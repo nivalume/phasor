@@ -1,0 +1,17 @@
+[package]
+name = "barq-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Vectorized simulation loops for barq"
+
+[lints]
+workspace = true
+
+[dependencies]
+barq-core = { workspace = true }
+barq-exec = { workspace = true }
+barq-model = { workspace = true }
+barq-records = { workspace = true }

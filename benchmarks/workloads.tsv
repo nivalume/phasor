@@ -1,0 +1,28 @@
+# Benchmark workloads, read by every runner so all of them do the same work.
+#
+# Input arrays are not stored here; they are generated from these parameters by
+# a formula both runners implement (see benchmarks/README.md). Every runner
+# reports a checksum of the arrays it generated, and compare.py refuses to
+# compare runs whose checksums differ — otherwise a "faster" number could just
+# be less work.
+#
+# fill_every  1 fills on every element; n fills on one element in n. The rest
+#             are size-zero orders, which the kernel ignores without writing a
+#             record. Fill rate matters more than it looks: at 100% the run is
+#             memory-bound on record writing rather than compute-bound.
+# price_mode  close     order price is this bar's close (+inf sentinel)
+#             prev      the previous bar's close (-inf sentinel)
+# size_type   Amount | TargetPercent
+# direction   Both | LongOnly | ShortOnly
+#
+name	n_rows	n_cols	fill_every	size_type	direction	price_mode	fees	fixed_fees	slippage
+single_long	200000	1	1	Amount	Both	close	0.0	0.0	0.0
+single_long_sparse	200000	1	20	Amount	Both	close	0.0	0.0	0.0
+sweep_small	2000	500	1	Amount	Both	close	0.0	0.0	0.0
+sweep_small_sparse	2000	500	20	Amount	Both	close	0.0	0.0	0.0
+sweep_wide	1000	2000	20	Amount	Both	close	0.0	0.0	0.0
+sweep_deep	20000	100	20	Amount	Both	close	0.0	0.0	0.0
+target_percent	20000	100	1	TargetPercent	Both	close	0.0	0.0	0.0
+with_costs	20000	100	5	Amount	Both	close	0.001	1.0	0.0005
+long_only	20000	100	5	Amount	LongOnly	close	0.0	0.0	0.0
+prev_close	20000	100	5	Amount	Both	prev	0.0	0.0	0.0

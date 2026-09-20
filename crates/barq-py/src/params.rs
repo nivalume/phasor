@@ -1,0 +1,110 @@
+//! The execution parameters both entry points share.
+//!
+//! `from_orders` and `from_signals` differ in what drives them — an order per
+//! element against a signal pipeline — and agree on everything the execution
+//! kernel reads: how big, at what price, what it costs, what is refused. That
+//! shared middle is a dozen parameters, each of which can arrive as a number, a
+//! value per column or a full matrix.
+//!
+//! Collected here for one reason: the borrows have to outlive the call that
+//! builds the [`FlexArray`](barq_core::flex::FlexArray)s from them, so they must
+//! live in the caller's own frame. A struct is how two call sites can share
+//! them without either one duplicating a dozen `let` bindings — and without a
+//! helper that returns the arrays, which cannot be written, because the arrays
+//! borrow from values the helper would drop on return.
+
+use pyo3::prelude::*;
+
+use crate::array::{Borrowed, BorrowedBool, borrow_opt_bool, borrow_opt_f64};
+
+/// The borrowed execution parameters, held for the duration of a call.
+///
+/// Every field is `None` when Python did not supply it, which means "the
+/// engine's own default" — see [`crate::array::borrow_opt_f64`] for why the
+/// defaults are not written down here.
+#[derive(Debug)]
+pub struct Shared<'py> {
+    /// Requested size.
+    pub size: Option<Borrowed<'py>>,
+    /// Order price. `inf` means the bar's close.
+    pub price: Option<Borrowed<'py>>,
+    /// Proportional fee rate.
+    pub fees: Option<Borrowed<'py>>,
+    /// Flat fee per fill.
+    pub fixed_fees: Option<Borrowed<'py>>,
+    /// Proportional slippage.
+    pub slippage: Option<Borrowed<'py>>,
+    /// Smallest acceptable fill.
+    pub min_size: Option<Borrowed<'py>>,
+    /// Largest acceptable fill.
+    pub max_size: Option<Borrowed<'py>>,
+    /// Lot size to round down to.
+    pub size_granularity: Option<Borrowed<'py>>,
+    /// Whether to reserve cash to cover an open short.
+    pub lock_cash: Option<BorrowedBool<'py>>,
+    /// Whether a partial fill is acceptable.
+    pub allow_partial: Option<BorrowedBool<'py>>,
+    /// Whether a rejection aborts the run instead of being recorded.
+    pub raise_reject: Option<BorrowedBool<'py>>,
+    /// Whether each order writes a log row.
+    pub log: Option<BorrowedBool<'py>>,
+}
+
+impl<'py> Shared<'py> {
+    /// Reads them all, keeping each borrow alive in the returned value.
+    ///
+    /// # Errors
+    ///
+    /// A Python `TypeError` naming the first parameter whose type cannot be
+    /// read — by name, because "expected float, got str" with twelve candidates
+    /// is not a diagnosis.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one argument per parameter, which is what is being collected"
+    )]
+    pub fn borrow(
+        size: Option<&Bound<'py, PyAny>>,
+        price: Option<&Bound<'py, PyAny>>,
+        fees: Option<&Bound<'py, PyAny>>,
+        fixed_fees: Option<&Bound<'py, PyAny>>,
+        slippage: Option<&Bound<'py, PyAny>>,
+        min_size: Option<&Bound<'py, PyAny>>,
+        max_size: Option<&Bound<'py, PyAny>>,
+        size_granularity: Option<&Bound<'py, PyAny>>,
+        lock_cash: Option<&Bound<'py, PyAny>>,
+        allow_partial: Option<&Bound<'py, PyAny>>,
+        raise_reject: Option<&Bound<'py, PyAny>>,
+        log: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        Ok(Self {
+            size: borrow_opt_f64(size, "size")?,
+            price: borrow_opt_f64(price, "price")?,
+            fees: borrow_opt_f64(fees, "fees")?,
+            fixed_fees: borrow_opt_f64(fixed_fees, "fixed_fees")?,
+            slippage: borrow_opt_f64(slippage, "slippage")?,
+            min_size: borrow_opt_f64(min_size, "min_size")?,
+            max_size: borrow_opt_f64(max_size, "max_size")?,
+            size_granularity: borrow_opt_f64(size_granularity, "size_granularity")?,
+            lock_cash: borrow_opt_bool(lock_cash, "lock_cash")?,
+            allow_partial: borrow_opt_bool(allow_partial, "allow_partial")?,
+            raise_reject: borrow_opt_bool(raise_reject, "raise_reject")?,
+            log: borrow_opt_bool(log, "log")?,
+        })
+    }
+
+    /// Whether any order in this run asks for a log row.
+    ///
+    /// Decides which simulation entry point is called. A scalar `False` — the
+    /// default — takes the unlogged path, so a run that is not investigating
+    /// anything does not allocate a journal. An array is assumed to contain at
+    /// least one `true` rather than scanned: a caller who passes a mask wants
+    /// logging, and scanning to discover an all-`false` mask would cost a pass
+    /// over the matrix to save allocating an empty vector.
+    pub const fn wants_logs(&self) -> bool {
+        match &self.log {
+            None => false,
+            Some(BorrowedBool::Scalar(on)) => *on,
+            Some(BorrowedBool::Slice(_)) => true,
+        }
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "barq-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Return metrics, drawdowns and the stats registry for barq"
+
+[lints]
+workspace = true
+
+[dependencies]
+barq-core = { workspace = true }
+barq-generic = { workspace = true }
+barq-model = { workspace = true }
+barq-records = { workspace = true }
+barq-sim = { workspace = true }
+

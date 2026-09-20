@@ -1,0 +1,501 @@
+"""barq — a vectorized backtesting engine, in Rust.
+
+The shell is deliberately thin. Everything that computes lives in Rust; this
+module exists to do the two things a Rust extension cannot do for the caller:
+put arrays in the layout the engine reads, and give back something a notebook
+can print.
+
+    import numpy as np, barq
+
+    close = np.array([[10.0], [11.0], [12.0], [11.0]])
+    entries = np.array([[True], [False], [False], [False]])
+    exits = np.array([[False], [False], [True], [False]])
+
+    pf = barq.from_signals(close, entries, exits, init_cash=100.0, fees=0.001)
+    print(pf.total_return())     # one value per column
+    print(pf.stats())            # the table, for column 0
+
+Layout
+------
+The engine is column-major; NumPy is row-major by default. Every array is
+passed through ``np.asfortranarray``, which is free when the array is already
+in that order and a visible copy when it is not. The Rust side refuses a
+C-ordered array rather than reading it as a transposed price series, so a
+caller who reaches past this module gets an error instead of a plausible
+backtest on scrambled data.
+
+Shapes
+------
+A column is one symbol under one parameter set. By default columns have
+independent cash. ``cash_sharing=True`` groups adjacent columns into accounts;
+``threads`` parallelizes accounts. A 1-D array of prices is read as one column.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import numpy as np
+
+from . import _barq, data
+from ._barq import Portfolio
+
+__all__ = [
+    "Expression",
+    "FactorSet",
+    "Portfolio",
+    "alpha158",
+    "alpha360",
+    "data",
+    "from_orders",
+    "from_signals",
+]
+__version__ = "0.1.0"
+
+
+def _matrix(value: Any, name: str) -> np.ndarray:
+    """A 2-D, F-ordered, float64 array, whatever shape came in.
+
+    A 1-D input is one column, not one row. That is the direction that matches
+    "a column is a run": a bare price series is a single backtest, not a single
+    bar across many symbols.
+    """
+    array = np.asarray(value, dtype=np.float64)
+    if array.ndim == 1:
+        array = array.reshape(-1, 1)
+    if array.ndim != 2:
+        raise ValueError(f"{name} must be 1-D or 2-D; got {array.ndim} dimensions")
+    return np.asfortranarray(array)
+
+
+def _factor_fields(
+    fields: Mapping[str, Any],
+) -> tuple[list[tuple[str, np.ndarray]], tuple[int, int]]:
+    if not isinstance(fields, Mapping):
+        raise TypeError("factor inputs must be a mapping of field names to arrays")
+    if not fields:
+        raise ValueError("factor inputs cannot be empty")
+
+    prepared = []
+    shape = None
+    for name, value in fields.items():
+        if not isinstance(name, str):
+            raise TypeError("factor field names must be strings")
+        array = _matrix(value, f"factor field {name!r}")
+        if shape is None:
+            shape = array.shape
+        elif array.shape != shape:
+            raise ValueError(
+                f"factor field {name!r} has shape {array.shape}, expected {shape}"
+            )
+        prepared.append((name, array))
+    assert shape is not None
+    return prepared, shape
+
+
+class FactorSet:
+    """A compiled, reusable set of named factor expressions."""
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner: _barq._FactorSet):
+        self._inner = inner
+
+    @classmethod
+    def compile(cls, factors: Mapping[str, str]) -> FactorSet:
+        if not isinstance(factors, Mapping):
+            raise TypeError("factors must be a mapping of names to expressions")
+        pairs = []
+        for name, source in factors.items():
+            if not isinstance(name, str) or not isinstance(source, str):
+                raise TypeError("factor names and expressions must be strings")
+            pairs.append((name, source))
+        return cls(_barq._FactorSet.compile(pairs))
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._inner.names)
+
+    @property
+    def required_fields(self) -> tuple[str, ...]:
+        return tuple(self._inner.required_fields)
+
+    @property
+    def uses_future(self) -> bool:
+        return self._inner.uses_future
+
+    def evaluate(self, fields: Mapping[str, Any]) -> dict[str, np.ndarray]:
+        prepared, shape = _factor_fields(fields)
+        return {
+            name: values.reshape(shape, order="F")
+            for name, values in self._inner.evaluate(prepared).items()
+        }
+
+
+class Expression:
+    """One compiled factor expression."""
+
+    __slots__ = ("_factors",)
+
+    def __init__(self, factors: FactorSet):
+        self._factors = factors
+
+    @classmethod
+    def compile(cls, source: str) -> Expression:
+        if not isinstance(source, str):
+            raise TypeError("expression must be a string")
+        return cls(FactorSet.compile({"value": source}))
+
+    @property
+    def required_fields(self) -> tuple[str, ...]:
+        return self._factors.required_fields
+
+    @property
+    def uses_future(self) -> bool:
+        return self._factors.uses_future
+
+    def evaluate(self, fields: Mapping[str, Any]) -> np.ndarray:
+        return self._factors.evaluate(fields)["value"]
+
+
+def alpha158() -> FactorSet:
+    """Returns Qlib's default 158 compiled expressions."""
+    return FactorSet(_barq.alpha158())
+
+
+def alpha360() -> FactorSet:
+    """Returns Qlib's default 360 compiled expressions."""
+    return FactorSet(_barq.alpha360())
+
+
+def _signals(value: Any, name: str) -> np.ndarray:
+    """A 2-D, F-ordered, bool array."""
+    array = np.asarray(value, dtype=bool)
+    if array.ndim == 1:
+        array = array.reshape(-1, 1)
+    if array.ndim != 2:
+        raise ValueError(f"{name} must be 1-D or 2-D; got {array.ndim} dimensions")
+    return np.asfortranarray(array)
+
+
+def _param(value: Any, name: str) -> Any:
+    """A parameter, in whichever of the engine's four broadcast shapes it is.
+
+    A number stays a number — the engine's ``FlexArray`` reads a scalar with no
+    allocation at all, so converting one to an array here would spend memory to
+    lose that. Arrays are converted; ``None`` means "the engine's default",
+    which is where every default lives.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float)):
+        return value
+    array = np.asarray(value, dtype=np.float64)
+    if array.ndim == 0:
+        # A NumPy scalar, or a 0-d array. Unwrapping it keeps the engine on its
+        # allocation-free scalar path instead of building a one-element buffer.
+        return float(array)
+    if array.ndim == 2:
+        return np.asfortranarray(array)
+    if array.ndim == 1:
+        return np.ascontiguousarray(array)
+    raise ValueError(f"{name} must be a number, a 1-D array or a 2-D array")
+
+
+def _flag(value: Any, name: str) -> Any:
+    """A bool parameter: a scalar, a matrix, or ``None`` for the default."""
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    array = np.asarray(value, dtype=bool)
+    if array.ndim == 0:
+        return bool(array)
+    if array.ndim == 1:
+        array = array.reshape(-1, 1)
+    if array.ndim != 2:
+        raise ValueError(f"{name} must be a bool or a 2-D bool array")
+    return np.asfortranarray(array)
+
+
+def _accumulate(value: Any) -> str:
+    """The accumulation mode, accepting the reference's boolean spelling.
+
+    The reference takes ``accumulate=True``, meaning "add and remove", and
+    ``False``, meaning "ignore repeated signals". Those are two of the four
+    modes, and someone porting a call over should not have to look up which
+    two — so both spellings work here.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "both" if value else "disabled"
+    return value
+
+
+def _group_lens(value):
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        raise TypeError("group_lens must be a sequence of positive integers")
+    lengths = list(value)
+    if any(
+        isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer))
+        for n in lengths
+    ):
+        raise TypeError("group_lens must contain integers")
+    if not lengths or any(n <= 0 for n in lengths):
+        raise ValueError("group_lens must contain positive lengths")
+    return [int(n) for n in lengths]
+
+
+def from_signals(
+    close,
+    entries,
+    exits,
+    *,
+    open=None,
+    high=None,
+    low=None,
+    init_cash=None,
+    size=None,
+    size_type="amount",
+    price=None,
+    direction="longonly",
+    fees=None,
+    fixed_fees=None,
+    slippage=None,
+    min_size=None,
+    max_size=None,
+    size_granularity=None,
+    lock_cash=None,
+    allow_partial=None,
+    raise_reject=None,
+    log=None,
+    accumulate="disabled",
+    sl_stop=None,
+    sl_trail=None,
+    tp_stop=None,
+    val_price=None,
+    ffill_val_price=True,
+    update_value=False,
+    ann_factor=365.0,
+    risk_free=0.0,
+    trades="exit",
+    incl_open=False,
+    threads=1,
+    cash_sharing=False,
+    group_lens=None,
+    call_seq="default",
+) -> Portfolio:
+    """Runs a signal-driven backtest and returns the portfolio.
+
+    Parameters
+    ----------
+    close, entries, exits
+        ``(n_bars, n_cols)``, or 1-D for a single column. These set the shape.
+    open, high, low
+        The rest of the bar. Only needed for stops, and **required** for them:
+        a stop level is tested against the bar's range, so without ``high`` and
+        ``low`` no stop can fire and the run would silently report a stopless
+        strategy. Passing ``sl_stop`` or ``tp_stop`` without them is an error
+        rather than a surprise.
+    init_cash, size, fees, fixed_fees, slippage, min_size, max_size, size_granularity
+        A number, one value per column, or a full matrix. ``None`` takes the
+        engine's own default, which is the only place a default is written down.
+    size_type
+        ``amount``, ``value`` or ``percent``. Targets require ``from_orders``.
+    direction
+        ``longonly``, ``shortonly`` or ``both``.
+    accumulate
+        ``disabled``, ``both``, ``addonly`` or ``removeonly`` — whether a
+        repeated signal adds to or trims an open position rather than being
+        ignored. ``True``/``False`` also work, as the reference spells them.
+    ann_factor
+        Periods per year, for the annualized metrics. 365 for daily crypto,
+        252 for daily equities, 365*24 for hourly.
+    trades
+        Which trade view the statistics are scored over: ``exit``, ``entry`` or
+        ``positions``. They give different trade counts and different per-trade
+        PnL from identical fills, and none of the three is wrong — a win rate
+        over entry trades answers a different question than one over exits.
+    log
+        ``True`` to record why every order ended the way it did, or a
+        ``(n_bars, n_cols)`` mask to log one column or one row. Off by default:
+        a log row is 38 fields against an order record's 7, written for every
+        order *considered* rather than every one filled. Read them back with
+        ``pf.logs()``, ``pf.log_reasons()`` and ``pf.reason_counts(col)``.
+    raise_reject
+        Turn a rejected order into an exception instead of a recorded refusal.
+        Useful under ``log=True`` to stop at the first one.
+    cash_sharing, group_lens
+        Share capital across adjacent columns. None groups all columns when
+        sharing is enabled; explicit positive lengths must sum to n_cols.
+        Shared init_cash is a scalar or one value per group.
+    call_seq
+        "default" uses column order; "auto" stably sorts approximate order
+        values, selling before buying. Neither mode allocates equal weights.
+    val_price, ffill_val_price, update_value
+        Valuation price (default: execution price), whether missing valuation
+        prices retain the previous value, and whether each fill updates the
+        account value before the next order. These do not shift signals.
+    threads
+        Splits independent account groups; symbols sharing cash execute sequentially.
+
+    Returns
+    -------
+    Portfolio
+        The run's fills, plus everything derivable from them on demand.
+    """
+    return _barq.from_signals(
+        _matrix(close, "close"),
+        _signals(entries, "entries"),
+        _signals(exits, "exits"),
+        open=None if open is None else _matrix(open, "open"),
+        high=None if high is None else _matrix(high, "high"),
+        low=None if low is None else _matrix(low, "low"),
+        init_cash=_param(init_cash, "init_cash"),
+        size=_param(size, "size"),
+        size_type=size_type,
+        price=_param(price, "price"),
+        direction=direction,
+        fees=_param(fees, "fees"),
+        fixed_fees=_param(fixed_fees, "fixed_fees"),
+        slippage=_param(slippage, "slippage"),
+        min_size=_param(min_size, "min_size"),
+        max_size=_param(max_size, "max_size"),
+        size_granularity=_param(size_granularity, "size_granularity"),
+        lock_cash=_flag(lock_cash, "lock_cash"),
+        allow_partial=_flag(allow_partial, "allow_partial"),
+        raise_reject=_flag(raise_reject, "raise_reject"),
+        log=_flag(log, "log"),
+        accumulate=_accumulate(accumulate),
+        sl_stop=_param(sl_stop, "sl_stop"),
+        sl_trail=_flag(sl_trail, "sl_trail"),
+        tp_stop=_param(tp_stop, "tp_stop"),
+        val_price=_param(val_price, "val_price"),
+        ffill_val_price=ffill_val_price,
+        update_value=update_value,
+        ann_factor=ann_factor,
+        risk_free=risk_free,
+        trades=trades,
+        incl_open=incl_open,
+        threads=threads,
+        cash_sharing=cash_sharing,
+        group_lens=_group_lens(group_lens),
+        call_seq=call_seq,
+    )
+
+
+def from_orders(
+    close,
+    size=None,
+    *,
+    size_type="amount",
+    price=None,
+    direction="both",
+    init_cash=None,
+    fees=None,
+    fixed_fees=None,
+    slippage=None,
+    min_size=None,
+    max_size=None,
+    size_granularity=None,
+    lock_cash=None,
+    allow_partial=None,
+    raise_reject=None,
+    log=None,
+    val_price=None,
+    ffill_val_price=True,
+    update_value=False,
+    ann_factor=365.0,
+    risk_free=0.0,
+    trades="exit",
+    incl_open=False,
+    threads=1,
+    cash_sharing=False,
+    group_lens=None,
+    call_seq="default",
+) -> Portfolio:
+    """Runs a backtest from one order request per element.
+
+    The other shape of a vectorized run. Where ``from_signals`` resolves
+    entries and exits into sizes, here ``size`` *is* the request, element by
+    element: a rebalance is a matrix of target weights, a schedule is a matrix
+    that is zero except on the bars that trade.
+
+    All six size types work here, unlike the signal path — nothing has to be
+    reconciled with a direction, so a target is unambiguous.
+
+    Parameters
+    ----------
+    close
+        ``(n_bars, n_cols)``, or 1-D for a single column. Sets the shape, and
+        resolves the ``inf`` sentinel in ``price`` and ``val_price``.
+    size
+        What to order on each bar. A number, one value per column, or a full
+        matrix. Default ``inf`` — as much as the cash allows, which with the
+        default price makes a buy-and-hold on the first bar.
+    size_type
+        ``amount``, ``value``, ``percent``, ``targetamount``, ``targetvalue``
+        or ``targetpercent``. A **target** type says where the position should
+        end up rather than how much to trade, which is what makes a rebalance
+        one line.
+    direction
+        ``both`` here, matching the reference, rather than ``longonly`` as in
+        ``from_signals``: an order's sign already says which way it goes.
+    price
+        ``inf`` (the default) is this bar's close, ``-inf`` the previous one.
+    val_price
+        What the position is marked at when a value- or percent-sized order is
+        resolved. ``inf`` (the default) is the order price.
+    ffill_val_price
+        Carry the last usable valuation price forward, as the reference does.
+    update_value
+        Re-mark to the filled price after each fill. In shared accounts later orders in the same bar see the updated value.
+    log
+        As in ``from_signals``: ``True``, or a mask, to record why each order
+        ended the way it did.
+    cash_sharing, group_lens
+        Share capital across adjacent columns. None groups all columns when
+        sharing is enabled; explicit positive lengths must sum to n_cols.
+        Shared init_cash is a scalar or one value per group.
+    call_seq
+        "default" uses column order; "auto" stably sorts approximate order
+        values, selling before buying. Neither mode allocates equal weights.
+    threads
+        Splits account groups, which are independent.
+
+    Returns
+    -------
+    Portfolio
+        The run's fills, plus everything derivable from them on demand.
+    """
+    return _barq.from_orders(
+        _matrix(close, "close"),
+        size=_param(size, "size"),
+        size_type=size_type,
+        price=_param(price, "price"),
+        direction=direction,
+        init_cash=_param(init_cash, "init_cash"),
+        fees=_param(fees, "fees"),
+        fixed_fees=_param(fixed_fees, "fixed_fees"),
+        slippage=_param(slippage, "slippage"),
+        min_size=_param(min_size, "min_size"),
+        max_size=_param(max_size, "max_size"),
+        size_granularity=_param(size_granularity, "size_granularity"),
+        lock_cash=_flag(lock_cash, "lock_cash"),
+        allow_partial=_flag(allow_partial, "allow_partial"),
+        raise_reject=_flag(raise_reject, "raise_reject"),
+        log=_flag(log, "log"),
+        val_price=_param(val_price, "val_price"),
+        ffill_val_price=ffill_val_price,
+        update_value=update_value,
+        ann_factor=ann_factor,
+        risk_free=risk_free,
+        trades=trades,
+        incl_open=incl_open,
+        threads=threads,
+        cash_sharing=cash_sharing,
+        group_lens=_group_lens(group_lens),
+        call_seq=call_seq,
+    )

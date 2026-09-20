@@ -1,0 +1,1665 @@
+# series definitions, shared with the Rust harness
+#series	plain	1.0;2.0;3.0;4.0;5.0;6.0
+#series	wobble	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0
+#series	leading_gap	nan;nan;3.0;4.0;5.0
+#series	trailing_gap	1.0;2.0;3.0;nan;nan
+#series	interior_gaps	1.0;nan;3.0;nan;5.0;6.0
+#series	all_nan	nan;nan;nan
+#series	constant	0.1;0.1;0.1;0.1;0.1
+#series	constant_negative	-2.5;-2.5;-2.5;-2.5
+#series	single	7.0
+#series	two	1.0;2.0
+#series	wide_scale	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08
+#series	negatives	-3.0;5.0;-1.0;2.0;-8.0
+#series	zeros	0.0;0.0;1.0;0.0
+fn	series	series2	window	minp	ddof	adjust	n	fill	wait	outcome	result	note
+rolling_mean	plain		1							ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_min	plain		1							ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_max	plain		1							ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		1		0					ok	0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	plain		1		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_min	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_max	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		1	1	0					ok	0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	plain		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_min	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_max	plain		1	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		1	1	0					ok	0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	plain		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	plain		2							ok	nan;1.5;2.5;3.5;4.5;5.5	
+rolling_min	plain		2							ok	nan;1.0;2.0;3.0;4.0;5.0	
+rolling_max	plain		2							ok	nan;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		2		0					ok	nan;0.5;0.5;0.5;0.5;0.5	
+rolling_std	plain		2		1					ok	nan;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476	
+rolling_mean	plain		2	1						ok	1.0;1.5;2.5;3.5;4.5;5.5	
+rolling_min	plain		2	1						ok	1.0;1.0;2.0;3.0;4.0;5.0	
+rolling_max	plain		2	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		2	1	0					ok	0.0;0.5;0.5;0.5;0.5;0.5	
+rolling_std	plain		2	1	1					ok	nan;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476	
+rolling_mean	plain		2	2						ok	nan;1.5;2.5;3.5;4.5;5.5	
+rolling_min	plain		2	2						ok	nan;1.0;2.0;3.0;4.0;5.0	
+rolling_max	plain		2	2						ok	nan;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		2	2	0					ok	nan;0.5;0.5;0.5;0.5;0.5	
+rolling_std	plain		2	2	1					ok	nan;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476;0.7071067811865476	
+rolling_mean	plain		3							ok	nan;nan;2.0;3.0;4.0;5.0	
+rolling_min	plain		3							ok	nan;nan;1.0;2.0;3.0;4.0	
+rolling_max	plain		3							ok	nan;nan;3.0;4.0;5.0;6.0	
+rolling_std	plain		3		0					ok	nan;nan;0.816496580927726;0.816496580927726;0.816496580927726;0.816496580927726	
+rolling_std	plain		3		1					ok	nan;nan;1.0;1.0;1.0;1.0	
+rolling_mean	plain		3	1						ok	1.0;1.5;2.0;3.0;4.0;5.0	
+rolling_min	plain		3	1						ok	1.0;1.0;1.0;2.0;3.0;4.0	
+rolling_max	plain		3	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		3	1	0					ok	0.0;0.5;0.816496580927726;0.816496580927726;0.816496580927726;0.816496580927726	
+rolling_std	plain		3	1	1					ok	nan;0.7071067811865476;1.0;1.0;1.0;1.0	
+rolling_mean	plain		3	3						ok	nan;nan;2.0;3.0;4.0;5.0	
+rolling_min	plain		3	3						ok	nan;nan;1.0;2.0;3.0;4.0	
+rolling_max	plain		3	3						ok	nan;nan;3.0;4.0;5.0;6.0	
+rolling_std	plain		3	3	0					ok	nan;nan;0.816496580927726;0.816496580927726;0.816496580927726;0.816496580927726	
+rolling_std	plain		3	3	1					ok	nan;nan;1.0;1.0;1.0;1.0	
+rolling_mean	plain		5							ok	nan;nan;nan;nan;3.0;4.0	
+rolling_min	plain		5							ok	nan;nan;nan;nan;1.0;2.0	
+rolling_max	plain		5							ok	nan;nan;nan;nan;5.0;6.0	
+rolling_std	plain		5		0					ok	nan;nan;nan;nan;1.4142135623730951;1.4142135623730951	
+rolling_std	plain		5		1					ok	nan;nan;nan;nan;1.5811388300841898;1.5811388300841898	
+rolling_mean	plain		5	1						ok	1.0;1.5;2.0;2.5;3.0;4.0	
+rolling_min	plain		5	1						ok	1.0;1.0;1.0;1.0;1.0;2.0	
+rolling_max	plain		5	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		5	1	0					ok	0.0;0.5;0.816496580927726;1.118033988749895;1.4142135623730951;1.4142135623730951	
+rolling_std	plain		5	1	1					ok	nan;0.7071067811865476;1.0;1.2909944487358056;1.5811388300841898;1.5811388300841898	
+rolling_mean	plain		5	5						ok	nan;nan;nan;nan;3.0;4.0	
+rolling_min	plain		5	5						ok	nan;nan;nan;nan;1.0;2.0	
+rolling_max	plain		5	5						ok	nan;nan;nan;nan;5.0;6.0	
+rolling_std	plain		5	5	0					ok	nan;nan;nan;nan;1.4142135623730951;1.4142135623730951	
+rolling_std	plain		5	5	1					ok	nan;nan;nan;nan;1.5811388300841898;1.5811388300841898	
+rolling_mean	plain		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_min	plain		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_max	plain		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_std	plain		10		0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	plain		10		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	plain		10	1						ok	1.0;1.5;2.0;2.5;3.0;3.5	
+rolling_min	plain		10	1						ok	1.0;1.0;1.0;1.0;1.0;1.0	
+rolling_max	plain		10	1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_std	plain		10	1	0					ok	0.0;0.5;0.816496580927726;1.118033988749895;1.4142135623730951;1.707825127659933	
+rolling_std	plain		10	1	1					ok	nan;0.7071067811865476;1.0;1.2909944487358056;1.5811388300841898;1.8708286933869707	
+rolling_mean	plain		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_min	plain		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_max	plain		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_std	plain		10	10	0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	plain		10	10	1					ok	nan;nan;nan;nan;nan;nan	
+expanding_min	plain			1						ok	1.0;1.0;1.0;1.0;1.0;1.0	
+expanding_max	plain			1						ok	1.0;2.0;3.0;4.0;5.0;6.0	
+expanding_mean	plain			1						ok	1.0;1.5;2.0;2.5;3.0;3.5	
+expanding_std	plain			1	0					ok	0.0;0.5;0.816496580927726;1.118033988749895;1.4142135623730951;1.707825127659933	
+expanding_std	plain			1	1					ok	nan;0.7071067811865476;1.0;1.2909944487358056;1.5811388300841898;1.8708286933869707	
+expanding_min	plain			2						ok	nan;1.0;1.0;1.0;1.0;1.0	
+expanding_max	plain			2						ok	nan;2.0;3.0;4.0;5.0;6.0	
+expanding_mean	plain			2						ok	nan;1.5;2.0;2.5;3.0;3.5	
+expanding_std	plain			2	0					ok	nan;0.5;0.816496580927726;1.118033988749895;1.4142135623730951;1.707825127659933	
+expanding_std	plain			2	1					ok	nan;0.7071067811865476;1.0;1.2909944487358056;1.5811388300841898;1.8708286933869707	
+ewm_mean	plain		2	0		false				ok	1.0;1.6666666666666665;2.5555555555555554;3.518518518518518;4.506172839506172;5.502057613168724	
+ewm_std	plain		2	0		false				ok	nan;0.7071067811865476;0.9746794344808966;1.1143420667632729;1.178568788931687;1.2061296277932905	
+ewm_mean	plain		2	1		false				ok	1.0;1.6666666666666665;2.5555555555555554;3.518518518518518;4.506172839506172;5.502057613168724	
+ewm_std	plain		2	1		false				ok	nan;0.7071067811865476;0.9746794344808966;1.1143420667632729;1.178568788931687;1.2061296277932905	
+ewm_mean	plain		2	0		true				ok	1.0;1.75;2.615384615384615;3.55;4.520661157024794;5.508241758241757	
+ewm_std	plain		2	0		true				ok	nan;0.7071067811865475;0.9198662110077998;1.0597532368796632;1.1416241873418624;1.1852520619163653	
+ewm_mean	plain		2	1		true				ok	1.0;1.75;2.615384615384615;3.55;4.520661157024794;5.508241758241757	
+ewm_std	plain		2	1		true				ok	nan;0.7071067811865475;0.9198662110077998;1.0597532368796632;1.1416241873418624;1.1852520619163653	
+ewm_mean	plain		3	0		false				ok	1.0;1.5;2.25;3.125;4.0625;5.03125	
+ewm_std	plain		3	0		false				ok	nan;0.7071067811865476;1.0488088481701516;1.300183137283433;1.46929354773366;1.5764952405261994	
+ewm_mean	plain		3	1		false				ok	1.0;1.5;2.25;3.125;4.0625;5.03125	
+ewm_std	plain		3	1		false				ok	nan;0.7071067811865476;1.0488088481701516;1.300183137283433;1.46929354773366;1.5764952405261994	
+ewm_mean	plain		3	0		true				ok	1.0;1.6666666666666667;2.4285714285714284;3.2666666666666666;4.161290322580645;5.095238095238095	
+ewm_std	plain		3	0		true				ok	nan;0.7071067811865476;0.9636241116594314;1.1771636613972951;1.3452425132127066;1.4709162008918397	
+ewm_mean	plain		3	1		true				ok	1.0;1.6666666666666667;2.4285714285714284;3.2666666666666666;4.161290322580645;5.095238095238095	
+ewm_std	plain		3	1		true				ok	nan;0.7071067811865476;0.9636241116594314;1.1771636613972951;1.3452425132127066;1.4709162008918397	
+ewm_mean	plain		5	0		false				ok	1.0;1.3333333333333335;1.888888888888889;2.5925925925925926;3.3950617283950617;4.263374485596708	
+ewm_std	plain		5	0		false				ok	nan;0.7071067811865476;1.0919284281983377;1.4340121957095098;1.725284286243414;1.9643856183013195	
+ewm_mean	plain		5	1		false				ok	1.0;1.3333333333333335;1.888888888888889;2.5925925925925926;3.3950617283950617;4.263374485596708	
+ewm_std	plain		5	1		false				ok	nan;0.7071067811865476;1.0919284281983377;1.4340121957095098;1.725284286243414;1.9643856183013195	
+ewm_mean	plain		5	0		true				ok	1.0;1.6;2.263157894736842;2.9846153846153842;3.7582938388625586;4.5774436090225565	
+ewm_std	plain		5	0		true				ok	nan;0.7071067811865476;0.98675438206593;1.2476698930179086;1.4864192600175838;1.700444634571664	
+ewm_mean	plain		5	1		true				ok	1.0;1.6;2.263157894736842;2.9846153846153842;3.7582938388625586;4.5774436090225565	
+ewm_std	plain		5	1		true				ok	nan;0.7071067811865476;0.98675438206593;1.2476698930179086;1.4864192600175838;1.700444634571664	
+fshift	plain						1	nan		ok	nan;1.0;2.0;3.0;4.0;5.0	
+bshift	plain						1	nan		ok	2.0;3.0;4.0;5.0;6.0;nan	
+diff	plain						1			ok	nan;1.0;1.0;1.0;1.0;1.0	
+pct_change	plain						1			ok	nan;1.0;0.5;0.33333333333333326;0.25;0.19999999999999996	
+fshift	plain						2	nan		ok	nan;nan;1.0;2.0;3.0;4.0	
+bshift	plain						2	nan		ok	3.0;4.0;5.0;6.0;nan;nan	
+diff	plain						2			ok	nan;nan;2.0;2.0;2.0;2.0	
+pct_change	plain						2			ok	nan;nan;2.0;1.0;0.6666666666666667;0.5	
+fshift	plain						5	nan		ok	nan;nan;nan;nan;nan;1.0	
+bshift	plain						5	nan		ok	6.0;nan;nan;nan;nan;nan	
+diff	plain						5			ok	nan;nan;nan;nan;nan;5.0	
+pct_change	plain						5			ok	nan;nan;nan;nan;nan;5.0	
+ffill	plain									ok	1.0;2.0;3.0;4.0;5.0;6.0	
+bfill	plain									ok	1.0;2.0;3.0;4.0;5.0;6.0	
+fillna	plain							-1.0		ok	1.0;2.0;3.0;4.0;5.0;6.0	
+rolling_mean	wobble		1							ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_min	wobble		1							ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_max	wobble		1							ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_std	wobble		1		0					ok	0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	wobble		1		1					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_mean	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_min	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_max	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_std	wobble		1	1	0					ok	0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	wobble		1	1	1					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_mean	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_min	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_max	wobble		1	1						ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_std	wobble		1	1	0					ok	0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0	
+rolling_std	wobble		1	1	1					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_mean	wobble		2							ok	nan;2.0;2.5;2.5;3.0;7.0;5.5;4.0	
+rolling_min	wobble		2							ok	nan;1.0;1.0;1.0;1.0;5.0;2.0;2.0	
+rolling_max	wobble		2							ok	nan;3.0;4.0;4.0;5.0;9.0;9.0;6.0	
+rolling_std	wobble		2		0					ok	nan;1.0;1.5;1.5;2.0;2.0;3.5;2.0	
+rolling_std	wobble		2		1					ok	nan;1.4142135623730951;2.1213203435596424;2.1213203435596424;2.8284271247461903;2.8284271247461903;4.949747468305833;2.8284271247461903	
+rolling_mean	wobble		2	1						ok	3.0;2.0;2.5;2.5;3.0;7.0;5.5;4.0	
+rolling_min	wobble		2	1						ok	3.0;1.0;1.0;1.0;1.0;5.0;2.0;2.0	
+rolling_max	wobble		2	1						ok	3.0;3.0;4.0;4.0;5.0;9.0;9.0;6.0	
+rolling_std	wobble		2	1	0					ok	0.0;1.0;1.5;1.5;2.0;2.0;3.5;2.0	
+rolling_std	wobble		2	1	1					ok	nan;1.4142135623730951;2.1213203435596424;2.1213203435596424;2.8284271247461903;2.8284271247461903;4.949747468305833;2.8284271247461903	
+rolling_mean	wobble		2	2						ok	nan;2.0;2.5;2.5;3.0;7.0;5.5;4.0	
+rolling_min	wobble		2	2						ok	nan;1.0;1.0;1.0;1.0;5.0;2.0;2.0	
+rolling_max	wobble		2	2						ok	nan;3.0;4.0;4.0;5.0;9.0;9.0;6.0	
+rolling_std	wobble		2	2	0					ok	nan;1.0;1.5;1.5;2.0;2.0;3.5;2.0	
+rolling_std	wobble		2	2	1					ok	nan;1.4142135623730951;2.1213203435596424;2.1213203435596424;2.8284271247461903;2.8284271247461903;4.949747468305833;2.8284271247461903	
+rolling_mean	wobble		3							ok	nan;nan;2.6666666666666665;2.0;3.3333333333333335;5.0;5.333333333333333;5.666666666666667	
+rolling_min	wobble		3							ok	nan;nan;1.0;1.0;1.0;1.0;2.0;2.0	
+rolling_max	wobble		3							ok	nan;nan;4.0;4.0;5.0;9.0;9.0;9.0	
+rolling_std	wobble		3		0					ok	nan;nan;1.2472191289246473;1.4142135623730951;1.6996731711975948;3.265986323710904;2.8674417556808756;2.867441755680875	
+rolling_std	wobble		3		1					ok	nan;nan;1.5275252316519468;1.7320508075688772;2.0816659994661326;4.0;3.5118845842842465;3.5118845842842457	
+rolling_mean	wobble		3	1						ok	3.0;2.0;2.6666666666666665;2.0;3.3333333333333335;5.0;5.333333333333333;5.666666666666667	
+rolling_min	wobble		3	1						ok	3.0;1.0;1.0;1.0;1.0;1.0;2.0;2.0	
+rolling_max	wobble		3	1						ok	3.0;3.0;4.0;4.0;5.0;9.0;9.0;9.0	
+rolling_std	wobble		3	1	0					ok	0.0;1.0;1.2472191289246473;1.4142135623730951;1.6996731711975948;3.265986323710904;2.8674417556808756;2.867441755680875	
+rolling_std	wobble		3	1	1					ok	nan;1.4142135623730951;1.5275252316519468;1.7320508075688772;2.0816659994661326;4.0;3.5118845842842465;3.5118845842842457	
+rolling_mean	wobble		3	3						ok	nan;nan;2.6666666666666665;2.0;3.3333333333333335;5.0;5.333333333333333;5.666666666666667	
+rolling_min	wobble		3	3						ok	nan;nan;1.0;1.0;1.0;1.0;2.0;2.0	
+rolling_max	wobble		3	3						ok	nan;nan;4.0;4.0;5.0;9.0;9.0;9.0	
+rolling_std	wobble		3	3	0					ok	nan;nan;1.2472191289246473;1.4142135623730951;1.6996731711975948;3.265986323710904;2.8674417556808756;2.867441755680875	
+rolling_std	wobble		3	3	1					ok	nan;nan;1.5275252316519468;1.7320508075688772;2.0816659994661326;4.0;3.5118845842842465;3.5118845842842457	
+rolling_mean	wobble		5							ok	nan;nan;nan;nan;2.8;4.0;4.2;4.6	
+rolling_min	wobble		5							ok	nan;nan;nan;nan;1.0;1.0;1.0;1.0	
+rolling_max	wobble		5							ok	nan;nan;nan;nan;5.0;9.0;9.0;9.0	
+rolling_std	wobble		5		0					ok	nan;nan;nan;nan;1.6000000000000003;2.9664793948382653;2.7856776554368237;2.8705400188814645	
+rolling_std	wobble		5		1					ok	nan;nan;nan;nan;1.7888543819998322;3.3166247903554;3.1144823004794873;3.209361307176242	
+rolling_mean	wobble		5	1						ok	3.0;2.0;2.6666666666666665;2.25;2.8;4.0;4.2;4.6	
+rolling_min	wobble		5	1						ok	3.0;1.0;1.0;1.0;1.0;1.0;1.0;1.0	
+rolling_max	wobble		5	1						ok	3.0;3.0;4.0;4.0;5.0;9.0;9.0;9.0	
+rolling_std	wobble		5	1	0					ok	0.0;1.0;1.2472191289246473;1.299038105676658;1.6000000000000003;2.9664793948382653;2.7856776554368237;2.8705400188814645	
+rolling_std	wobble		5	1	1					ok	nan;1.4142135623730951;1.5275252316519468;1.5;1.7888543819998322;3.3166247903554;3.1144823004794873;3.209361307176242	
+rolling_mean	wobble		5	5						ok	nan;nan;nan;nan;2.8;4.0;4.2;4.6	
+rolling_min	wobble		5	5						ok	nan;nan;nan;nan;1.0;1.0;1.0;1.0	
+rolling_max	wobble		5	5						ok	nan;nan;nan;nan;5.0;9.0;9.0;9.0	
+rolling_std	wobble		5	5	0					ok	nan;nan;nan;nan;1.6000000000000003;2.9664793948382653;2.7856776554368237;2.8705400188814645	
+rolling_std	wobble		5	5	1					ok	nan;nan;nan;nan;1.7888543819998322;3.3166247903554;3.1144823004794873;3.209361307176242	
+rolling_mean	wobble		10							ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_min	wobble		10							ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_max	wobble		10							ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_std	wobble		10		0					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_std	wobble		10		1					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_mean	wobble		10	1						ok	3.0;2.0;2.6666666666666665;2.25;2.8;3.8333333333333335;3.5714285714285716;3.875	
+rolling_min	wobble		10	1						ok	3.0;1.0;1.0;1.0;1.0;1.0;1.0;1.0	
+rolling_max	wobble		10	1						ok	3.0;3.0;4.0;4.0;5.0;9.0;9.0;9.0	
+rolling_std	wobble		10	1	0					ok	0.0;1.0;1.2472191289246473;1.299038105676658;1.6000000000000003;2.7335365778094545;2.610809554642438;2.5708704751503917	
+rolling_std	wobble		10	1	1					ok	nan;1.4142135623730951;1.5275252316519468;1.5;1.7888543819998322;2.994439290863428;2.819996622760558;2.748376143938713	
+rolling_mean	wobble		10	10						ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_min	wobble		10	10						ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_max	wobble		10	10						ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_std	wobble		10	10	0					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+rolling_std	wobble		10	10	1					ok	nan;nan;nan;nan;nan;nan;nan;nan	
+expanding_min	wobble			1						ok	3.0;1.0;1.0;1.0;1.0;1.0;1.0;1.0	
+expanding_max	wobble			1						ok	3.0;3.0;4.0;4.0;5.0;9.0;9.0;9.0	
+expanding_mean	wobble			1						ok	3.0;2.0;2.6666666666666665;2.25;2.8;3.8333333333333335;3.5714285714285716;3.875	
+expanding_std	wobble			1	0					ok	0.0;1.0;1.2472191289246473;1.299038105676658;1.6000000000000003;2.7335365778094545;2.610809554642438;2.5708704751503917	
+expanding_std	wobble			1	1					ok	nan;1.4142135623730951;1.5275252316519468;1.5;1.7888543819998322;2.994439290863428;2.819996622760558;2.748376143938713	
+expanding_min	wobble			2						ok	nan;1.0;1.0;1.0;1.0;1.0;1.0;1.0	
+expanding_max	wobble			2						ok	nan;3.0;4.0;4.0;5.0;9.0;9.0;9.0	
+expanding_mean	wobble			2						ok	nan;2.0;2.6666666666666665;2.25;2.8;3.8333333333333335;3.5714285714285716;3.875	
+expanding_std	wobble			2	0					ok	nan;1.0;1.2472191289246473;1.299038105676658;1.6000000000000003;2.7335365778094545;2.610809554642438;2.5708704751503917	
+expanding_std	wobble			2	1					ok	nan;1.4142135623730951;1.5275252316519468;1.5;1.7888543819998322;2.994439290863428;2.819996622760558;2.748376143938713	
+ewm_mean	wobble		2	0		false				ok	3.0;1.6666666666666665;3.2222222222222223;1.740740740740741;3.91358024691358;7.304526748971194;3.7681755829903985;5.256058527663466	
+ewm_std	wobble		2	0		false				ok	nan;1.4142135623730951;1.7464249196572983;1.7897756013804367;2.4059124327677313;3.664413056092036;4.120887049016409;2.8061284139547027	
+ewm_mean	wobble		2	1		false				ok	3.0;1.6666666666666665;3.2222222222222223;1.740740740740741;3.91358024691358;7.304526748971194;3.7681755829903985;5.256058527663466	
+ewm_std	wobble		2	1		false				ok	nan;1.4142135623730951;1.7464249196572983;1.7897756013804367;2.4059124327677313;3.664413056092036;4.120887049016409;2.8061284139547027	
+ewm_mean	wobble		2	0		true				ok	3.0;1.4999999999999998;3.2307692307692304;1.725;3.9173553719008267;7.31043956043956;3.768526989935956;5.256402439024391	
+ewm_std	wobble		2	0		true				ok	nan;1.414213562373095;1.8397324220156;1.8112893834970798;2.4192752141878096;3.6649785718429424;4.123646926147666;2.806493314851668	
+ewm_mean	wobble		2	1		true				ok	3.0;1.4999999999999998;3.2307692307692304;1.725;3.9173553719008267;7.31043956043956;3.768526989935956;5.256402439024391	
+ewm_std	wobble		2	1		true				ok	nan;1.414213562373095;1.8397324220156;1.8112893834970798;2.4192752141878096;3.6649785718429424;4.123646926147666;2.806493314851668	
+ewm_mean	wobble		3	0		false				ok	3.0;2.0;3.0;2.0;3.5;6.25;4.125;5.0625	
+ewm_std	wobble		3	0		false				ok	nan;1.4142135623730951;1.5491933384829668;1.632993161855452;2.1693045781865616;3.7014699465747247;3.690597894720152;2.8508681458690663	
+ewm_mean	wobble		3	1		false				ok	3.0;2.0;3.0;2.0;3.5;6.25;4.125;5.0625	
+ewm_std	wobble		3	1		false				ok	nan;1.4142135623730951;1.5491933384829668;1.632993161855452;2.1693045781865616;3.7014699465747247;3.690597894720152;2.8508681458690663	
+ewm_mean	wobble		3	0		true				ok	3.0;1.6666666666666667;3.0;1.9333333333333333;3.5161290322580645;6.301587301587301;4.133858267716535;5.070588235294117	
+ewm_std	wobble		3	0		true				ok	nan;1.4142135623730951;1.7320508075688772;1.6987390281365427;2.2331808646398414;3.724168584211138;3.717276924246236;2.857573248864535	
+ewm_mean	wobble		3	1		true				ok	3.0;1.6666666666666667;3.0;1.9333333333333333;3.5161290322580645;6.301587301587301;4.133858267716535;5.070588235294117	
+ewm_std	wobble		3	1		true				ok	nan;1.4142135623730951;1.7320508075688772;1.6987390281365427;2.2331808646398414;3.724168584211138;3.717276924246236;2.857573248864535	
+ewm_mean	wobble		5	0		false				ok	3.0;2.3333333333333335;2.8888888888888893;2.25925925925926;3.1728395061728403;5.1152263374485605;4.076817558299041;4.717878372199361	
+ewm_std	wobble		5	0		false				ok	nan;1.4142135623730951;1.3728129459672882;1.4804490275954358;1.8863422472475644;3.452315659426622;3.253487579155344;2.838555343464524	
+ewm_mean	wobble		5	1		false				ok	3.0;2.3333333333333335;2.8888888888888893;2.25925925925926;3.1728395061728403;5.1152263374485605;4.076817558299041;4.717878372199361	
+ewm_std	wobble		5	1		false				ok	nan;1.4142135623730951;1.3728129459672882;1.4804490275954358;1.8863422472475644;3.452315659426622;3.253487579155344;2.838555343464524	
+ewm_mean	wobble		5	0		true				ok	3.0;1.7999999999999998;2.8421052631578942;2.076923076923077;3.1990521327014214;5.318796992481203;4.143759106362312;4.787628865979381	
+ewm_std	wobble		5	0		true				ok	nan;1.4142135623730951;1.6463676125912685;1.6128281293736122;2.0625472961578546;3.587215934775232;3.378711855104328;2.8930757497691024	
+ewm_mean	wobble		5	1		true				ok	3.0;1.7999999999999998;2.8421052631578942;2.076923076923077;3.1990521327014214;5.318796992481203;4.143759106362312;4.787628865979381	
+ewm_std	wobble		5	1		true				ok	nan;1.4142135623730951;1.6463676125912685;1.6128281293736122;2.0625472961578546;3.587215934775232;3.378711855104328;2.8930757497691024	
+fshift	wobble						1	nan		ok	nan;3.0;1.0;4.0;1.0;5.0;9.0;2.0	
+bshift	wobble						1	nan		ok	1.0;4.0;1.0;5.0;9.0;2.0;6.0;nan	
+diff	wobble						1			ok	nan;-2.0;3.0;-3.0;4.0;4.0;-7.0;4.0	
+pct_change	wobble						1			ok	nan;-0.6666666666666667;3.0;-0.75;4.0;0.8;-0.7777777777777778;2.0	
+fshift	wobble						2	nan		ok	nan;nan;3.0;1.0;4.0;1.0;5.0;9.0	
+bshift	wobble						2	nan		ok	4.0;1.0;5.0;9.0;2.0;6.0;nan;nan	
+diff	wobble						2			ok	nan;nan;1.0;0.0;1.0;8.0;-3.0;-3.0	
+pct_change	wobble						2			ok	nan;nan;0.33333333333333326;0.0;0.25;8.0;-0.6;-0.33333333333333337	
+fshift	wobble						5	nan		ok	nan;nan;nan;nan;nan;3.0;1.0;4.0	
+bshift	wobble						5	nan		ok	9.0;2.0;6.0;nan;nan;nan;nan;nan	
+diff	wobble						5			ok	nan;nan;nan;nan;nan;6.0;1.0;2.0	
+pct_change	wobble						5			ok	nan;nan;nan;nan;nan;2.0;1.0;0.5	
+ffill	wobble									ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+bfill	wobble									ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+fillna	wobble							-1.0		ok	3.0;1.0;4.0;1.0;5.0;9.0;2.0;6.0	
+rolling_mean	leading_gap		1							ok	nan;nan;3.0;4.0;5.0	
+rolling_min	leading_gap		1							ok	nan;nan;3.0;4.0;5.0	
+rolling_max	leading_gap		1							ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		1		0					ok	nan;nan;0.0;0.0;0.0	
+rolling_std	leading_gap		1		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_min	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_max	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		1	1	0					ok	nan;nan;0.0;0.0;0.0	
+rolling_std	leading_gap		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_min	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_max	leading_gap		1	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		1	1	0					ok	nan;nan;0.0;0.0;0.0	
+rolling_std	leading_gap		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		2							ok	nan;nan;nan;3.5;4.5	
+rolling_min	leading_gap		2							ok	nan;nan;nan;3.0;4.0	
+rolling_max	leading_gap		2							ok	nan;nan;nan;4.0;5.0	
+rolling_std	leading_gap		2		0					ok	nan;nan;nan;0.5;0.5	
+rolling_std	leading_gap		2		1					ok	nan;nan;nan;0.7071067811865476;0.7071067811865476	
+rolling_mean	leading_gap		2	1						ok	nan;nan;3.0;3.5;4.5	
+rolling_min	leading_gap		2	1						ok	nan;nan;3.0;3.0;4.0	
+rolling_max	leading_gap		2	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		2	1	0					ok	nan;nan;0.0;0.5;0.5	
+rolling_std	leading_gap		2	1	1					ok	nan;nan;nan;0.7071067811865476;0.7071067811865476	
+rolling_mean	leading_gap		2	2						ok	nan;nan;nan;3.5;4.5	
+rolling_min	leading_gap		2	2						ok	nan;nan;nan;3.0;4.0	
+rolling_max	leading_gap		2	2						ok	nan;nan;nan;4.0;5.0	
+rolling_std	leading_gap		2	2	0					ok	nan;nan;nan;0.5;0.5	
+rolling_std	leading_gap		2	2	1					ok	nan;nan;nan;0.7071067811865476;0.7071067811865476	
+rolling_mean	leading_gap		3							ok	nan;nan;nan;nan;4.0	
+rolling_min	leading_gap		3							ok	nan;nan;nan;nan;3.0	
+rolling_max	leading_gap		3							ok	nan;nan;nan;nan;5.0	
+rolling_std	leading_gap		3		0					ok	nan;nan;nan;nan;0.816496580927726	
+rolling_std	leading_gap		3		1					ok	nan;nan;nan;nan;1.0	
+rolling_mean	leading_gap		3	1						ok	nan;nan;3.0;3.5;4.0	
+rolling_min	leading_gap		3	1						ok	nan;nan;3.0;3.0;3.0	
+rolling_max	leading_gap		3	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		3	1	0					ok	nan;nan;0.0;0.5;0.816496580927726	
+rolling_std	leading_gap		3	1	1					ok	nan;nan;nan;0.7071067811865476;1.0	
+rolling_mean	leading_gap		3	3						ok	nan;nan;nan;nan;4.0	
+rolling_min	leading_gap		3	3						ok	nan;nan;nan;nan;3.0	
+rolling_max	leading_gap		3	3						ok	nan;nan;nan;nan;5.0	
+rolling_std	leading_gap		3	3	0					ok	nan;nan;nan;nan;0.816496580927726	
+rolling_std	leading_gap		3	3	1					ok	nan;nan;nan;nan;1.0	
+rolling_mean	leading_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_min	leading_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_max	leading_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		5		0					ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		5		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		5	1						ok	nan;nan;3.0;3.5;4.0	
+rolling_min	leading_gap		5	1						ok	nan;nan;3.0;3.0;3.0	
+rolling_max	leading_gap		5	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		5	1	0					ok	nan;nan;0.0;0.5;0.816496580927726	
+rolling_std	leading_gap		5	1	1					ok	nan;nan;nan;0.7071067811865476;1.0	
+rolling_mean	leading_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_min	leading_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_max	leading_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		5	5	0					ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		5	5	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_min	leading_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_max	leading_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		10		0					ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		10		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	leading_gap		10	1						ok	nan;nan;3.0;3.5;4.0	
+rolling_min	leading_gap		10	1						ok	nan;nan;3.0;3.0;3.0	
+rolling_max	leading_gap		10	1						ok	nan;nan;3.0;4.0;5.0	
+rolling_std	leading_gap		10	1	0					ok	nan;nan;0.0;0.5;0.816496580927726	
+rolling_std	leading_gap		10	1	1					ok	nan;nan;nan;0.7071067811865476;1.0	
+rolling_mean	leading_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_min	leading_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_max	leading_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		10	10	0					ok	nan;nan;nan;nan;nan	
+rolling_std	leading_gap		10	10	1					ok	nan;nan;nan;nan;nan	
+expanding_min	leading_gap			1						ok	nan;nan;3.0;3.0;3.0	
+expanding_max	leading_gap			1						ok	nan;nan;3.0;4.0;5.0	
+expanding_mean	leading_gap			1						ok	nan;nan;3.0;3.5;4.0	
+expanding_std	leading_gap			1	0					ok	nan;nan;0.0;0.5;0.816496580927726	
+expanding_std	leading_gap			1	1					ok	nan;nan;nan;0.7071067811865476;1.0	
+expanding_min	leading_gap			2						ok	nan;nan;nan;3.0;3.0	
+expanding_max	leading_gap			2						ok	nan;nan;nan;4.0;5.0	
+expanding_mean	leading_gap			2						ok	nan;nan;nan;3.5;4.0	
+expanding_std	leading_gap			2	0					ok	nan;nan;nan;0.5;0.816496580927726	
+expanding_std	leading_gap			2	1					ok	nan;nan;nan;0.7071067811865476;1.0	
+ewm_mean	leading_gap		2	0		false				ok	nan;nan;3.0;3.6666666666666665;4.555555555555555	
+ewm_std	leading_gap		2	0		false				ok	nan;nan;nan;0.7071067811865476;0.9746794344808966	
+ewm_mean	leading_gap		2	1		false				ok	nan;nan;3.0;3.6666666666666665;4.555555555555555	
+ewm_std	leading_gap		2	1		false				ok	nan;nan;nan;0.7071067811865476;0.9746794344808966	
+ewm_mean	leading_gap		2	0		true				ok	nan;nan;3.0;3.7499999999999996;4.615384615384615	
+ewm_std	leading_gap		2	0		true				ok	nan;nan;nan;0.7071067811865475;0.9198662110078002	
+ewm_mean	leading_gap		2	1		true				ok	nan;nan;3.0;3.7499999999999996;4.615384615384615	
+ewm_std	leading_gap		2	1		true				ok	nan;nan;nan;0.7071067811865475;0.9198662110078002	
+ewm_mean	leading_gap		3	0		false				ok	nan;nan;3.0;3.5;4.25	
+ewm_std	leading_gap		3	0		false				ok	nan;nan;nan;0.7071067811865476;1.0488088481701516	
+ewm_mean	leading_gap		3	1		false				ok	nan;nan;3.0;3.5;4.25	
+ewm_std	leading_gap		3	1		false				ok	nan;nan;nan;0.7071067811865476;1.0488088481701516	
+ewm_mean	leading_gap		3	0		true				ok	nan;nan;3.0;3.6666666666666665;4.428571428571429	
+ewm_std	leading_gap		3	0		true				ok	nan;nan;nan;0.7071067811865476;0.9636241116594315	
+ewm_mean	leading_gap		3	1		true				ok	nan;nan;3.0;3.6666666666666665;4.428571428571429	
+ewm_std	leading_gap		3	1		true				ok	nan;nan;nan;0.7071067811865476;0.9636241116594315	
+ewm_mean	leading_gap		5	0		false				ok	nan;nan;3.0;3.333333333333333;3.888888888888889	
+ewm_std	leading_gap		5	0		false				ok	nan;nan;nan;0.7071067811865476;1.091928428198338	
+ewm_mean	leading_gap		5	1		false				ok	nan;nan;3.0;3.333333333333333;3.888888888888889	
+ewm_std	leading_gap		5	1		false				ok	nan;nan;nan;0.7071067811865476;1.091928428198338	
+ewm_mean	leading_gap		5	0		true				ok	nan;nan;3.0;3.5999999999999996;4.263157894736841	
+ewm_std	leading_gap		5	0		true				ok	nan;nan;nan;0.7071067811865476;0.9867543820659302	
+ewm_mean	leading_gap		5	1		true				ok	nan;nan;3.0;3.5999999999999996;4.263157894736841	
+ewm_std	leading_gap		5	1		true				ok	nan;nan;nan;0.7071067811865476;0.9867543820659302	
+fshift	leading_gap						1	nan		ok	nan;nan;nan;3.0;4.0	
+bshift	leading_gap						1	nan		ok	nan;3.0;4.0;5.0;nan	
+diff	leading_gap						1			ok	nan;nan;nan;1.0;1.0	
+pct_change	leading_gap						1			ok	nan;nan;nan;0.33333333333333326;0.25	
+fshift	leading_gap						2	nan		ok	nan;nan;nan;nan;3.0	
+bshift	leading_gap						2	nan		ok	3.0;4.0;5.0;nan;nan	
+diff	leading_gap						2			ok	nan;nan;nan;nan;2.0	
+pct_change	leading_gap						2			ok	nan;nan;nan;nan;0.6666666666666667	
+fshift	leading_gap						5	nan		ok	nan;nan;nan;nan;nan	
+bshift	leading_gap						5	nan		ok	nan;nan;nan;nan;nan	
+diff	leading_gap						5			ok	nan;nan;nan;nan;nan	
+pct_change	leading_gap						5			ok	nan;nan;nan;nan;nan	
+ffill	leading_gap									ok	nan;nan;3.0;4.0;5.0	
+bfill	leading_gap									ok	3.0;3.0;3.0;4.0;5.0	
+fillna	leading_gap							-1.0		ok	-1.0;-1.0;3.0;4.0;5.0	
+rolling_mean	trailing_gap		1							ok	1.0;2.0;3.0;nan;nan	
+rolling_min	trailing_gap		1							ok	1.0;2.0;3.0;nan;nan	
+rolling_max	trailing_gap		1							ok	1.0;2.0;3.0;nan;nan	
+rolling_std	trailing_gap		1		0					ok	0.0;0.0;0.0;nan;nan	
+rolling_std	trailing_gap		1		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_min	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_max	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_std	trailing_gap		1	1	0					ok	0.0;0.0;0.0;nan;nan	
+rolling_std	trailing_gap		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_min	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_max	trailing_gap		1	1						ok	1.0;2.0;3.0;nan;nan	
+rolling_std	trailing_gap		1	1	0					ok	0.0;0.0;0.0;nan;nan	
+rolling_std	trailing_gap		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		2							ok	nan;1.5;2.5;nan;nan	
+rolling_min	trailing_gap		2							ok	nan;1.0;2.0;nan;nan	
+rolling_max	trailing_gap		2							ok	nan;2.0;3.0;nan;nan	
+rolling_std	trailing_gap		2		0					ok	nan;0.5;0.5;nan;nan	
+rolling_std	trailing_gap		2		1					ok	nan;0.7071067811865476;0.7071067811865476;nan;nan	
+rolling_mean	trailing_gap		2	1						ok	1.0;1.5;2.5;3.0;nan	
+rolling_min	trailing_gap		2	1						ok	1.0;1.0;2.0;3.0;nan	
+rolling_max	trailing_gap		2	1						ok	1.0;2.0;3.0;3.0;nan	
+rolling_std	trailing_gap		2	1	0					ok	0.0;0.5;0.5;0.0;nan	
+rolling_std	trailing_gap		2	1	1					ok	nan;0.7071067811865476;0.7071067811865476;nan;nan	
+rolling_mean	trailing_gap		2	2						ok	nan;1.5;2.5;nan;nan	
+rolling_min	trailing_gap		2	2						ok	nan;1.0;2.0;nan;nan	
+rolling_max	trailing_gap		2	2						ok	nan;2.0;3.0;nan;nan	
+rolling_std	trailing_gap		2	2	0					ok	nan;0.5;0.5;nan;nan	
+rolling_std	trailing_gap		2	2	1					ok	nan;0.7071067811865476;0.7071067811865476;nan;nan	
+rolling_mean	trailing_gap		3							ok	nan;nan;2.0;nan;nan	
+rolling_min	trailing_gap		3							ok	nan;nan;1.0;nan;nan	
+rolling_max	trailing_gap		3							ok	nan;nan;3.0;nan;nan	
+rolling_std	trailing_gap		3		0					ok	nan;nan;0.816496580927726;nan;nan	
+rolling_std	trailing_gap		3		1					ok	nan;nan;1.0;nan;nan	
+rolling_mean	trailing_gap		3	1						ok	1.0;1.5;2.0;2.5;3.0	
+rolling_min	trailing_gap		3	1						ok	1.0;1.0;1.0;2.0;3.0	
+rolling_max	trailing_gap		3	1						ok	1.0;2.0;3.0;3.0;3.0	
+rolling_std	trailing_gap		3	1	0					ok	0.0;0.5;0.816496580927726;0.5;0.0	
+rolling_std	trailing_gap		3	1	1					ok	nan;0.7071067811865476;1.0;0.7071067811865476;nan	
+rolling_mean	trailing_gap		3	3						ok	nan;nan;2.0;nan;nan	
+rolling_min	trailing_gap		3	3						ok	nan;nan;1.0;nan;nan	
+rolling_max	trailing_gap		3	3						ok	nan;nan;3.0;nan;nan	
+rolling_std	trailing_gap		3	3	0					ok	nan;nan;0.816496580927726;nan;nan	
+rolling_std	trailing_gap		3	3	1					ok	nan;nan;1.0;nan;nan	
+rolling_mean	trailing_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_min	trailing_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_max	trailing_gap		5							ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		5		0					ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		5		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		5	1						ok	1.0;1.5;2.0;2.0;2.0	
+rolling_min	trailing_gap		5	1						ok	1.0;1.0;1.0;1.0;1.0	
+rolling_max	trailing_gap		5	1						ok	1.0;2.0;3.0;3.0;3.0	
+rolling_std	trailing_gap		5	1	0					ok	0.0;0.5;0.816496580927726;0.816496580927726;0.816496580927726	
+rolling_std	trailing_gap		5	1	1					ok	nan;0.7071067811865476;1.0;1.0;1.0	
+rolling_mean	trailing_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_min	trailing_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_max	trailing_gap		5	5						ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		5	5	0					ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		5	5	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_min	trailing_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_max	trailing_gap		10							ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		10		0					ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		10		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	trailing_gap		10	1						ok	1.0;1.5;2.0;2.0;2.0	
+rolling_min	trailing_gap		10	1						ok	1.0;1.0;1.0;1.0;1.0	
+rolling_max	trailing_gap		10	1						ok	1.0;2.0;3.0;3.0;3.0	
+rolling_std	trailing_gap		10	1	0					ok	0.0;0.5;0.816496580927726;0.816496580927726;0.816496580927726	
+rolling_std	trailing_gap		10	1	1					ok	nan;0.7071067811865476;1.0;1.0;1.0	
+rolling_mean	trailing_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_min	trailing_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_max	trailing_gap		10	10						ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		10	10	0					ok	nan;nan;nan;nan;nan	
+rolling_std	trailing_gap		10	10	1					ok	nan;nan;nan;nan;nan	
+expanding_min	trailing_gap			1						ok	1.0;1.0;1.0;1.0;1.0	
+expanding_max	trailing_gap			1						ok	1.0;2.0;3.0;3.0;3.0	
+expanding_mean	trailing_gap			1						ok	1.0;1.5;2.0;2.0;2.0	
+expanding_std	trailing_gap			1	0					ok	0.0;0.5;0.816496580927726;0.816496580927726;0.816496580927726	
+expanding_std	trailing_gap			1	1					ok	nan;0.7071067811865476;1.0;1.0;1.0	
+expanding_min	trailing_gap			2						ok	nan;1.0;1.0;1.0;1.0	
+expanding_max	trailing_gap			2						ok	nan;2.0;3.0;3.0;3.0	
+expanding_mean	trailing_gap			2						ok	nan;1.5;2.0;2.0;2.0	
+expanding_std	trailing_gap			2	0					ok	nan;0.5;0.816496580927726;0.816496580927726;0.816496580927726	
+expanding_std	trailing_gap			2	1					ok	nan;0.7071067811865476;1.0;1.0;1.0	
+ewm_mean	trailing_gap		2	0		false				ok	1.0;1.6666666666666665;2.5555555555555554;2.5555555555555554;2.5555555555555554	
+ewm_std	trailing_gap		2	0		false				ok	nan;0.7071067811865476;0.9746794344808966;0.9746794344808967;0.9746794344808967	
+ewm_mean	trailing_gap		2	1		false				ok	1.0;1.6666666666666665;2.5555555555555554;2.5555555555555554;2.5555555555555554	
+ewm_std	trailing_gap		2	1		false				ok	nan;0.7071067811865476;0.9746794344808966;0.9746794344808967;0.9746794344808967	
+ewm_mean	trailing_gap		2	0		true				ok	1.0;1.75;2.615384615384615;2.615384615384615;2.615384615384615	
+ewm_std	trailing_gap		2	0		true				ok	nan;0.7071067811865475;0.9198662110077998;0.9198662110077996;0.9198662110077995	
+ewm_mean	trailing_gap		2	1		true				ok	1.0;1.75;2.615384615384615;2.615384615384615;2.615384615384615	
+ewm_std	trailing_gap		2	1		true				ok	nan;0.7071067811865475;0.9198662110077998;0.9198662110077996;0.9198662110077995	
+ewm_mean	trailing_gap		3	0		false				ok	1.0;1.5;2.25;2.25;2.25	
+ewm_std	trailing_gap		3	0		false				ok	nan;0.7071067811865476;1.0488088481701516;1.0488088481701516;1.0488088481701516	
+ewm_mean	trailing_gap		3	1		false				ok	1.0;1.5;2.25;2.25;2.25	
+ewm_std	trailing_gap		3	1		false				ok	nan;0.7071067811865476;1.0488088481701516;1.0488088481701516;1.0488088481701516	
+ewm_mean	trailing_gap		3	0		true				ok	1.0;1.6666666666666667;2.4285714285714284;2.4285714285714284;2.4285714285714284	
+ewm_std	trailing_gap		3	0		true				ok	nan;0.7071067811865476;0.9636241116594314;0.9636241116594314;0.9636241116594314	
+ewm_mean	trailing_gap		3	1		true				ok	1.0;1.6666666666666667;2.4285714285714284;2.4285714285714284;2.4285714285714284	
+ewm_std	trailing_gap		3	1		true				ok	nan;0.7071067811865476;0.9636241116594314;0.9636241116594314;0.9636241116594314	
+ewm_mean	trailing_gap		5	0		false				ok	1.0;1.3333333333333335;1.888888888888889;1.888888888888889;1.888888888888889	
+ewm_std	trailing_gap		5	0		false				ok	nan;0.7071067811865476;1.0919284281983377;1.0919284281983377;1.0919284281983377	
+ewm_mean	trailing_gap		5	1		false				ok	1.0;1.3333333333333335;1.888888888888889;1.888888888888889;1.888888888888889	
+ewm_std	trailing_gap		5	1		false				ok	nan;0.7071067811865476;1.0919284281983377;1.0919284281983377;1.0919284281983377	
+ewm_mean	trailing_gap		5	0		true				ok	1.0;1.6;2.263157894736842;2.263157894736842;2.263157894736842	
+ewm_std	trailing_gap		5	0		true				ok	nan;0.7071067811865476;0.98675438206593;0.98675438206593;0.98675438206593	
+ewm_mean	trailing_gap		5	1		true				ok	1.0;1.6;2.263157894736842;2.263157894736842;2.263157894736842	
+ewm_std	trailing_gap		5	1		true				ok	nan;0.7071067811865476;0.98675438206593;0.98675438206593;0.98675438206593	
+fshift	trailing_gap						1	nan		ok	nan;1.0;2.0;3.0;nan	
+bshift	trailing_gap						1	nan		ok	2.0;3.0;nan;nan;nan	
+diff	trailing_gap						1			ok	nan;1.0;1.0;nan;nan	
+pct_change	trailing_gap						1			ok	nan;1.0;0.5;nan;nan	
+fshift	trailing_gap						2	nan		ok	nan;nan;1.0;2.0;3.0	
+bshift	trailing_gap						2	nan		ok	3.0;nan;nan;nan;nan	
+diff	trailing_gap						2			ok	nan;nan;2.0;nan;nan	
+pct_change	trailing_gap						2			ok	nan;nan;2.0;nan;nan	
+fshift	trailing_gap						5	nan		ok	nan;nan;nan;nan;nan	
+bshift	trailing_gap						5	nan		ok	nan;nan;nan;nan;nan	
+diff	trailing_gap						5			ok	nan;nan;nan;nan;nan	
+pct_change	trailing_gap						5			ok	nan;nan;nan;nan;nan	
+ffill	trailing_gap									ok	1.0;2.0;3.0;3.0;3.0	
+bfill	trailing_gap									ok	1.0;2.0;3.0;nan;nan	
+fillna	trailing_gap							-1.0		ok	1.0;2.0;3.0;-1.0;-1.0	
+rolling_mean	interior_gaps		1							ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_min	interior_gaps		1							ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_max	interior_gaps		1							ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_std	interior_gaps		1		0					ok	0.0;nan;0.0;nan;0.0;0.0	
+rolling_std	interior_gaps		1		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_min	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_max	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_std	interior_gaps		1	1	0					ok	0.0;nan;0.0;nan;0.0;0.0	
+rolling_std	interior_gaps		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_min	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_max	interior_gaps		1	1						ok	1.0;nan;3.0;nan;5.0;6.0	
+rolling_std	interior_gaps		1	1	0					ok	0.0;nan;0.0;nan;0.0;0.0	
+rolling_std	interior_gaps		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		2							ok	nan;nan;nan;nan;nan;5.5	
+rolling_min	interior_gaps		2							ok	nan;nan;nan;nan;nan;5.0	
+rolling_max	interior_gaps		2							ok	nan;nan;nan;nan;nan;6.0	
+rolling_std	interior_gaps		2		0					ok	nan;nan;nan;nan;nan;0.5	
+rolling_std	interior_gaps		2		1					ok	nan;nan;nan;nan;nan;0.7071067811865476	
+rolling_mean	interior_gaps		2	1						ok	1.0;1.0;3.0;3.0;5.0;5.5	
+rolling_min	interior_gaps		2	1						ok	1.0;1.0;3.0;3.0;5.0;5.0	
+rolling_max	interior_gaps		2	1						ok	1.0;1.0;3.0;3.0;5.0;6.0	
+rolling_std	interior_gaps		2	1	0					ok	0.0;0.0;0.0;0.0;0.0;0.5	
+rolling_std	interior_gaps		2	1	1					ok	nan;nan;nan;nan;nan;0.7071067811865476	
+rolling_mean	interior_gaps		2	2						ok	nan;nan;nan;nan;nan;5.5	
+rolling_min	interior_gaps		2	2						ok	nan;nan;nan;nan;nan;5.0	
+rolling_max	interior_gaps		2	2						ok	nan;nan;nan;nan;nan;6.0	
+rolling_std	interior_gaps		2	2	0					ok	nan;nan;nan;nan;nan;0.5	
+rolling_std	interior_gaps		2	2	1					ok	nan;nan;nan;nan;nan;0.7071067811865476	
+rolling_mean	interior_gaps		3							ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		3							ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		3							ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		3		0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		3		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		3	1						ok	1.0;1.0;2.0;3.0;4.0;5.5	
+rolling_min	interior_gaps		3	1						ok	1.0;1.0;1.0;3.0;3.0;5.0	
+rolling_max	interior_gaps		3	1						ok	1.0;1.0;3.0;3.0;5.0;6.0	
+rolling_std	interior_gaps		3	1	0					ok	0.0;0.0;1.0;0.0;1.0;0.5	
+rolling_std	interior_gaps		3	1	1					ok	nan;nan;1.4142135623730951;nan;1.4142135623730951;0.7071067811865476	
+rolling_mean	interior_gaps		3	3						ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		3	3						ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		3	3						ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		3	3	0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		3	3	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		5							ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		5							ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		5							ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		5		0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		5		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		5	1						ok	1.0;1.0;2.0;2.0;3.0;4.666666666666667	
+rolling_min	interior_gaps		5	1						ok	1.0;1.0;1.0;1.0;1.0;3.0	
+rolling_max	interior_gaps		5	1						ok	1.0;1.0;3.0;3.0;5.0;6.0	
+rolling_std	interior_gaps		5	1	0					ok	0.0;0.0;1.0;1.0;1.632993161855452;1.247219128924646	
+rolling_std	interior_gaps		5	1	1					ok	nan;nan;1.4142135623730951;1.4142135623730951;2.0;1.5275252316519452	
+rolling_mean	interior_gaps		5	5						ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		5	5						ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		5	5						ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		5	5	0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		5	5	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		10		0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		10		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	interior_gaps		10	1						ok	1.0;1.0;2.0;2.0;3.0;3.75	
+rolling_min	interior_gaps		10	1						ok	1.0;1.0;1.0;1.0;1.0;1.0	
+rolling_max	interior_gaps		10	1						ok	1.0;1.0;3.0;3.0;5.0;6.0	
+rolling_std	interior_gaps		10	1	0					ok	0.0;0.0;1.0;1.0;1.632993161855452;1.920286436967152	
+rolling_std	interior_gaps		10	1	1					ok	nan;nan;1.4142135623730951;1.4142135623730951;2.0;2.217355782608345	
+rolling_mean	interior_gaps		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_min	interior_gaps		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_max	interior_gaps		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		10	10	0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	interior_gaps		10	10	1					ok	nan;nan;nan;nan;nan;nan	
+expanding_min	interior_gaps			1						ok	1.0;1.0;1.0;1.0;1.0;1.0	
+expanding_max	interior_gaps			1						ok	1.0;1.0;3.0;3.0;5.0;6.0	
+expanding_mean	interior_gaps			1						ok	1.0;1.0;2.0;2.0;3.0;3.75	
+expanding_std	interior_gaps			1	0					ok	0.0;0.0;1.0;1.0;1.632993161855452;1.920286436967152	
+expanding_std	interior_gaps			1	1					ok	nan;nan;1.4142135623730951;1.4142135623730951;2.0;2.217355782608345	
+expanding_min	interior_gaps			2						ok	nan;nan;1.0;1.0;1.0;1.0	
+expanding_max	interior_gaps			2						ok	nan;nan;3.0;3.0;5.0;6.0	
+expanding_mean	interior_gaps			2						ok	nan;nan;2.0;2.0;3.0;3.75	
+expanding_std	interior_gaps			2	0					ok	nan;nan;1.0;1.0;1.632993161855452;1.920286436967152	
+expanding_std	interior_gaps			2	1					ok	nan;nan;1.4142135623730951;1.4142135623730951;2.0;2.217355782608345	
+ewm_mean	interior_gaps		2	0		false				ok	1.0;1.0;2.7142857142857144;2.7142857142857144;4.673469387755102;5.557823129251701	
+ewm_std	interior_gaps		2	0		false				ok	nan;nan;1.414213562373095;1.414213562373095;1.6852299546352716;1.1528601965082592	
+ewm_mean	interior_gaps		2	1		false				ok	1.0;1.0;2.7142857142857144;2.7142857142857144;4.673469387755102;5.557823129251701	
+ewm_std	interior_gaps		2	1		false				ok	nan;nan;1.414213562373095;1.414213562373095;1.6852299546352716;1.1528601965082592	
+ewm_mean	interior_gaps		2	0		true				ok	1.0;1.0;2.8;2.8;4.758241758241757;5.661676646706586	
+ewm_std	interior_gaps		2	0		true				ok	nan;nan;1.414213562373095;1.4142135623730954;1.6104057232283402;1.0408644215809428	
+ewm_mean	interior_gaps		2	1		true				ok	1.0;1.0;2.8;2.8;4.758241758241757;5.661676646706586	
+ewm_std	interior_gaps		2	1		true				ok	nan;nan;1.414213562373095;1.4142135623730954;1.6104057232283402;1.0408644215809428	
+ewm_mean	interior_gaps		3	0		false				ok	1.0;1.0;2.3333333333333335;2.3333333333333335;4.111111111111112;5.055555555555555	
+ewm_std	interior_gaps		3	0		false				ok	nan;nan;1.4142135623730951;1.4142135623730951;1.9493588689617927;1.7133719865681343	
+ewm_mean	interior_gaps		3	1		false				ok	1.0;1.0;2.3333333333333335;2.3333333333333335;4.111111111111112;5.055555555555555	
+ewm_std	interior_gaps		3	1		false				ok	nan;nan;1.4142135623730951;1.4142135623730951;1.9493588689617927;1.7133719865681343	
+ewm_mean	interior_gaps		3	0		true				ok	1.0;1.0;2.6;2.6;4.428571428571429;5.377358490566038	
+ewm_std	interior_gaps		3	0		true				ok	nan;nan;1.4142135623730951;1.4142135623730951;1.7728105208558367;1.4067110502288587	
+ewm_mean	interior_gaps		3	1		true				ok	1.0;1.0;2.6;2.6;4.428571428571429;5.377358490566038	
+ewm_std	interior_gaps		3	1		true				ok	nan;nan;1.4142135623730951;1.4142135623730951;1.7728105208558367;1.4067110502288587	
+ewm_mean	interior_gaps		5	0		false				ok	1.0;1.0;1.8571428571428572;1.8571428571428572;3.2040816326530606;4.136054421768707	
+ewm_std	interior_gaps		5	0		false				ok	nan;nan;1.414213562373095;1.414213562373095;2.141171498179299;2.2533601379126136	
+ewm_mean	interior_gaps		5	1		false				ok	1.0;1.0;1.8571428571428572;1.8571428571428572;3.2040816326530606;4.136054421768707	
+ewm_std	interior_gaps		5	1		false				ok	nan;nan;1.414213562373095;1.414213562373095;2.141171498179299;2.2533601379126136	
+ewm_mean	interior_gaps		5	0		true				ok	1.0;1.0;2.3846153846153846;2.3846153846153846;3.9774436090225564;4.94302554027505	
+ewm_std	interior_gaps		5	0		true				ok	nan;nan;1.4142135623730947;1.4142135623730945;1.903696443862818;1.778466494473716	
+ewm_mean	interior_gaps		5	1		true				ok	1.0;1.0;2.3846153846153846;2.3846153846153846;3.9774436090225564;4.94302554027505	
+ewm_std	interior_gaps		5	1		true				ok	nan;nan;1.4142135623730947;1.4142135623730945;1.903696443862818;1.778466494473716	
+fshift	interior_gaps						1	nan		ok	nan;1.0;nan;3.0;nan;5.0	
+bshift	interior_gaps						1	nan		ok	nan;3.0;nan;5.0;6.0;nan	
+diff	interior_gaps						1			ok	nan;nan;nan;nan;nan;1.0	
+pct_change	interior_gaps						1			ok	nan;nan;nan;nan;nan;0.19999999999999996	
+fshift	interior_gaps						2	nan		ok	nan;nan;1.0;nan;3.0;nan	
+bshift	interior_gaps						2	nan		ok	3.0;nan;5.0;6.0;nan;nan	
+diff	interior_gaps						2			ok	nan;nan;2.0;nan;2.0;nan	
+pct_change	interior_gaps						2			ok	nan;nan;2.0;nan;0.6666666666666667;nan	
+fshift	interior_gaps						5	nan		ok	nan;nan;nan;nan;nan;1.0	
+bshift	interior_gaps						5	nan		ok	6.0;nan;nan;nan;nan;nan	
+diff	interior_gaps						5			ok	nan;nan;nan;nan;nan;5.0	
+pct_change	interior_gaps						5			ok	nan;nan;nan;nan;nan;5.0	
+ffill	interior_gaps									ok	1.0;1.0;3.0;3.0;5.0;6.0	
+bfill	interior_gaps									ok	1.0;3.0;3.0;5.0;5.0;6.0	
+fillna	interior_gaps							-1.0		ok	1.0;-1.0;3.0;-1.0;5.0;6.0	
+rolling_mean	all_nan		1							ok	nan;nan;nan	
+rolling_min	all_nan		1							ok	nan;nan;nan	
+rolling_max	all_nan		1							ok	nan;nan;nan	
+rolling_std	all_nan		1		0					ok	nan;nan;nan	
+rolling_std	all_nan		1		1					ok	nan;nan;nan	
+rolling_mean	all_nan		1	1						ok	nan;nan;nan	
+rolling_min	all_nan		1	1						ok	nan;nan;nan	
+rolling_max	all_nan		1	1						ok	nan;nan;nan	
+rolling_std	all_nan		1	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		1	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		1	1						ok	nan;nan;nan	
+rolling_min	all_nan		1	1						ok	nan;nan;nan	
+rolling_max	all_nan		1	1						ok	nan;nan;nan	
+rolling_std	all_nan		1	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		1	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		2							ok	nan;nan;nan	
+rolling_min	all_nan		2							ok	nan;nan;nan	
+rolling_max	all_nan		2							ok	nan;nan;nan	
+rolling_std	all_nan		2		0					ok	nan;nan;nan	
+rolling_std	all_nan		2		1					ok	nan;nan;nan	
+rolling_mean	all_nan		2	1						ok	nan;nan;nan	
+rolling_min	all_nan		2	1						ok	nan;nan;nan	
+rolling_max	all_nan		2	1						ok	nan;nan;nan	
+rolling_std	all_nan		2	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		2	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		2	2						ok	nan;nan;nan	
+rolling_min	all_nan		2	2						ok	nan;nan;nan	
+rolling_max	all_nan		2	2						ok	nan;nan;nan	
+rolling_std	all_nan		2	2	0					ok	nan;nan;nan	
+rolling_std	all_nan		2	2	1					ok	nan;nan;nan	
+rolling_mean	all_nan		3							ok	nan;nan;nan	
+rolling_min	all_nan		3							ok	nan;nan;nan	
+rolling_max	all_nan		3							ok	nan;nan;nan	
+rolling_std	all_nan		3		0					ok	nan;nan;nan	
+rolling_std	all_nan		3		1					ok	nan;nan;nan	
+rolling_mean	all_nan		3	1						ok	nan;nan;nan	
+rolling_min	all_nan		3	1						ok	nan;nan;nan	
+rolling_max	all_nan		3	1						ok	nan;nan;nan	
+rolling_std	all_nan		3	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		3	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		3	3						ok	nan;nan;nan	
+rolling_min	all_nan		3	3						ok	nan;nan;nan	
+rolling_max	all_nan		3	3						ok	nan;nan;nan	
+rolling_std	all_nan		3	3	0					ok	nan;nan;nan	
+rolling_std	all_nan		3	3	1					ok	nan;nan;nan	
+rolling_mean	all_nan		5							ok	nan;nan;nan	
+rolling_min	all_nan		5							ok	nan;nan;nan	
+rolling_max	all_nan		5							ok	nan;nan;nan	
+rolling_std	all_nan		5		0					ok	nan;nan;nan	
+rolling_std	all_nan		5		1					ok	nan;nan;nan	
+rolling_mean	all_nan		5	1						ok	nan;nan;nan	
+rolling_min	all_nan		5	1						ok	nan;nan;nan	
+rolling_max	all_nan		5	1						ok	nan;nan;nan	
+rolling_std	all_nan		5	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		5	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		5	5						ok	nan;nan;nan	
+rolling_min	all_nan		5	5						ok	nan;nan;nan	
+rolling_max	all_nan		5	5						ok	nan;nan;nan	
+rolling_std	all_nan		5	5	0					ok	nan;nan;nan	
+rolling_std	all_nan		5	5	1					ok	nan;nan;nan	
+rolling_mean	all_nan		10							ok	nan;nan;nan	
+rolling_min	all_nan		10							ok	nan;nan;nan	
+rolling_max	all_nan		10							ok	nan;nan;nan	
+rolling_std	all_nan		10		0					ok	nan;nan;nan	
+rolling_std	all_nan		10		1					ok	nan;nan;nan	
+rolling_mean	all_nan		10	1						ok	nan;nan;nan	
+rolling_min	all_nan		10	1						ok	nan;nan;nan	
+rolling_max	all_nan		10	1						ok	nan;nan;nan	
+rolling_std	all_nan		10	1	0					ok	nan;nan;nan	
+rolling_std	all_nan		10	1	1					ok	nan;nan;nan	
+rolling_mean	all_nan		10	10						ok	nan;nan;nan	
+rolling_min	all_nan		10	10						ok	nan;nan;nan	
+rolling_max	all_nan		10	10						ok	nan;nan;nan	
+rolling_std	all_nan		10	10	0					ok	nan;nan;nan	
+rolling_std	all_nan		10	10	1					ok	nan;nan;nan	
+expanding_min	all_nan			1						ok	nan;nan;nan	
+expanding_max	all_nan			1						ok	nan;nan;nan	
+expanding_mean	all_nan			1						ok	nan;nan;nan	
+expanding_std	all_nan			1	0					ok	nan;nan;nan	
+expanding_std	all_nan			1	1					ok	nan;nan;nan	
+expanding_min	all_nan			2						ok	nan;nan;nan	
+expanding_max	all_nan			2						ok	nan;nan;nan	
+expanding_mean	all_nan			2						ok	nan;nan;nan	
+expanding_std	all_nan			2	0					ok	nan;nan;nan	
+expanding_std	all_nan			2	1					ok	nan;nan;nan	
+ewm_mean	all_nan		2	0		false				ok	nan;nan;nan	
+ewm_std	all_nan		2	0		false				ok	nan;nan;nan	
+ewm_mean	all_nan		2	1		false				ok	nan;nan;nan	
+ewm_std	all_nan		2	1		false				ok	nan;nan;nan	
+ewm_mean	all_nan		2	0		true				ok	nan;nan;nan	
+ewm_std	all_nan		2	0		true				ok	nan;nan;nan	
+ewm_mean	all_nan		2	1		true				ok	nan;nan;nan	
+ewm_std	all_nan		2	1		true				ok	nan;nan;nan	
+ewm_mean	all_nan		3	0		false				ok	nan;nan;nan	
+ewm_std	all_nan		3	0		false				ok	nan;nan;nan	
+ewm_mean	all_nan		3	1		false				ok	nan;nan;nan	
+ewm_std	all_nan		3	1		false				ok	nan;nan;nan	
+ewm_mean	all_nan		3	0		true				ok	nan;nan;nan	
+ewm_std	all_nan		3	0		true				ok	nan;nan;nan	
+ewm_mean	all_nan		3	1		true				ok	nan;nan;nan	
+ewm_std	all_nan		3	1		true				ok	nan;nan;nan	
+ewm_mean	all_nan		5	0		false				ok	nan;nan;nan	
+ewm_std	all_nan		5	0		false				ok	nan;nan;nan	
+ewm_mean	all_nan		5	1		false				ok	nan;nan;nan	
+ewm_std	all_nan		5	1		false				ok	nan;nan;nan	
+ewm_mean	all_nan		5	0		true				ok	nan;nan;nan	
+ewm_std	all_nan		5	0		true				ok	nan;nan;nan	
+ewm_mean	all_nan		5	1		true				ok	nan;nan;nan	
+ewm_std	all_nan		5	1		true				ok	nan;nan;nan	
+fshift	all_nan						1	nan		ok	nan;nan;nan	
+bshift	all_nan						1	nan		ok	nan;nan;nan	
+diff	all_nan						1			ok	nan;nan;nan	
+pct_change	all_nan						1			ok	nan;nan;nan	
+fshift	all_nan						2	nan		ok	nan;nan;nan	
+bshift	all_nan						2	nan		ok	nan;nan;nan	
+diff	all_nan						2			ok	nan;nan;nan	
+pct_change	all_nan						2			ok	nan;nan;nan	
+fshift	all_nan						5	nan		ok	nan;nan;nan	
+bshift	all_nan						5	nan		ok	nan;nan;nan	
+diff	all_nan						5			ok	nan;nan;nan	
+pct_change	all_nan						5			ok	nan;nan;nan	
+ffill	all_nan									ok	nan;nan;nan	
+bfill	all_nan									ok	nan;nan;nan	
+fillna	all_nan							-1.0		ok	-1.0;-1.0;-1.0	
+rolling_mean	constant		1							ok	0.1;0.1;0.10000000000000003;0.09999999999999998;0.09999999999999998	
+rolling_min	constant		1							ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		1							ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		1		0					ok	0.0;0.0;2.2812650937430355e-09;2.634178031930877e-09;2.634178031930877e-09	
+rolling_std	constant		1		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	constant		1	1						ok	0.1;0.1;0.10000000000000003;0.09999999999999998;0.09999999999999998	
+rolling_min	constant		1	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		1	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		1	1	0					ok	0.0;0.0;2.2812650937430355e-09;2.634178031930877e-09;2.634178031930877e-09	
+rolling_std	constant		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	constant		1	1						ok	0.1;0.1;0.10000000000000003;0.09999999999999998;0.09999999999999998	
+rolling_min	constant		1	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		1	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		1	1	0					ok	0.0;0.0;2.2812650937430355e-09;2.634178031930877e-09;2.634178031930877e-09	
+rolling_std	constant		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	constant		2							ok	nan;0.1;0.10000000000000002;0.1;0.09999999999999998	
+rolling_min	constant		2							ok	nan;0.1;0.1;0.1;0.1	
+rolling_max	constant		2							ok	nan;0.1;0.1;0.1;0.1	
+rolling_std	constant		2		0					ok	nan;0.0;1.3170890159654386e-09;0.0;2.634178031930877e-09	
+rolling_std	constant		2		1					ok	nan;0.0;1.862645149230957e-09;0.0;3.725290298461914e-09	
+rolling_mean	constant		2	1						ok	0.1;0.1;0.10000000000000002;0.1;0.09999999999999998	
+rolling_min	constant		2	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		2	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		2	1	0					ok	0.0;0.0;1.3170890159654386e-09;0.0;2.634178031930877e-09	
+rolling_std	constant		2	1	1					ok	nan;0.0;1.862645149230957e-09;0.0;3.725290298461914e-09	
+rolling_mean	constant		2	2						ok	nan;0.1;0.10000000000000002;0.1;0.09999999999999998	
+rolling_min	constant		2	2						ok	nan;0.1;0.1;0.1;0.1	
+rolling_max	constant		2	2						ok	nan;0.1;0.1;0.1;0.1	
+rolling_std	constant		2	2	0					ok	nan;0.0;1.3170890159654386e-09;0.0;2.634178031930877e-09	
+rolling_std	constant		2	2	1					ok	nan;0.0;1.862645149230957e-09;0.0;3.725290298461914e-09	
+rolling_mean	constant		3							ok	nan;nan;0.10000000000000002;0.10000000000000002;0.09999999999999999	
+rolling_min	constant		3							ok	nan;nan;0.1;0.1;0.1	
+rolling_max	constant		3							ok	nan;nan;0.1;0.1;0.1	
+rolling_std	constant		3		0					ok	nan;nan;0.0;0.0;1.862645149230957e-09	
+rolling_std	constant		3		1					ok	nan;nan;0.0;0.0;2.2812650937430355e-09	
+rolling_mean	constant		3	1						ok	0.1;0.1;0.10000000000000002;0.10000000000000002;0.09999999999999999	
+rolling_min	constant		3	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		3	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		3	1	0					ok	0.0;0.0;0.0;0.0;1.862645149230957e-09	
+rolling_std	constant		3	1	1					ok	nan;0.0;0.0;0.0;2.2812650937430355e-09	
+rolling_mean	constant		3	3						ok	nan;nan;0.10000000000000002;0.10000000000000002;0.09999999999999999	
+rolling_min	constant		3	3						ok	nan;nan;0.1;0.1;0.1	
+rolling_max	constant		3	3						ok	nan;nan;0.1;0.1;0.1	
+rolling_std	constant		3	3	0					ok	nan;nan;0.0;0.0;1.862645149230957e-09	
+rolling_std	constant		3	3	1					ok	nan;nan;0.0;0.0;2.2812650937430355e-09	
+rolling_mean	constant		5							ok	nan;nan;nan;nan;0.1	
+rolling_min	constant		5							ok	nan;nan;nan;nan;0.1	
+rolling_max	constant		5							ok	nan;nan;nan;nan;0.1	
+rolling_std	constant		5		0					ok	nan;nan;nan;nan;1.666000468656264e-09	
+rolling_std	constant		5		1					ok	nan;nan;nan;nan;1.862645149230957e-09	
+rolling_mean	constant		5	1						ok	0.1;0.1;0.10000000000000002;0.1;0.1	
+rolling_min	constant		5	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		5	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		5	1	0					ok	0.0;0.0;0.0;0.0;1.666000468656264e-09	
+rolling_std	constant		5	1	1					ok	nan;0.0;0.0;0.0;1.862645149230957e-09	
+rolling_mean	constant		5	5						ok	nan;nan;nan;nan;0.1	
+rolling_min	constant		5	5						ok	nan;nan;nan;nan;0.1	
+rolling_max	constant		5	5						ok	nan;nan;nan;nan;0.1	
+rolling_std	constant		5	5	0					ok	nan;nan;nan;nan;1.666000468656264e-09	
+rolling_std	constant		5	5	1					ok	nan;nan;nan;nan;1.862645149230957e-09	
+rolling_mean	constant		10							ok	nan;nan;nan;nan;nan	
+rolling_min	constant		10							ok	nan;nan;nan;nan;nan	
+rolling_max	constant		10							ok	nan;nan;nan;nan;nan	
+rolling_std	constant		10		0					ok	nan;nan;nan;nan;nan	
+rolling_std	constant		10		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	constant		10	1						ok	0.1;0.1;0.10000000000000002;0.1;0.1	
+rolling_min	constant		10	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_max	constant		10	1						ok	0.1;0.1;0.1;0.1;0.1	
+rolling_std	constant		10	1	0					ok	0.0;0.0;0.0;0.0;1.666000468656264e-09	
+rolling_std	constant		10	1	1					ok	nan;0.0;0.0;0.0;1.862645149230957e-09	
+rolling_mean	constant		10	10						ok	nan;nan;nan;nan;nan	
+rolling_min	constant		10	10						ok	nan;nan;nan;nan;nan	
+rolling_max	constant		10	10						ok	nan;nan;nan;nan;nan	
+rolling_std	constant		10	10	0					ok	nan;nan;nan;nan;nan	
+rolling_std	constant		10	10	1					ok	nan;nan;nan;nan;nan	
+expanding_min	constant			1						ok	0.1;0.1;0.1;0.1;0.1	
+expanding_max	constant			1						ok	0.1;0.1;0.1;0.1;0.1	
+expanding_mean	constant			1						ok	0.1;0.1;0.10000000000000002;0.1;0.1	
+expanding_std	constant			1	0					ok	0.0;0.0;0.0;0.0;1.666000468656264e-09	
+expanding_std	constant			1	1					ok	nan;0.0;0.0;0.0;1.862645149230957e-09	
+expanding_min	constant			2						ok	nan;0.1;0.1;0.1;0.1	
+expanding_max	constant			2						ok	nan;0.1;0.1;0.1;0.1	
+expanding_mean	constant			2						ok	nan;0.1;0.10000000000000002;0.1;0.1	
+expanding_std	constant			2	0					ok	nan;0.0;0.0;0.0;1.666000468656264e-09	
+expanding_std	constant			2	1					ok	nan;0.0;0.0;0.0;1.862645149230957e-09	
+ewm_mean	constant		2	0		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		2	0		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		2	1		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		2	1		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		2	0		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		2	0		true				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		2	1		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		2	1		true				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		3	0		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		3	0		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		3	1		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		3	1		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		3	0		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		3	0		true				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		3	1		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		3	1		true				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		5	0		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		5	0		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		5	1		false				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		5	1		false				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		5	0		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		5	0		true				ok	nan;0.0;0.0;0.0;0.0	
+ewm_mean	constant		5	1		true				ok	0.1;0.1;0.1;0.1;0.1	
+ewm_std	constant		5	1		true				ok	nan;0.0;0.0;0.0;0.0	
+fshift	constant						1	nan		ok	nan;0.1;0.1;0.1;0.1	
+bshift	constant						1	nan		ok	0.1;0.1;0.1;0.1;nan	
+diff	constant						1			ok	nan;0.0;0.0;0.0;0.0	
+pct_change	constant						1			ok	nan;0.0;0.0;0.0;0.0	
+fshift	constant						2	nan		ok	nan;nan;0.1;0.1;0.1	
+bshift	constant						2	nan		ok	0.1;0.1;0.1;nan;nan	
+diff	constant						2			ok	nan;nan;0.0;0.0;0.0	
+pct_change	constant						2			ok	nan;nan;0.0;0.0;0.0	
+fshift	constant						5	nan		ok	nan;nan;nan;nan;nan	
+bshift	constant						5	nan		ok	nan;nan;nan;nan;nan	
+diff	constant						5			ok	nan;nan;nan;nan;nan	
+pct_change	constant						5			ok	nan;nan;nan;nan;nan	
+ffill	constant									ok	0.1;0.1;0.1;0.1;0.1	
+bfill	constant									ok	0.1;0.1;0.1;0.1;0.1	
+fillna	constant							-1.0		ok	0.1;0.1;0.1;0.1;0.1	
+rolling_mean	constant_negative		1							ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		1							ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		1							ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		1		0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		1		1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		1	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		1	1	1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		1	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		1	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		1	1	1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		2							ok	nan;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		2							ok	nan;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		2							ok	nan;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		2		0					ok	nan;0.0;0.0;0.0	
+rolling_std	constant_negative		2		1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		2	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		2	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		2	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		2	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		2	1	1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		2	2						ok	nan;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		2	2						ok	nan;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		2	2						ok	nan;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		2	2	0					ok	nan;0.0;0.0;0.0	
+rolling_std	constant_negative		2	2	1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		3							ok	nan;nan;-2.5;-2.5	
+rolling_min	constant_negative		3							ok	nan;nan;-2.5;-2.5	
+rolling_max	constant_negative		3							ok	nan;nan;-2.5;-2.5	
+rolling_std	constant_negative		3		0					ok	nan;nan;0.0;0.0	
+rolling_std	constant_negative		3		1					ok	nan;nan;0.0;0.0	
+rolling_mean	constant_negative		3	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		3	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		3	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		3	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		3	1	1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		3	3						ok	nan;nan;-2.5;-2.5	
+rolling_min	constant_negative		3	3						ok	nan;nan;-2.5;-2.5	
+rolling_max	constant_negative		3	3						ok	nan;nan;-2.5;-2.5	
+rolling_std	constant_negative		3	3	0					ok	nan;nan;0.0;0.0	
+rolling_std	constant_negative		3	3	1					ok	nan;nan;0.0;0.0	
+rolling_mean	constant_negative		5							ok	nan;nan;nan;nan	
+rolling_min	constant_negative		5							ok	nan;nan;nan;nan	
+rolling_max	constant_negative		5							ok	nan;nan;nan;nan	
+rolling_std	constant_negative		5		0					ok	nan;nan;nan;nan	
+rolling_std	constant_negative		5		1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		5	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		5	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		5	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		5	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		5	1	1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		5	5						ok	nan;nan;nan;nan	
+rolling_min	constant_negative		5	5						ok	nan;nan;nan;nan	
+rolling_max	constant_negative		5	5						ok	nan;nan;nan;nan	
+rolling_std	constant_negative		5	5	0					ok	nan;nan;nan;nan	
+rolling_std	constant_negative		5	5	1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		10							ok	nan;nan;nan;nan	
+rolling_min	constant_negative		10							ok	nan;nan;nan;nan	
+rolling_max	constant_negative		10							ok	nan;nan;nan;nan	
+rolling_std	constant_negative		10		0					ok	nan;nan;nan;nan	
+rolling_std	constant_negative		10		1					ok	nan;nan;nan;nan	
+rolling_mean	constant_negative		10	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_min	constant_negative		10	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_max	constant_negative		10	1						ok	-2.5;-2.5;-2.5;-2.5	
+rolling_std	constant_negative		10	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	constant_negative		10	1	1					ok	nan;0.0;0.0;0.0	
+rolling_mean	constant_negative		10	10						ok	nan;nan;nan;nan	
+rolling_min	constant_negative		10	10						ok	nan;nan;nan;nan	
+rolling_max	constant_negative		10	10						ok	nan;nan;nan;nan	
+rolling_std	constant_negative		10	10	0					ok	nan;nan;nan;nan	
+rolling_std	constant_negative		10	10	1					ok	nan;nan;nan;nan	
+expanding_min	constant_negative			1						ok	-2.5;-2.5;-2.5;-2.5	
+expanding_max	constant_negative			1						ok	-2.5;-2.5;-2.5;-2.5	
+expanding_mean	constant_negative			1						ok	-2.5;-2.5;-2.5;-2.5	
+expanding_std	constant_negative			1	0					ok	0.0;0.0;0.0;0.0	
+expanding_std	constant_negative			1	1					ok	nan;0.0;0.0;0.0	
+expanding_min	constant_negative			2						ok	nan;-2.5;-2.5;-2.5	
+expanding_max	constant_negative			2						ok	nan;-2.5;-2.5;-2.5	
+expanding_mean	constant_negative			2						ok	nan;-2.5;-2.5;-2.5	
+expanding_std	constant_negative			2	0					ok	nan;0.0;0.0;0.0	
+expanding_std	constant_negative			2	1					ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		2	0		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		2	0		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		2	1		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		2	1		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		2	0		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		2	0		true				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		2	1		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		2	1		true				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		3	0		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		3	0		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		3	1		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		3	1		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		3	0		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		3	0		true				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		3	1		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		3	1		true				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		5	0		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		5	0		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		5	1		false				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		5	1		false				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		5	0		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		5	0		true				ok	nan;0.0;0.0;0.0	
+ewm_mean	constant_negative		5	1		true				ok	-2.5;-2.5;-2.5;-2.5	
+ewm_std	constant_negative		5	1		true				ok	nan;0.0;0.0;0.0	
+fshift	constant_negative						1	nan		ok	nan;-2.5;-2.5;-2.5	
+bshift	constant_negative						1	nan		ok	-2.5;-2.5;-2.5;nan	
+diff	constant_negative						1			ok	nan;0.0;0.0;0.0	
+pct_change	constant_negative						1			ok	nan;0.0;0.0;0.0	
+fshift	constant_negative						2	nan		ok	nan;nan;-2.5;-2.5	
+bshift	constant_negative						2	nan		ok	-2.5;-2.5;nan;nan	
+diff	constant_negative						2			ok	nan;nan;0.0;0.0	
+pct_change	constant_negative						2			ok	nan;nan;0.0;0.0	
+fshift	constant_negative						5	nan		ok	nan;nan;nan;nan	
+bshift	constant_negative						5	nan		ok	nan;nan;nan;nan	
+diff	constant_negative						5			ok	nan;nan;nan;nan	
+pct_change	constant_negative						5			ok	nan;nan;nan;nan	
+ffill	constant_negative									ok	-2.5;-2.5;-2.5;-2.5	
+bfill	constant_negative									ok	-2.5;-2.5;-2.5;-2.5	
+fillna	constant_negative							-1.0		ok	-2.5;-2.5;-2.5;-2.5	
+rolling_mean	single		1							ok	7.0	
+rolling_min	single		1							ok	7.0	
+rolling_max	single		1							ok	7.0	
+rolling_std	single		1		0					ok	0.0	
+rolling_std	single		1		1					ok	nan	
+rolling_mean	single		1	1						ok	7.0	
+rolling_min	single		1	1						ok	7.0	
+rolling_max	single		1	1						ok	7.0	
+rolling_std	single		1	1	0					ok	0.0	
+rolling_std	single		1	1	1					ok	nan	
+rolling_mean	single		1	1						ok	7.0	
+rolling_min	single		1	1						ok	7.0	
+rolling_max	single		1	1						ok	7.0	
+rolling_std	single		1	1	0					ok	0.0	
+rolling_std	single		1	1	1					ok	nan	
+rolling_mean	single		2							ok	nan	
+rolling_min	single		2							ok	nan	
+rolling_max	single		2							ok	nan	
+rolling_std	single		2		0					ok	nan	
+rolling_std	single		2		1					ok	nan	
+rolling_mean	single		2	1						ok	7.0	
+rolling_min	single		2	1						ok	7.0	
+rolling_max	single		2	1						ok	7.0	
+rolling_std	single		2	1	0					ok	0.0	
+rolling_std	single		2	1	1					ok	nan	
+rolling_mean	single		2	2						ok	nan	
+rolling_min	single		2	2						ok	nan	
+rolling_max	single		2	2						ok	nan	
+rolling_std	single		2	2	0					ok	nan	
+rolling_std	single		2	2	1					ok	nan	
+rolling_mean	single		3							ok	nan	
+rolling_min	single		3							ok	nan	
+rolling_max	single		3							ok	nan	
+rolling_std	single		3		0					ok	nan	
+rolling_std	single		3		1					ok	nan	
+rolling_mean	single		3	1						ok	7.0	
+rolling_min	single		3	1						ok	7.0	
+rolling_max	single		3	1						ok	7.0	
+rolling_std	single		3	1	0					ok	0.0	
+rolling_std	single		3	1	1					ok	nan	
+rolling_mean	single		3	3						ok	nan	
+rolling_min	single		3	3						ok	nan	
+rolling_max	single		3	3						ok	nan	
+rolling_std	single		3	3	0					ok	nan	
+rolling_std	single		3	3	1					ok	nan	
+rolling_mean	single		5							ok	nan	
+rolling_min	single		5							ok	nan	
+rolling_max	single		5							ok	nan	
+rolling_std	single		5		0					ok	nan	
+rolling_std	single		5		1					ok	nan	
+rolling_mean	single		5	1						ok	7.0	
+rolling_min	single		5	1						ok	7.0	
+rolling_max	single		5	1						ok	7.0	
+rolling_std	single		5	1	0					ok	0.0	
+rolling_std	single		5	1	1					ok	nan	
+rolling_mean	single		5	5						ok	nan	
+rolling_min	single		5	5						ok	nan	
+rolling_max	single		5	5						ok	nan	
+rolling_std	single		5	5	0					ok	nan	
+rolling_std	single		5	5	1					ok	nan	
+rolling_mean	single		10							ok	nan	
+rolling_min	single		10							ok	nan	
+rolling_max	single		10							ok	nan	
+rolling_std	single		10		0					ok	nan	
+rolling_std	single		10		1					ok	nan	
+rolling_mean	single		10	1						ok	7.0	
+rolling_min	single		10	1						ok	7.0	
+rolling_max	single		10	1						ok	7.0	
+rolling_std	single		10	1	0					ok	0.0	
+rolling_std	single		10	1	1					ok	nan	
+rolling_mean	single		10	10						ok	nan	
+rolling_min	single		10	10						ok	nan	
+rolling_max	single		10	10						ok	nan	
+rolling_std	single		10	10	0					ok	nan	
+rolling_std	single		10	10	1					ok	nan	
+expanding_min	single			1						ok	7.0	
+expanding_max	single			1						ok	7.0	
+expanding_mean	single			1						ok	7.0	
+expanding_std	single			1	0					ok	0.0	
+expanding_std	single			1	1					ok	nan	
+expanding_min	single			2						ok	nan	
+expanding_max	single			2						ok	nan	
+expanding_mean	single			2						error		min_periods above the series length
+expanding_std	single			2	0					error		min_periods above the series length
+expanding_std	single			2	1					error		min_periods above the series length
+ewm_mean	single		2	0		false				ok	7.0	
+ewm_std	single		2	0		false				ok	nan	
+ewm_mean	single		2	1		false				ok	7.0	
+ewm_std	single		2	1		false				ok	nan	
+ewm_mean	single		2	0		true				ok	7.0	
+ewm_std	single		2	0		true				ok	nan	
+ewm_mean	single		2	1		true				ok	7.0	
+ewm_std	single		2	1		true				ok	nan	
+ewm_mean	single		3	0		false				ok	7.0	
+ewm_std	single		3	0		false				ok	nan	
+ewm_mean	single		3	1		false				ok	7.0	
+ewm_std	single		3	1		false				ok	nan	
+ewm_mean	single		3	0		true				ok	7.0	
+ewm_std	single		3	0		true				ok	nan	
+ewm_mean	single		3	1		true				ok	7.0	
+ewm_std	single		3	1		true				ok	nan	
+ewm_mean	single		5	0		false				ok	7.0	
+ewm_std	single		5	0		false				ok	nan	
+ewm_mean	single		5	1		false				ok	7.0	
+ewm_std	single		5	1		false				ok	nan	
+ewm_mean	single		5	0		true				ok	7.0	
+ewm_std	single		5	0		true				ok	nan	
+ewm_mean	single		5	1		true				ok	7.0	
+ewm_std	single		5	1		true				ok	nan	
+fshift	single						1	nan		ok	nan	
+bshift	single						1	nan		ok	nan	
+diff	single						1			ok	nan	
+pct_change	single						1			ok	nan	
+fshift	single						2	nan		ok	nan	
+bshift	single						2	nan		ok	nan	
+diff	single						2			ok	nan	
+pct_change	single						2			ok	nan	
+fshift	single						5	nan		ok	nan	
+bshift	single						5	nan		ok	nan	
+diff	single						5			ok	nan	
+pct_change	single						5			ok	nan	
+ffill	single									ok	7.0	
+bfill	single									ok	7.0	
+fillna	single							-1.0		ok	7.0	
+rolling_mean	two		1							ok	1.0;2.0	
+rolling_min	two		1							ok	1.0;2.0	
+rolling_max	two		1							ok	1.0;2.0	
+rolling_std	two		1		0					ok	0.0;0.0	
+rolling_std	two		1		1					ok	nan;nan	
+rolling_mean	two		1	1						ok	1.0;2.0	
+rolling_min	two		1	1						ok	1.0;2.0	
+rolling_max	two		1	1						ok	1.0;2.0	
+rolling_std	two		1	1	0					ok	0.0;0.0	
+rolling_std	two		1	1	1					ok	nan;nan	
+rolling_mean	two		1	1						ok	1.0;2.0	
+rolling_min	two		1	1						ok	1.0;2.0	
+rolling_max	two		1	1						ok	1.0;2.0	
+rolling_std	two		1	1	0					ok	0.0;0.0	
+rolling_std	two		1	1	1					ok	nan;nan	
+rolling_mean	two		2							ok	nan;1.5	
+rolling_min	two		2							ok	nan;1.0	
+rolling_max	two		2							ok	nan;2.0	
+rolling_std	two		2		0					ok	nan;0.5	
+rolling_std	two		2		1					ok	nan;0.7071067811865476	
+rolling_mean	two		2	1						ok	1.0;1.5	
+rolling_min	two		2	1						ok	1.0;1.0	
+rolling_max	two		2	1						ok	1.0;2.0	
+rolling_std	two		2	1	0					ok	0.0;0.5	
+rolling_std	two		2	1	1					ok	nan;0.7071067811865476	
+rolling_mean	two		2	2						ok	nan;1.5	
+rolling_min	two		2	2						ok	nan;1.0	
+rolling_max	two		2	2						ok	nan;2.0	
+rolling_std	two		2	2	0					ok	nan;0.5	
+rolling_std	two		2	2	1					ok	nan;0.7071067811865476	
+rolling_mean	two		3							ok	nan;nan	
+rolling_min	two		3							ok	nan;nan	
+rolling_max	two		3							ok	nan;nan	
+rolling_std	two		3		0					ok	nan;nan	
+rolling_std	two		3		1					ok	nan;nan	
+rolling_mean	two		3	1						ok	1.0;1.5	
+rolling_min	two		3	1						ok	1.0;1.0	
+rolling_max	two		3	1						ok	1.0;2.0	
+rolling_std	two		3	1	0					ok	0.0;0.5	
+rolling_std	two		3	1	1					ok	nan;0.7071067811865476	
+rolling_mean	two		3	3						ok	nan;nan	
+rolling_min	two		3	3						ok	nan;nan	
+rolling_max	two		3	3						ok	nan;nan	
+rolling_std	two		3	3	0					ok	nan;nan	
+rolling_std	two		3	3	1					ok	nan;nan	
+rolling_mean	two		5							ok	nan;nan	
+rolling_min	two		5							ok	nan;nan	
+rolling_max	two		5							ok	nan;nan	
+rolling_std	two		5		0					ok	nan;nan	
+rolling_std	two		5		1					ok	nan;nan	
+rolling_mean	two		5	1						ok	1.0;1.5	
+rolling_min	two		5	1						ok	1.0;1.0	
+rolling_max	two		5	1						ok	1.0;2.0	
+rolling_std	two		5	1	0					ok	0.0;0.5	
+rolling_std	two		5	1	1					ok	nan;0.7071067811865476	
+rolling_mean	two		5	5						ok	nan;nan	
+rolling_min	two		5	5						ok	nan;nan	
+rolling_max	two		5	5						ok	nan;nan	
+rolling_std	two		5	5	0					ok	nan;nan	
+rolling_std	two		5	5	1					ok	nan;nan	
+rolling_mean	two		10							ok	nan;nan	
+rolling_min	two		10							ok	nan;nan	
+rolling_max	two		10							ok	nan;nan	
+rolling_std	two		10		0					ok	nan;nan	
+rolling_std	two		10		1					ok	nan;nan	
+rolling_mean	two		10	1						ok	1.0;1.5	
+rolling_min	two		10	1						ok	1.0;1.0	
+rolling_max	two		10	1						ok	1.0;2.0	
+rolling_std	two		10	1	0					ok	0.0;0.5	
+rolling_std	two		10	1	1					ok	nan;0.7071067811865476	
+rolling_mean	two		10	10						ok	nan;nan	
+rolling_min	two		10	10						ok	nan;nan	
+rolling_max	two		10	10						ok	nan;nan	
+rolling_std	two		10	10	0					ok	nan;nan	
+rolling_std	two		10	10	1					ok	nan;nan	
+expanding_min	two			1						ok	1.0;1.0	
+expanding_max	two			1						ok	1.0;2.0	
+expanding_mean	two			1						ok	1.0;1.5	
+expanding_std	two			1	0					ok	0.0;0.5	
+expanding_std	two			1	1					ok	nan;0.7071067811865476	
+expanding_min	two			2						ok	nan;1.0	
+expanding_max	two			2						ok	nan;2.0	
+expanding_mean	two			2						ok	nan;1.5	
+expanding_std	two			2	0					ok	nan;0.5	
+expanding_std	two			2	1					ok	nan;0.7071067811865476	
+ewm_mean	two		2	0		false				ok	1.0;1.6666666666666665	
+ewm_std	two		2	0		false				ok	nan;0.7071067811865476	
+ewm_mean	two		2	1		false				ok	1.0;1.6666666666666665	
+ewm_std	two		2	1		false				ok	nan;0.7071067811865476	
+ewm_mean	two		2	0		true				ok	1.0;1.75	
+ewm_std	two		2	0		true				ok	nan;0.7071067811865475	
+ewm_mean	two		2	1		true				ok	1.0;1.75	
+ewm_std	two		2	1		true				ok	nan;0.7071067811865475	
+ewm_mean	two		3	0		false				ok	1.0;1.5	
+ewm_std	two		3	0		false				ok	nan;0.7071067811865476	
+ewm_mean	two		3	1		false				ok	1.0;1.5	
+ewm_std	two		3	1		false				ok	nan;0.7071067811865476	
+ewm_mean	two		3	0		true				ok	1.0;1.6666666666666667	
+ewm_std	two		3	0		true				ok	nan;0.7071067811865476	
+ewm_mean	two		3	1		true				ok	1.0;1.6666666666666667	
+ewm_std	two		3	1		true				ok	nan;0.7071067811865476	
+ewm_mean	two		5	0		false				ok	1.0;1.3333333333333335	
+ewm_std	two		5	0		false				ok	nan;0.7071067811865476	
+ewm_mean	two		5	1		false				ok	1.0;1.3333333333333335	
+ewm_std	two		5	1		false				ok	nan;0.7071067811865476	
+ewm_mean	two		5	0		true				ok	1.0;1.6	
+ewm_std	two		5	0		true				ok	nan;0.7071067811865476	
+ewm_mean	two		5	1		true				ok	1.0;1.6	
+ewm_std	two		5	1		true				ok	nan;0.7071067811865476	
+fshift	two						1	nan		ok	nan;1.0	
+bshift	two						1	nan		ok	2.0;nan	
+diff	two						1			ok	nan;1.0	
+pct_change	two						1			ok	nan;1.0	
+fshift	two						2	nan		ok	nan;nan	
+bshift	two						2	nan		ok	nan;nan	
+diff	two						2			ok	nan;nan	
+pct_change	two						2			ok	nan;nan	
+fshift	two						5	nan		ok	nan;nan	
+bshift	two						5	nan		ok	nan;nan	
+diff	two						5			ok	nan;nan	
+pct_change	two						5			ok	nan;nan	
+ffill	two									ok	1.0;2.0	
+bfill	two									ok	1.0;2.0	
+fillna	two							-1.0		ok	1.0;2.0	
+rolling_mean	wide_scale		1							ok	100000000.0;1.4901161193847656e-08;99999999.99999999;0.0;100000000.0;0.0	
+rolling_min	wide_scale		1							ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_max	wide_scale		1							ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_std	wide_scale		1		0					ok	0.0;1.4901161193847656e-08;1.4142135623730951;0.0;0.0;0.0	
+rolling_std	wide_scale		1		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	wide_scale		1	1						ok	100000000.0;1.4901161193847656e-08;99999999.99999999;0.0;100000000.0;0.0	
+rolling_min	wide_scale		1	1						ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_max	wide_scale		1	1						ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_std	wide_scale		1	1	0					ok	0.0;1.4901161193847656e-08;1.4142135623730951;0.0;0.0;0.0	
+rolling_std	wide_scale		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	wide_scale		1	1						ok	100000000.0;1.4901161193847656e-08;99999999.99999999;0.0;100000000.0;0.0	
+rolling_min	wide_scale		1	1						ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_max	wide_scale		1	1						ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_std	wide_scale		1	1	0					ok	0.0;1.4901161193847656e-08;1.4142135623730951;0.0;0.0;0.0	
+rolling_std	wide_scale		1	1	1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	wide_scale		2							ok	nan;50000000.00000001;50000000.0;49999999.99999999;50000000.0;50000000.0	
+rolling_min	wide_scale		2							ok	nan;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		2							ok	nan;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		2		0					ok	nan;49999999.99999999;50000000.0;50000000.00000001;50000000.0;50000000.0	
+rolling_std	wide_scale		2		1					ok	nan;70710678.11865474;70710678.11865476;70710678.11865476;70710678.11865476;70710678.11865476	
+rolling_mean	wide_scale		2	1						ok	100000000.0;50000000.00000001;50000000.0;49999999.99999999;50000000.0;50000000.0	
+rolling_min	wide_scale		2	1						ok	100000000.0;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		2	1						ok	100000000.0;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		2	1	0					ok	0.0;49999999.99999999;50000000.0;50000000.00000001;50000000.0;50000000.0	
+rolling_std	wide_scale		2	1	1					ok	nan;70710678.11865474;70710678.11865476;70710678.11865476;70710678.11865476;70710678.11865476	
+rolling_mean	wide_scale		2	2						ok	nan;50000000.00000001;50000000.0;49999999.99999999;50000000.0;50000000.0	
+rolling_min	wide_scale		2	2						ok	nan;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		2	2						ok	nan;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		2	2	0					ok	nan;49999999.99999999;50000000.0;50000000.00000001;50000000.0;50000000.0	
+rolling_std	wide_scale		2	2	1					ok	nan;70710678.11865474;70710678.11865476;70710678.11865476;70710678.11865476;70710678.11865476	
+rolling_mean	wide_scale		3							ok	nan;nan;66666666.666666664;33333333.333333332;66666666.666666664;33333333.333333332	
+rolling_min	wide_scale		3							ok	nan;nan;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		3							ok	nan;nan;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		3		0					ok	nan;nan;47140452.07910317;47140452.07910317;47140452.07910317;47140452.07910317	
+rolling_std	wide_scale		3		1					ok	nan;nan;57735026.91896258;57735026.918962575;57735026.91896258;57735026.918962575	
+rolling_mean	wide_scale		3	1						ok	100000000.0;50000000.00000001;66666666.666666664;33333333.333333332;66666666.666666664;33333333.333333332	
+rolling_min	wide_scale		3	1						ok	100000000.0;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		3	1						ok	100000000.0;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		3	1	0					ok	0.0;49999999.99999999;47140452.07910317;47140452.07910317;47140452.07910317;47140452.07910317	
+rolling_std	wide_scale		3	1	1					ok	nan;70710678.11865474;57735026.91896258;57735026.918962575;57735026.91896258;57735026.918962575	
+rolling_mean	wide_scale		3	3						ok	nan;nan;66666666.666666664;33333333.333333332;66666666.666666664;33333333.333333332	
+rolling_min	wide_scale		3	3						ok	nan;nan;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		3	3						ok	nan;nan;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		3	3	0					ok	nan;nan;47140452.07910317;47140452.07910317;47140452.07910317;47140452.07910317	
+rolling_std	wide_scale		3	3	1					ok	nan;nan;57735026.91896258;57735026.918962575;57735026.91896258;57735026.918962575	
+rolling_mean	wide_scale		5							ok	nan;nan;nan;nan;60000000.0;40000000.0	
+rolling_min	wide_scale		5							ok	nan;nan;nan;nan;1e-08;1e-08	
+rolling_max	wide_scale		5							ok	nan;nan;nan;nan;100000000.0;100000000.0	
+rolling_std	wide_scale		5		0					ok	nan;nan;nan;nan;48989794.85566356;48989794.85566356	
+rolling_std	wide_scale		5		1					ok	nan;nan;nan;nan;54772255.75051661;54772255.75051661	
+rolling_mean	wide_scale		5	1						ok	100000000.0;50000000.00000001;66666666.666666664;50000000.0;60000000.0;40000000.0	
+rolling_min	wide_scale		5	1						ok	100000000.0;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		5	1						ok	100000000.0;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		5	1	0					ok	0.0;49999999.99999999;47140452.07910317;50000000.0;48989794.85566356;48989794.85566356	
+rolling_std	wide_scale		5	1	1					ok	nan;70710678.11865474;57735026.91896258;57735026.918962575;54772255.75051661;54772255.75051661	
+rolling_mean	wide_scale		5	5						ok	nan;nan;nan;nan;60000000.0;40000000.0	
+rolling_min	wide_scale		5	5						ok	nan;nan;nan;nan;1e-08;1e-08	
+rolling_max	wide_scale		5	5						ok	nan;nan;nan;nan;100000000.0;100000000.0	
+rolling_std	wide_scale		5	5	0					ok	nan;nan;nan;nan;48989794.85566356;48989794.85566356	
+rolling_std	wide_scale		5	5	1					ok	nan;nan;nan;nan;54772255.75051661;54772255.75051661	
+rolling_mean	wide_scale		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_min	wide_scale		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_max	wide_scale		10							ok	nan;nan;nan;nan;nan;nan	
+rolling_std	wide_scale		10		0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	wide_scale		10		1					ok	nan;nan;nan;nan;nan;nan	
+rolling_mean	wide_scale		10	1						ok	100000000.0;50000000.00000001;66666666.666666664;50000000.0;60000000.0;50000000.0	
+rolling_min	wide_scale		10	1						ok	100000000.0;1e-08;1e-08;1e-08;1e-08;1e-08	
+rolling_max	wide_scale		10	1						ok	100000000.0;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+rolling_std	wide_scale		10	1	0					ok	0.0;49999999.99999999;47140452.07910317;50000000.0;48989794.85566356;50000000.0	
+rolling_std	wide_scale		10	1	1					ok	nan;70710678.11865474;57735026.91896258;57735026.918962575;54772255.75051661;54772255.75051661	
+rolling_mean	wide_scale		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_min	wide_scale		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_max	wide_scale		10	10						ok	nan;nan;nan;nan;nan;nan	
+rolling_std	wide_scale		10	10	0					ok	nan;nan;nan;nan;nan;nan	
+rolling_std	wide_scale		10	10	1					ok	nan;nan;nan;nan;nan;nan	
+expanding_min	wide_scale			1						ok	100000000.0;1e-08;1e-08;1e-08;1e-08;1e-08	
+expanding_max	wide_scale			1						ok	100000000.0;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+expanding_mean	wide_scale			1						ok	100000000.0;50000000.00000001;66666666.666666664;50000000.0;60000000.0;50000000.0	
+expanding_std	wide_scale			1	0					ok	0.0;49999999.99999999;47140452.07910317;50000000.0;48989794.85566356;50000000.0	
+expanding_std	wide_scale			1	1					ok	nan;70710678.11865474;57735026.91896258;57735026.918962575;54772255.75051661;54772255.75051661	
+expanding_min	wide_scale			2						ok	nan;1e-08;1e-08;1e-08;1e-08;1e-08	
+expanding_max	wide_scale			2						ok	nan;100000000.0;100000000.0;100000000.0;100000000.0;100000000.0	
+expanding_mean	wide_scale			2						ok	nan;50000000.00000001;66666666.666666664;50000000.0;60000000.0;50000000.0	
+expanding_std	wide_scale			2	0					ok	nan;49999999.99999999;47140452.07910317;50000000.0;48989794.85566356;50000000.0	
+expanding_std	wide_scale			2	1					ok	nan;70710678.11865474;57735026.91896258;57735026.918962575;54772255.75051661;54772255.75051661	
+ewm_mean	wide_scale		2	0		false				ok	100000000.0;33333333.333333343;77777777.77777778;25925925.925925937;75308641.97530864;25102880.658436224	
+ewm_std	wide_scale		2	0		false				ok	nan;70710678.11865476;59160797.83099615;62017367.29460421;60987803.65878042;61321534.37832745	
+ewm_mean	wide_scale		2	1		false				ok	100000000.0;33333333.333333343;77777777.77777778;25925925.925925937;75308641.97530864;25102880.658436224	
+ewm_std	wide_scale		2	1		false				ok	nan;70710678.11865476;59160797.83099615;62017367.29460421;60987803.65878042;61321534.37832745	
+ewm_mean	wide_scale		2	0		true				ok	100000000.0;25000000.000000007;76923076.92307691;25000000.000000007;75206611.57024793;25000000.000000004	
+ewm_std	wide_scale		2	0		true				ok	nan;70710678.11865474;62017367.29460422;62017367.29460421;61321534.37832747;61321534.37832745	
+ewm_mean	wide_scale		2	1		true				ok	100000000.0;25000000.000000007;76923076.92307691;25000000.000000007;75206611.57024793;25000000.000000004	
+ewm_std	wide_scale		2	1		true				ok	nan;70710678.11865474;62017367.29460422;62017367.29460421;61321534.37832747;61321534.37832745	
+ewm_mean	wide_scale		3	0		false				ok	100000000.0;50000000.00000001;75000000.0;37500000.00000001;68750000.0;34375000.00000001	
+ewm_std	wide_scale		3	0		false				ok	nan;70710678.11865476;54772255.75051661;59761430.46671967;56879645.8994521;58198769.52473778	
+ewm_mean	wide_scale		3	1		false				ok	100000000.0;50000000.00000001;75000000.0;37500000.00000001;68750000.0;34375000.00000001	
+ewm_std	wide_scale		3	1		false				ok	nan;70710678.11865476;54772255.75051661;59761430.46671967;56879645.8994521;58198769.52473778	
+ewm_mean	wide_scale		3	0		true				ok	100000000.0;33333333.33333334;71428571.42857143;33333333.333333336;67741935.48387097;33333333.333333336	
+ewm_std	wide_scale		3	0		true				ok	nan;70710678.11865474;59761430.46671967;59761430.46671968;58198769.52473779;58198769.52473778	
+ewm_mean	wide_scale		3	1		true				ok	100000000.0;33333333.33333334;71428571.42857143;33333333.333333336;67741935.48387097;33333333.333333336	
+ewm_std	wide_scale		3	1		true				ok	nan;70710678.11865474;59761430.46671967;59761430.46671968;58198769.52473779;58198769.52473778	
+ewm_mean	wide_scale		5	0		false				ok	100000000.0;66666666.66666667;77777777.77777779;51851851.851851866;67901234.56790125;45267489.71193417	
+ewm_std	wide_scale		5	0		false				ok	nan;70710678.11865476;51887452.16627708;58489765.186560184;53245202.09738858;56139636.334523164	
+ewm_mean	wide_scale		5	1		false				ok	100000000.0;66666666.66666667;77777777.77777779;51851851.851851866;67901234.56790125;45267489.71193417	
+ewm_std	wide_scale		5	1		false				ok	nan;70710678.11865476;51887452.16627708;58489765.186560184;53245202.09738858;56139636.334523164	
+ewm_mean	wide_scale		5	0		true				ok	100000000.0;40000000.00000001;68421052.63157895;40000000.000000015;63033175.35545024;40000000.000000015	
+ewm_std	wide_scale		5	0		true				ok	nan;70710678.11865474;58489765.18656017;58489765.18656018;56139636.334523134;56139636.33452314	
+ewm_mean	wide_scale		5	1		true				ok	100000000.0;40000000.00000001;68421052.63157895;40000000.000000015;63033175.35545024;40000000.000000015	
+ewm_std	wide_scale		5	1		true				ok	nan;70710678.11865474;58489765.18656017;58489765.18656018;56139636.334523134;56139636.33452314	
+fshift	wide_scale						1	nan		ok	nan;100000000.0;1e-08;100000000.0;1e-08;100000000.0	
+bshift	wide_scale						1	nan		ok	1e-08;100000000.0;1e-08;100000000.0;1e-08;nan	
+diff	wide_scale						1			ok	nan;-99999999.99999999;99999999.99999999;-99999999.99999999;99999999.99999999;-99999999.99999999	
+pct_change	wide_scale						1			ok	nan;-0.9999999999999999;1e+16;-0.9999999999999999;1e+16;-0.9999999999999999	
+fshift	wide_scale						2	nan		ok	nan;nan;100000000.0;1e-08;100000000.0;1e-08	
+bshift	wide_scale						2	nan		ok	100000000.0;1e-08;100000000.0;1e-08;nan;nan	
+diff	wide_scale						2			ok	nan;nan;0.0;0.0;0.0;0.0	
+pct_change	wide_scale						2			ok	nan;nan;0.0;0.0;0.0;0.0	
+fshift	wide_scale						5	nan		ok	nan;nan;nan;nan;nan;100000000.0	
+bshift	wide_scale						5	nan		ok	1e-08;nan;nan;nan;nan;nan	
+diff	wide_scale						5			ok	nan;nan;nan;nan;nan;-99999999.99999999	
+pct_change	wide_scale						5			ok	nan;nan;nan;nan;nan;-0.9999999999999999	
+ffill	wide_scale									ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+bfill	wide_scale									ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+fillna	wide_scale							-1.0		ok	100000000.0;1e-08;100000000.0;1e-08;100000000.0;1e-08	
+rolling_mean	negatives		1							ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_min	negatives		1							ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_max	negatives		1							ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_std	negatives		1		0					ok	0.0;0.0;0.0;0.0;0.0	
+rolling_std	negatives		1		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_min	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_max	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_std	negatives		1	1	0					ok	0.0;0.0;0.0;0.0;0.0	
+rolling_std	negatives		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_min	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_max	negatives		1	1						ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_std	negatives		1	1	0					ok	0.0;0.0;0.0;0.0;0.0	
+rolling_std	negatives		1	1	1					ok	nan;nan;nan;nan;nan	
+rolling_mean	negatives		2							ok	nan;1.0;2.0;0.5;-3.0	
+rolling_min	negatives		2							ok	nan;-3.0;-1.0;-1.0;-8.0	
+rolling_max	negatives		2							ok	nan;5.0;5.0;2.0;2.0	
+rolling_std	negatives		2		0					ok	nan;4.0;3.0;1.5;5.0	
+rolling_std	negatives		2		1					ok	nan;5.656854249492381;4.242640687119285;2.1213203435596424;7.0710678118654755	
+rolling_mean	negatives		2	1						ok	-3.0;1.0;2.0;0.5;-3.0	
+rolling_min	negatives		2	1						ok	-3.0;-3.0;-1.0;-1.0;-8.0	
+rolling_max	negatives		2	1						ok	-3.0;5.0;5.0;2.0;2.0	
+rolling_std	negatives		2	1	0					ok	0.0;4.0;3.0;1.5;5.0	
+rolling_std	negatives		2	1	1					ok	nan;5.656854249492381;4.242640687119285;2.1213203435596424;7.0710678118654755	
+rolling_mean	negatives		2	2						ok	nan;1.0;2.0;0.5;-3.0	
+rolling_min	negatives		2	2						ok	nan;-3.0;-1.0;-1.0;-8.0	
+rolling_max	negatives		2	2						ok	nan;5.0;5.0;2.0;2.0	
+rolling_std	negatives		2	2	0					ok	nan;4.0;3.0;1.5;5.0	
+rolling_std	negatives		2	2	1					ok	nan;5.656854249492381;4.242640687119285;2.1213203435596424;7.0710678118654755	
+rolling_mean	negatives		3							ok	nan;nan;0.3333333333333333;2.0;-2.3333333333333335	
+rolling_min	negatives		3							ok	nan;nan;-3.0;-1.0;-8.0	
+rolling_max	negatives		3							ok	nan;nan;5.0;5.0;2.0	
+rolling_std	negatives		3		0					ok	nan;nan;3.39934634239519;2.449489742783178;4.189935029992178	
+rolling_std	negatives		3		1					ok	nan;nan;4.163331998932266;3.0;5.131601439446884	
+rolling_mean	negatives		3	1						ok	-3.0;1.0;0.3333333333333333;2.0;-2.3333333333333335	
+rolling_min	negatives		3	1						ok	-3.0;-3.0;-3.0;-1.0;-8.0	
+rolling_max	negatives		3	1						ok	-3.0;5.0;5.0;5.0;2.0	
+rolling_std	negatives		3	1	0					ok	0.0;4.0;3.39934634239519;2.449489742783178;4.189935029992178	
+rolling_std	negatives		3	1	1					ok	nan;5.656854249492381;4.163331998932266;3.0;5.131601439446884	
+rolling_mean	negatives		3	3						ok	nan;nan;0.3333333333333333;2.0;-2.3333333333333335	
+rolling_min	negatives		3	3						ok	nan;nan;-3.0;-1.0;-8.0	
+rolling_max	negatives		3	3						ok	nan;nan;5.0;5.0;2.0	
+rolling_std	negatives		3	3	0					ok	nan;nan;3.39934634239519;2.449489742783178;4.189935029992178	
+rolling_std	negatives		3	3	1					ok	nan;nan;4.163331998932266;3.0;5.131601439446884	
+rolling_mean	negatives		5							ok	nan;nan;nan;nan;-1.0	
+rolling_min	negatives		5							ok	nan;nan;nan;nan;-8.0	
+rolling_max	negatives		5							ok	nan;nan;nan;nan;5.0	
+rolling_std	negatives		5		0					ok	nan;nan;nan;nan;4.427188724235731	
+rolling_std	negatives		5		1					ok	nan;nan;nan;nan;4.949747468305833	
+rolling_mean	negatives		5	1						ok	-3.0;1.0;0.3333333333333333;0.75;-1.0	
+rolling_min	negatives		5	1						ok	-3.0;-3.0;-3.0;-3.0;-8.0	
+rolling_max	negatives		5	1						ok	-3.0;5.0;5.0;5.0;5.0	
+rolling_std	negatives		5	1	0					ok	0.0;4.0;3.39934634239519;3.031088913245535;4.427188724235731	
+rolling_std	negatives		5	1	1					ok	nan;5.656854249492381;4.163331998932266;3.5;4.949747468305833	
+rolling_mean	negatives		5	5						ok	nan;nan;nan;nan;-1.0	
+rolling_min	negatives		5	5						ok	nan;nan;nan;nan;-8.0	
+rolling_max	negatives		5	5						ok	nan;nan;nan;nan;5.0	
+rolling_std	negatives		5	5	0					ok	nan;nan;nan;nan;4.427188724235731	
+rolling_std	negatives		5	5	1					ok	nan;nan;nan;nan;4.949747468305833	
+rolling_mean	negatives		10							ok	nan;nan;nan;nan;nan	
+rolling_min	negatives		10							ok	nan;nan;nan;nan;nan	
+rolling_max	negatives		10							ok	nan;nan;nan;nan;nan	
+rolling_std	negatives		10		0					ok	nan;nan;nan;nan;nan	
+rolling_std	negatives		10		1					ok	nan;nan;nan;nan;nan	
+rolling_mean	negatives		10	1						ok	-3.0;1.0;0.3333333333333333;0.75;-1.0	
+rolling_min	negatives		10	1						ok	-3.0;-3.0;-3.0;-3.0;-8.0	
+rolling_max	negatives		10	1						ok	-3.0;5.0;5.0;5.0;5.0	
+rolling_std	negatives		10	1	0					ok	0.0;4.0;3.39934634239519;3.031088913245535;4.427188724235731	
+rolling_std	negatives		10	1	1					ok	nan;5.656854249492381;4.163331998932266;3.5;4.949747468305833	
+rolling_mean	negatives		10	10						ok	nan;nan;nan;nan;nan	
+rolling_min	negatives		10	10						ok	nan;nan;nan;nan;nan	
+rolling_max	negatives		10	10						ok	nan;nan;nan;nan;nan	
+rolling_std	negatives		10	10	0					ok	nan;nan;nan;nan;nan	
+rolling_std	negatives		10	10	1					ok	nan;nan;nan;nan;nan	
+expanding_min	negatives			1						ok	-3.0;-3.0;-3.0;-3.0;-8.0	
+expanding_max	negatives			1						ok	-3.0;5.0;5.0;5.0;5.0	
+expanding_mean	negatives			1						ok	-3.0;1.0;0.3333333333333333;0.75;-1.0	
+expanding_std	negatives			1	0					ok	0.0;4.0;3.39934634239519;3.031088913245535;4.427188724235731	
+expanding_std	negatives			1	1					ok	nan;5.656854249492381;4.163331998932266;3.5;4.949747468305833	
+expanding_min	negatives			2						ok	nan;-3.0;-3.0;-3.0;-8.0	
+expanding_max	negatives			2						ok	nan;5.0;5.0;5.0;5.0	
+expanding_mean	negatives			2						ok	nan;1.0;0.3333333333333333;0.75;-1.0	
+expanding_std	negatives			2	0					ok	nan;4.0;3.39934634239519;3.031088913245535;4.427188724235731	
+expanding_std	negatives			2	1					ok	nan;5.656854249492381;4.163331998932266;3.5;4.949747468305833	
+ewm_mean	negatives		2	0		false				ok	-3.0;2.333333333333333;0.11111111111111116;1.3703703703703702;-4.876543209876543	
+ewm_std	negatives		2	0		false				ok	nan;5.656854249492381;3.82099463490856;2.530039308212207;6.415682006595722	
+ewm_mean	negatives		2	1		false				ok	-3.0;2.333333333333333;0.11111111111111116;1.3703703703703702;-4.876543209876543	
+ewm_std	negatives		2	1		false				ok	nan;5.656854249492381;3.82099463490856;2.530039308212207;6.415682006595722	
+ewm_mean	negatives		2	0		true				ok	-3.0;2.9999999999999996;0.23076923076923084;1.4249999999999998;-4.884297520661157	
+ewm_std	negatives		2	0		true				ok	nan;5.65685424949238;3.922322702763681;2.4783679493383732;6.452880707210356	
+ewm_mean	negatives		2	1		true				ok	-3.0;2.9999999999999996;0.23076923076923084;1.4249999999999998;-4.884297520661157	
+ewm_std	negatives		2	1		true				ok	nan;5.65685424949238;3.922322702763681;2.4783679493383732;6.452880707210356	
+ewm_mean	negatives		3	0		false				ok	-3.0;1.0;0.0;1.0;-3.5	
+ewm_std	negatives		3	0		false				ok	nan;5.656854249492381;3.794733192202055;2.8949874578229835;5.885175793266252	
+ewm_mean	negatives		3	1		false				ok	-3.0;1.0;0.0;1.0;-3.5	
+ewm_std	negatives		3	1		false				ok	nan;5.656854249492381;3.794733192202055;2.8949874578229835;5.885175793266252	
+ewm_mean	negatives		3	0		true				ok	-3.0;2.3333333333333335;0.42857142857142855;1.2666666666666666;-3.5161290322580645	
+ewm_std	negatives		3	0		true				ok	nan;5.656854249492381;3.927922024247863;2.7568097504180447;6.065236745106785	
+ewm_mean	negatives		3	1		true				ok	-3.0;2.3333333333333335;0.42857142857142855;1.2666666666666666;-3.5161290322580645	
+ewm_std	negatives		3	1		true				ok	nan;5.656854249492381;3.927922024247863;2.7568097504180447;6.065236745106785	
+ewm_mean	negatives		5	0		false				ok	-3.0;-0.3333333333333335;-0.5555555555555557;0.2962962962962961;-2.4691358024691357	
+ewm_std	negatives		5	0		false				ok	nan;5.656854249492381;3.8630398552276066;3.2772856915074406;5.166459880063688	
+ewm_mean	negatives		5	1		false				ok	-3.0;-0.3333333333333335;-0.5555555555555557;0.2962962962962961;-2.4691358024691357	
+ewm_std	negatives		5	1		false				ok	nan;5.656854249492381;3.8630398552276066;3.2772856915074406;5.166459880063688	
+ewm_mean	negatives		5	0		true				ok	-3.0;1.7999999999999998;0.4736842105263159;1.1076923076923075;-2.388625592417061	
+ewm_std	negatives		5	0		true				ok	nan;5.656854249492381;3.986820392506447;3.0285416915287686;5.647856810116174	
+ewm_mean	negatives		5	1		true				ok	-3.0;1.7999999999999998;0.4736842105263159;1.1076923076923075;-2.388625592417061	
+ewm_std	negatives		5	1		true				ok	nan;5.656854249492381;3.986820392506447;3.0285416915287686;5.647856810116174	
+fshift	negatives						1	nan		ok	nan;-3.0;5.0;-1.0;2.0	
+bshift	negatives						1	nan		ok	5.0;-1.0;2.0;-8.0;nan	
+diff	negatives						1			ok	nan;8.0;-6.0;3.0;-10.0	
+pct_change	negatives						1			ok	nan;-2.666666666666667;-1.2;-3.0;-5.0	
+fshift	negatives						2	nan		ok	nan;nan;-3.0;5.0;-1.0	
+bshift	negatives						2	nan		ok	-1.0;2.0;-8.0;nan;nan	
+diff	negatives						2			ok	nan;nan;2.0;-3.0;-7.0	
+pct_change	negatives						2			ok	nan;nan;-0.6666666666666667;-0.6;7.0	
+fshift	negatives						5	nan		ok	nan;nan;nan;nan;nan	
+bshift	negatives						5	nan		ok	nan;nan;nan;nan;nan	
+diff	negatives						5			ok	nan;nan;nan;nan;nan	
+pct_change	negatives						5			ok	nan;nan;nan;nan;nan	
+ffill	negatives									ok	-3.0;5.0;-1.0;2.0;-8.0	
+bfill	negatives									ok	-3.0;5.0;-1.0;2.0;-8.0	
+fillna	negatives							-1.0		ok	-3.0;5.0;-1.0;2.0;-8.0	
+rolling_mean	zeros		1							ok	0.0;0.0;1.0;0.0	
+rolling_min	zeros		1							ok	0.0;0.0;1.0;0.0	
+rolling_max	zeros		1							ok	0.0;0.0;1.0;0.0	
+rolling_std	zeros		1		0					ok	0.0;0.0;0.0;0.0	
+rolling_std	zeros		1		1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_min	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_max	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_std	zeros		1	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	zeros		1	1	1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_min	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_max	zeros		1	1						ok	0.0;0.0;1.0;0.0	
+rolling_std	zeros		1	1	0					ok	0.0;0.0;0.0;0.0	
+rolling_std	zeros		1	1	1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		2							ok	nan;0.0;0.5;0.5	
+rolling_min	zeros		2							ok	nan;0.0;0.0;0.0	
+rolling_max	zeros		2							ok	nan;0.0;1.0;1.0	
+rolling_std	zeros		2		0					ok	nan;0.0;0.5;0.5	
+rolling_std	zeros		2		1					ok	nan;0.0;0.7071067811865476;0.7071067811865476	
+rolling_mean	zeros		2	1						ok	0.0;0.0;0.5;0.5	
+rolling_min	zeros		2	1						ok	0.0;0.0;0.0;0.0	
+rolling_max	zeros		2	1						ok	0.0;0.0;1.0;1.0	
+rolling_std	zeros		2	1	0					ok	0.0;0.0;0.5;0.5	
+rolling_std	zeros		2	1	1					ok	nan;0.0;0.7071067811865476;0.7071067811865476	
+rolling_mean	zeros		2	2						ok	nan;0.0;0.5;0.5	
+rolling_min	zeros		2	2						ok	nan;0.0;0.0;0.0	
+rolling_max	zeros		2	2						ok	nan;0.0;1.0;1.0	
+rolling_std	zeros		2	2	0					ok	nan;0.0;0.5;0.5	
+rolling_std	zeros		2	2	1					ok	nan;0.0;0.7071067811865476;0.7071067811865476	
+rolling_mean	zeros		3							ok	nan;nan;0.3333333333333333;0.3333333333333333	
+rolling_min	zeros		3							ok	nan;nan;0.0;0.0	
+rolling_max	zeros		3							ok	nan;nan;1.0;1.0	
+rolling_std	zeros		3		0					ok	nan;nan;0.4714045207910317;0.4714045207910317	
+rolling_std	zeros		3		1					ok	nan;nan;0.5773502691896258;0.5773502691896258	
+rolling_mean	zeros		3	1						ok	0.0;0.0;0.3333333333333333;0.3333333333333333	
+rolling_min	zeros		3	1						ok	0.0;0.0;0.0;0.0	
+rolling_max	zeros		3	1						ok	0.0;0.0;1.0;1.0	
+rolling_std	zeros		3	1	0					ok	0.0;0.0;0.4714045207910317;0.4714045207910317	
+rolling_std	zeros		3	1	1					ok	nan;0.0;0.5773502691896258;0.5773502691896258	
+rolling_mean	zeros		3	3						ok	nan;nan;0.3333333333333333;0.3333333333333333	
+rolling_min	zeros		3	3						ok	nan;nan;0.0;0.0	
+rolling_max	zeros		3	3						ok	nan;nan;1.0;1.0	
+rolling_std	zeros		3	3	0					ok	nan;nan;0.4714045207910317;0.4714045207910317	
+rolling_std	zeros		3	3	1					ok	nan;nan;0.5773502691896258;0.5773502691896258	
+rolling_mean	zeros		5							ok	nan;nan;nan;nan	
+rolling_min	zeros		5							ok	nan;nan;nan;nan	
+rolling_max	zeros		5							ok	nan;nan;nan;nan	
+rolling_std	zeros		5		0					ok	nan;nan;nan;nan	
+rolling_std	zeros		5		1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		5	1						ok	0.0;0.0;0.3333333333333333;0.25	
+rolling_min	zeros		5	1						ok	0.0;0.0;0.0;0.0	
+rolling_max	zeros		5	1						ok	0.0;0.0;1.0;1.0	
+rolling_std	zeros		5	1	0					ok	0.0;0.0;0.4714045207910317;0.4330127018922193	
+rolling_std	zeros		5	1	1					ok	nan;0.0;0.5773502691896258;0.5	
+rolling_mean	zeros		5	5						ok	nan;nan;nan;nan	
+rolling_min	zeros		5	5						ok	nan;nan;nan;nan	
+rolling_max	zeros		5	5						ok	nan;nan;nan;nan	
+rolling_std	zeros		5	5	0					ok	nan;nan;nan;nan	
+rolling_std	zeros		5	5	1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		10							ok	nan;nan;nan;nan	
+rolling_min	zeros		10							ok	nan;nan;nan;nan	
+rolling_max	zeros		10							ok	nan;nan;nan;nan	
+rolling_std	zeros		10		0					ok	nan;nan;nan;nan	
+rolling_std	zeros		10		1					ok	nan;nan;nan;nan	
+rolling_mean	zeros		10	1						ok	0.0;0.0;0.3333333333333333;0.25	
+rolling_min	zeros		10	1						ok	0.0;0.0;0.0;0.0	
+rolling_max	zeros		10	1						ok	0.0;0.0;1.0;1.0	
+rolling_std	zeros		10	1	0					ok	0.0;0.0;0.4714045207910317;0.4330127018922193	
+rolling_std	zeros		10	1	1					ok	nan;0.0;0.5773502691896258;0.5	
+rolling_mean	zeros		10	10						ok	nan;nan;nan;nan	
+rolling_min	zeros		10	10						ok	nan;nan;nan;nan	
+rolling_max	zeros		10	10						ok	nan;nan;nan;nan	
+rolling_std	zeros		10	10	0					ok	nan;nan;nan;nan	
+rolling_std	zeros		10	10	1					ok	nan;nan;nan;nan	
+expanding_min	zeros			1						ok	0.0;0.0;0.0;0.0	
+expanding_max	zeros			1						ok	0.0;0.0;1.0;1.0	
+expanding_mean	zeros			1						ok	0.0;0.0;0.3333333333333333;0.25	
+expanding_std	zeros			1	0					ok	0.0;0.0;0.4714045207910317;0.4330127018922193	
+expanding_std	zeros			1	1					ok	nan;0.0;0.5773502691896258;0.5	
+expanding_min	zeros			2						ok	nan;0.0;0.0;0.0	
+expanding_max	zeros			2						ok	nan;0.0;1.0;1.0	
+expanding_mean	zeros			2						ok	nan;0.0;0.3333333333333333;0.25	
+expanding_std	zeros			2	0					ok	nan;0.0;0.4714045207910317;0.4330127018922193	
+expanding_std	zeros			2	1					ok	nan;0.0;0.5773502691896258;0.5	
+ewm_mean	zeros		2	0		false				ok	0.0;0.0;0.6666666666666666;0.22222222222222224	
+ewm_std	zeros		2	0		false				ok	nan;0.0;0.6708203932499369;0.5883484054145521	
+ewm_mean	zeros		2	1		false				ok	0.0;0.0;0.6666666666666666;0.22222222222222224	
+ewm_std	zeros		2	1		false				ok	nan;0.0;0.6708203932499369;0.5883484054145521	
+ewm_mean	zeros		2	0		true				ok	0.0;0.0;0.6923076923076922;0.225	
+ewm_std	zeros		2	0		true				ok	nan;0.0;0.6793662204867574;0.5980738313053896	
+ewm_mean	zeros		2	1		true				ok	0.0;0.0;0.6923076923076922;0.225	
+ewm_std	zeros		2	1		true				ok	nan;0.0;0.6793662204867574;0.5980738313053896	
+ewm_mean	zeros		3	0		false				ok	0.0;0.0;0.5;0.25	
+ewm_std	zeros		3	0		false				ok	nan;0.0;0.6324555320336759;0.5345224838248488	
+ewm_mean	zeros		3	1		false				ok	0.0;0.0;0.5;0.25	
+ewm_std	zeros		3	1		false				ok	nan;0.0;0.6324555320336759;0.5345224838248488	
+ewm_mean	zeros		3	0		true				ok	0.0;0.0;0.5714285714285714;0.26666666666666666	
+ewm_std	zeros		3	0		true				ok	nan;0.0;0.6546536707079772;0.5606119105813882	
+ewm_mean	zeros		3	1		true				ok	0.0;0.0;0.5714285714285714;0.26666666666666666	
+ewm_std	zeros		3	1		true				ok	nan;0.0;0.6546536707079772;0.5606119105813882	
+ewm_mean	zeros		5	0		false				ok	0.0;0.0;0.3333333333333333;0.22222222222222224	
+ewm_std	zeros		5	0		false				ok	nan;0.0;0.5883484054145521;0.4866642633922877	
+ewm_mean	zeros		5	1		false				ok	0.0;0.0;0.3333333333333333;0.22222222222222224	
+ewm_std	zeros		5	1		false				ok	nan;0.0;0.5883484054145521;0.4866642633922877	
+ewm_mean	zeros		5	0		true				ok	0.0;0.0;0.47368421052631565;0.2769230769230769	
+ewm_std	zeros		5	0		true				ok	nan;0.0;0.6282808624375431;0.5342519080121051	
+ewm_mean	zeros		5	1		true				ok	0.0;0.0;0.47368421052631565;0.2769230769230769	
+ewm_std	zeros		5	1		true				ok	nan;0.0;0.6282808624375431;0.5342519080121051	
+fshift	zeros						1	nan		ok	nan;0.0;0.0;1.0	
+bshift	zeros						1	nan		ok	0.0;1.0;0.0;nan	
+diff	zeros						1			ok	nan;0.0;1.0;-1.0	
+pct_change	zeros						1			ok	nan;nan;inf;-1.0	
+fshift	zeros						2	nan		ok	nan;nan;0.0;0.0	
+bshift	zeros						2	nan		ok	1.0;0.0;nan;nan	
+diff	zeros						2			ok	nan;nan;1.0;0.0	
+pct_change	zeros						2			ok	nan;nan;inf;nan	
+fshift	zeros						5	nan		ok	nan;nan;nan;nan	
+bshift	zeros						5	nan		ok	nan;nan;nan;nan	
+diff	zeros						5			ok	nan;nan;nan;nan	
+pct_change	zeros						5			ok	nan;nan;nan;nan	
+ffill	zeros									ok	0.0;0.0;1.0;0.0	
+bfill	zeros									ok	0.0;0.0;1.0;0.0	
+fillna	zeros							-1.0		ok	0.0;0.0;1.0;0.0	
+crossed_above	0.0;2.0;3.0;4.0	1.0;1.0;1.0;1.0							0	ok	false;true;false;false	rises_through
+crossed_above	0.0;2.0;3.0;4.0	1.0;1.0;1.0;1.0							1	ok	false;false;true;false	rises_through
+crossed_above	0.0;2.0;3.0;4.0	1.0;1.0;1.0;1.0							2	ok	false;false;false;true	rises_through
+crossed_above	2.0;3.0;4.0	1.0;1.0;1.0							0	ok	false;false;false	starts_above
+crossed_above	2.0;3.0;4.0	1.0;1.0;1.0							1	ok	false;false;false	starts_above
+crossed_above	2.0;3.0;4.0	1.0;1.0;1.0							2	ok	false;false;false	starts_above
+crossed_above	0.0;1.0;2.0	1.0;1.0;1.0							0	ok	false;false;true	touches_then_rises
+crossed_above	0.0;1.0;2.0	1.0;1.0;1.0							1	ok	false;false;false	touches_then_rises
+crossed_above	0.0;1.0;2.0	1.0;1.0;1.0							2	ok	false;false;false	touches_then_rises
+crossed_above	2.0;1.0;0.0	1.0;1.0;1.0							0	ok	false;false;false	touches_then_falls
+crossed_above	2.0;1.0;0.0	1.0;1.0;1.0							1	ok	false;false;false	touches_then_falls
+crossed_above	2.0;1.0;0.0	1.0;1.0;1.0							2	ok	false;false;false	touches_then_falls
+crossed_above	0.0;nan;2.0	1.0;1.0;1.0							0	ok	false;false;false	gap_between
+crossed_above	0.0;nan;2.0	1.0;1.0;1.0							1	ok	false;false;false	gap_between
+crossed_above	0.0;nan;2.0	1.0;1.0;1.0							2	ok	false;false;false	gap_between
+crossed_above	0.0;2.0;3.0	1.0;nan;1.0							0	ok	false;false;false	gap_in_other
+crossed_above	0.0;2.0;3.0	1.0;nan;1.0							1	ok	false;false;false	gap_in_other
+crossed_above	0.0;2.0;3.0	1.0;nan;1.0							2	ok	false;false;false	gap_in_other
+crossed_above	0.0;2.0;0.0;2.0	1.0;1.0;1.0;1.0							0	ok	false;true;false;true	crosses_twice
+crossed_above	0.0;2.0;0.0;2.0	1.0;1.0;1.0;1.0							1	ok	false;false;false;false	crosses_twice
+crossed_above	0.0;2.0;0.0;2.0	1.0;1.0;1.0;1.0							2	ok	false;false;false;false	crosses_twice
+crossed_above	0.0;2.0;1.0;2.0;3.0	1.0;1.0;1.0;1.0;1.0							0	ok	false;true;false;true;false	above_then_touch_then_above
+crossed_above	0.0;2.0;1.0;2.0;3.0	1.0;1.0;1.0;1.0;1.0							1	ok	false;false;false;false;true	above_then_touch_then_above
+crossed_above	0.0;2.0;1.0;2.0;3.0	1.0;1.0;1.0;1.0;1.0							2	ok	false;false;false;false;false	above_then_touch_then_above
+crossed_above	0.0;2.0;1.0;1.0;2.0	1.0;1.0;1.0;1.0;1.0							0	ok	false;true;false;false;true	above_then_touch_twice
+crossed_above	0.0;2.0;1.0;1.0;2.0	1.0;1.0;1.0;1.0;1.0							1	ok	false;false;false;false;false	above_then_touch_twice
+crossed_above	0.0;2.0;1.0;1.0;2.0	1.0;1.0;1.0;1.0;1.0							2	ok	false;false;false;false;false	above_then_touch_twice
+crossed_above	0.0;2.0;0.5;4.0	1.0;1.0;1.0;1.0							0	ok	false;true;false;true	falls_back_before_wait
+crossed_above	0.0;2.0;0.5;4.0	1.0;1.0;1.0;1.0							1	ok	false;false;false;false	falls_back_before_wait
+crossed_above	0.0;2.0;0.5;4.0	1.0;1.0;1.0;1.0							2	ok	false;false;false;false	falls_back_before_wait
+crossed_above	nan;nan	nan;nan							0	ok	false;false	both_nan
+crossed_above	nan;nan	nan;nan							1	ok	false;false	both_nan
+crossed_above	nan;nan	nan;nan							2	ok	false;false	both_nan
+crossed_above	1.0;1.0;1.0	1.0;1.0;1.0							0	ok	false;false;false	equal_throughout
+crossed_above	1.0;1.0;1.0	1.0;1.0;1.0							1	ok	false;false;false	equal_throughout
+crossed_above	1.0;1.0;1.0	1.0;1.0;1.0							2	ok	false;false;false	equal_throughout
+rolling_mean	plain		2	3						error		min_periods above the window
+rolling_std	plain		2	3	0					error		min_periods above the window

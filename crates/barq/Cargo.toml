@@ -1,0 +1,27 @@
+[package]
+name = "barq"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parallel factor-driven vectorized backtesting engine"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+polars = ["barq-expr/polars"]
+
+[dependencies]
+barq-analysis = { workspace = true }
+barq-core = { workspace = true }
+barq-exec = { workspace = true }
+barq-generic = { workspace = true }
+barq-indicators = { workspace = true }
+barq-expr = { workspace = true }
+barq-model = { workspace = true }
+barq-records = { workspace = true }
+barq-signals = { workspace = true }
+barq-sim = { workspace = true }

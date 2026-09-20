@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/barq",
+  "crates/barq-core",
+  "crates/barq-model",
+  "crates/barq-exec",
+  "crates/barq-generic",
+  "crates/barq-indicators",
+  "crates/barq-sim",
+  "crates/barq-py",
+  "crates/barq-records",
+  "crates/barq-signals",
+  "crates/barq-analysis",
+  "crates/barq-expr",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/nivalume/barq"
+description = "Parallel factor-driven vectorized backtesting engine"
+
+[workspace.dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+polars = { version = "0.46", default-features = false, features = [
+  "abs",
+  "cov",
+  "cse",
+  "ewma",
+  "fused",
+  "lazy",
+  "log",
+  "rolling_window",
+  "sign",
+] }
+barq-analysis = { path = "crates/barq-analysis", version = "0.1.0" }
+barq-core = { path = "crates/barq-core", version = "0.1.0" }
+barq-exec = { path = "crates/barq-exec", version = "0.1.0" }
+barq-generic = { path = "crates/barq-generic", version = "0.1.0" }
+barq-indicators = { path = "crates/barq-indicators", version = "0.1.0" }
+barq-expr = { path = "crates/barq-expr", version = "0.1.0" }
+barq-model = { path = "crates/barq-model", version = "0.1.0" }
+barq-records = { path = "crates/barq-records", version = "0.1.0" }
+barq-signals = { path = "crates/barq-signals", version = "0.1.0" }
+barq-sim = { path = "crates/barq-sim", version = "0.1.0" }
+
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# The simulation kernels are ported semantics, not idiomatic Rust. These lints
+# fire constantly on faithful ports and hide real findings.
+too_many_arguments = "allow"
+# Deliberate: financial comparisons go through `barq_core::math`, never `==`.
+float_cmp = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+# Benchmarks and parity runs must not be built in debug; debug builds of the
+# simulation kernels are ~50x slower and produce meaningless numbers.
+[profile.bench]
+inherits = "release"
+debug = true

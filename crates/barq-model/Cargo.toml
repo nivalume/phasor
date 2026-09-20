@@ -1,0 +1,14 @@
+[package]
+name = "barq-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Domain model for barq: fixed-point values, identifiers, bars, enums"
+
+[lints]
+workspace = true
+
+[dependencies]
+barq-core = { workspace = true }
