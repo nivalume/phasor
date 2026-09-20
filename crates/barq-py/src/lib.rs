@@ -43,6 +43,9 @@
 #![deny(unsafe_code)]
 
 pub mod array;
+#[allow(unsafe_code)]
+mod arrow;
+pub mod data;
 pub mod expr;
 pub mod params;
 pub mod parse;
@@ -88,6 +91,8 @@ pub struct PyPortfolio {
     /// logs explain the run rather than contributing to it.
     logs: LogRecords,
     close: Vec<f64>,
+    source_cols: usize,
+    column_map: Option<Vec<usize>>,
     init_cash: Vec<f64>,
     groups: Groups,
     cash_sharing: bool,
@@ -114,7 +119,12 @@ impl PyPortfolio {
     /// exist as bulk calls. Six scalars pulled one at a time is six rebuilds
     /// for the answer one would have given.
     fn core(&self) -> PyResult<CorePortfolio<'_>> {
-        let close = FlexArray::full(&self.close, self.n_rows, self.n_cols).map_err(to_py_err)?;
+        let close = market_array(
+            &self.close,
+            self.n_rows,
+            self.source_cols,
+            self.column_map.as_deref(),
+        )?;
         let cash = FlexArray::per_column(&self.init_cash, self.n_cols).map_err(to_py_err)?;
         CorePortfolio::from_grouped_records(
             self.orders.clone(),
@@ -136,6 +146,12 @@ impl PyPortfolio {
 
 #[pymethods]
 impl PyPortfolio {
+    /// Bytes retained for source prices, independent of parameter count.
+    #[getter]
+    fn price_nbytes(&self) -> usize {
+        self.close.len() * std::mem::size_of::<f64>()
+    }
+
     /// Number of bars.
     #[getter]
     const fn n_rows(&self) -> usize {
@@ -623,6 +639,7 @@ fn account_inputs(
     cash_sharing = false,
     group_lens = None,
     call_seq = "default",
+    column_map = None,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -665,6 +682,7 @@ fn from_signals(
     cash_sharing: bool,
     group_lens: Option<Vec<usize>>,
     call_seq: &str,
+    column_map: Option<Vec<usize>>,
 ) -> PyResult<PyPortfolio> {
     // `close` first, so every other parameter can be checked against a known
     // shape rather than one inferred from whichever array arrived first.
@@ -674,7 +692,9 @@ fn from_signals(
             "close must be a 2-D float64 array; it is what sets the run's shape",
         ));
     };
-    let (close_flat, n_rows, n_cols) = columns_of(close_arr)?;
+    let (close_flat, n_rows, source_cols) = columns_of(close_arr)?;
+    let close_view = market_array(close_flat, n_rows, source_cols, column_map.as_deref())?;
+    let n_cols = column_map.as_ref().map_or(source_cols, Vec::len);
 
     // A stop that can never fire is worse than a rejected argument: the run
     // succeeds and reports a strategy that never stopped out. The stop level is
@@ -754,10 +774,10 @@ fn from_signals(
         update_value,
         n_rows,
         n_cols,
-        close: FlexArray::full(close_flat, n_rows, n_cols).map_err(to_py_err)?,
-        open: flex_or_f64(&open_b, n_rows, n_cols, per_col, d.open)?,
-        high: flex_or_f64(&high_b, n_rows, n_cols, per_col, d.high)?,
-        low: flex_or_f64(&low_b, n_rows, n_cols, per_col, d.low)?,
+        close: close_view,
+        open: market_optional(&open_b, n_rows, source_cols, column_map.as_deref(), d.open)?,
+        high: market_optional(&high_b, n_rows, source_cols, column_map.as_deref(), d.high)?,
+        low: market_optional(&low_b, n_rows, source_cols, column_map.as_deref(), d.low)?,
         entries: flex_bool(&entries_b, n_rows, n_cols)?,
         exits: flex_bool(&exits_b, n_rows, n_cols)?,
         init_cash: FlexArray::per_column(&account_cash, n_cols).map_err(to_py_err)?,
@@ -816,6 +836,8 @@ fn from_signals(
         orders,
         logs,
         close: close_flat.to_vec(),
+        source_cols,
+        column_map,
         init_cash: init_cash_owned,
         groups,
         cash_sharing,
@@ -872,6 +894,7 @@ fn from_signals(
     cash_sharing = false,
     group_lens = None,
     call_seq = "default",
+    column_map = None,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -905,6 +928,7 @@ fn from_orders(
     cash_sharing: bool,
     group_lens: Option<Vec<usize>>,
     call_seq: &str,
+    column_map: Option<Vec<usize>>,
 ) -> PyResult<PyPortfolio> {
     let close_b = borrow_f64(close, "close")?;
     let Borrowed::Slice(close_arr) = &close_b else {
@@ -912,7 +936,9 @@ fn from_orders(
             "close must be a 2-D float64 array; it is what sets the run's shape",
         ));
     };
-    let (close_flat, n_rows, n_cols) = columns_of(close_arr)?;
+    let (close_flat, n_rows, source_cols) = columns_of(close_arr)?;
+    let close_view = market_array(close_flat, n_rows, source_cols, column_map.as_deref())?;
+    let n_cols = column_map.as_ref().map_or(source_cols, Vec::len);
 
     let init_cash_b = borrow_opt_f64(init_cash, "init_cash")?;
     let val_price_b = borrow_opt_f64(val_price, "val_price")?;
@@ -957,7 +983,7 @@ fn from_orders(
         n_cols,
         groups: groups.clone(),
         call_seq,
-        close: FlexArray::full(close_flat, n_rows, n_cols).map_err(to_py_err)?,
+        close: close_view,
         init_cash: FlexArray::per_column(&account_cash, n_cols).map_err(to_py_err)?,
         val_price: flex_or_f64(&val_price_b, n_rows, n_cols, per_col, d.val_price)?,
         direction: FlexArray::Scalar(dir),
@@ -1008,6 +1034,8 @@ fn from_orders(
         orders,
         logs,
         close: close_flat.to_vec(),
+        source_cols,
+        column_map,
         init_cash: init_cash_owned,
         groups,
         cash_sharing,
@@ -1020,9 +1048,52 @@ fn from_orders(
     })
 }
 
+fn market_array<'a>(
+    data: &'a [f64],
+    rows: usize,
+    cols: usize,
+    map: Option<&'a [usize]>,
+) -> PyResult<FlexArray<'a, f64>> {
+    match map {
+        Some(map) => FlexArray::mapped(data, rows, cols, map),
+        None => FlexArray::full(data, rows, cols),
+    }
+    .map_err(to_py_err)
+}
+
+fn market_optional<'a>(
+    value: &'a Option<Borrowed<'a>>,
+    rows: usize,
+    cols: usize,
+    map: Option<&'a [usize]>,
+    default: FlexArray<'a, f64>,
+) -> PyResult<FlexArray<'a, f64>> {
+    match value {
+        Some(Borrowed::Slice(a)) => {
+            let (data, r, c) = columns_of(a)?;
+            if (r, c) != (rows, cols) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "OHLC arrays must have the source close shape",
+                ));
+            }
+            market_array(data, rows, cols, map)
+        }
+        Some(Borrowed::Row(_)) if map.is_some() => Err(pyo3::exceptions::PyValueError::new_err(
+            "mapped OHLC must be a source-shaped matrix or scalar",
+        )),
+        _ => flex_or_f64(value, rows, cols, OneDim::PerColumn, default),
+    }
+}
+
 /// The extension module.
 #[pymodule]
 fn _barq(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<data::PyInstrumentId>()?;
+    m.add_class::<data::PyBarType>()?;
+    m.add_class::<data::PyContext>()?;
+    m.add_class::<data::PyDataset>()?;
+    m.add_function(wrap_pyfunction!(data::catalog_files, m)?)?;
+    m.add_function(wrap_pyfunction!(data::load_data, m)?)?;
     m.add_class::<PyPortfolio>()?;
     m.add_class::<PyFactorSet>()?;
     m.add_function(wrap_pyfunction!(from_signals, m)?)?;

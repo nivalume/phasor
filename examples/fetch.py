@@ -2,12 +2,12 @@
 
 import argparse
 
-import barq
+import binance
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbols", default="BTCUSDT,ETHUSDT")
+    parser.add_argument("--symbols", default="BTCUSDT.BINANCE,ETHUSDT.BINANCE")
     parser.add_argument("--interval", default="1d")
     parser.add_argument("--from", dest="start", default="2021-01-01")
     parser.add_argument("--dir", default="data/binance")
@@ -17,7 +17,7 @@ def main():
     failed = 0
     for symbol in symbols:
         try:
-            bars = barq.data.fetch_cached(
+            bars = binance.fetch_cached(
                 symbol, args.interval, args.start, directory=args.dir
             )
             span = f"{bars[0].open_time} .. {bars[-1].open_time}" if bars else "empty"

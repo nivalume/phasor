@@ -33,6 +33,12 @@ pub enum FlexArray<'a, T> {
     PerColumn(&'a [T]),
     /// One value per row, constant across the columns. Length is `n_rows`.
     PerRow(&'a [T]),
+    /// Logical columns reference a shared source matrix.
+    MappedColumns {
+        data: &'a [T],
+        n_rows: usize,
+        columns: &'a [usize],
+    },
     /// A full column-major matrix: `data[col * n_rows + row]`.
     Full {
         /// Column-major elements, length `n_rows * n_cols`.
@@ -57,6 +63,11 @@ impl<T: Copy> FlexArray<'_, T> {
             Self::Scalar(v) => v,
             Self::PerColumn(v) => v[col],
             Self::PerRow(v) => v[row],
+            Self::MappedColumns {
+                data,
+                n_rows,
+                columns,
+            } => data[columns[col] * n_rows + row],
             Self::Full { data, n_rows } => data[col * n_rows + row],
         }
     }
@@ -67,11 +78,36 @@ impl<T: Copy> FlexArray<'_, T> {
     /// of its inner loop when this is `false`.
     #[must_use]
     pub const fn varies_by_row(&self) -> bool {
-        matches!(self, Self::PerRow(_) | Self::Full { .. })
+        matches!(
+            self,
+            Self::PerRow(_) | Self::Full { .. } | Self::MappedColumns { .. }
+        )
     }
 }
 
 impl<'a, T> FlexArray<'a, T> {
+    /// Map logical columns to source columns without expanding the matrix.
+    pub fn mapped(
+        data: &'a [T],
+        n_rows: usize,
+        source_cols: usize,
+        columns: &'a [usize],
+    ) -> Result<Self> {
+        if n_rows.checked_mul(source_cols) != Some(data.len())
+            || columns.is_empty()
+            || columns.iter().any(|&c| c >= source_cols)
+        {
+            return Err(Error::Invariant(
+                "column_map must be nonempty and index a correctly shaped source matrix".into(),
+            ));
+        }
+        Ok(Self::MappedColumns {
+            data,
+            n_rows,
+            columns,
+        })
+    }
+
     /// A value that is constant everywhere.
     #[must_use]
     pub const fn scalar(value: T) -> Self {
@@ -134,6 +170,17 @@ impl<'a, T> FlexArray<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_columns_share_source_and_validate_bounds() {
+        let data = [1, 2, 10, 20];
+        let map = [1, 0, 1];
+        let a = FlexArray::mapped(&data, 2, 2, &map).unwrap();
+        assert_eq!((a.get(0, 0), a.get(1, 1), a.get(1, 2)), (10, 2, 20));
+        assert!(a.varies_by_row());
+        assert!(FlexArray::mapped(&data, 2, 2, &[2]).is_err());
+        assert!(FlexArray::mapped(&data, 2, 2, &[]).is_err());
+    }
 
     #[test]
     fn scalar_is_constant_everywhere() {

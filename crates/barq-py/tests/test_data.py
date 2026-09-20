@@ -1,193 +1,170 @@
-"""Python market-data boundary."""
-
-import runpy
-import sys
+"""The same user Schema must work through all local readers and Rust alignment."""
+from dataclasses import replace
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+import gc
+import sys
 
 import numpy as np
 import pytest
+import barq
+pa = pytest.importorskip("pyarrow")
+import pyarrow.csv as csv
+import pyarrow.parquet as pq
 
-from barq import data
-
-DAY = 86_400_000
 ROOT = Path(__file__).parents[3]
+sys.path.insert(0, str(ROOT / "examples"))
+import multi_data
+
+KEY = "ADAUSDC.BINANCE-1-MINUTE-LAST-EXTERNAL"
+OTHER = "ETHUSDC.BINANCE-1-MINUTE-LAST-EXTERNAL"
 
 
-def row(open_time, close=100.0):
-    return [
-        open_time,
-        str(close - 1.0),
-        str(close + 2.0),
-        str(close - 3.0),
-        str(close),
-        "42.5",
-        open_time + DAY - 1,
-        "0",
-        7,
-        "0",
-        "0",
-        "0",
-    ]
+def identity(batch, context):
+    return batch
 
 
-class Fake:
-    def __init__(self, pages, now=10 * DAY):
-        self.pages = list(pages)
-        self.now = now
-        self.urls = []
-        self.paced = []
-
-    def get(self, url):
-        self.urls.append(url)
-        return self.pages.pop(0)
-
-    def server_time(self):
-        return self.now
-
-    def pace(self, seconds):
-        self.paced.append(seconds)
+def schema(extra, *, name="custom", instrument="source"):
+    fields = pa.schema([("event_time", pa.uint64()), ("available_time", pa.uint64()), *extra])
+    return barq.data.DataSchema(name, fields, fields, identity, instrument=instrument)
 
 
-def starts(fake):
-    return [int(parse_qs(urlparse(url).query)["startTime"][0]) for url in fake.urls]
+def bar_schema():
+    return schema([(k, pa.float64()) for k in multi_data.OHLCV])
 
 
-def test_fetch_pages_forward_and_drops_the_open_bar():
-    fake = Fake([[row(0), row(DAY)], [row(2 * DAY)]], now=2 * DAY + DAY // 2)
-    bars = data.fetch_klines("BTCUSDT", "1d", 0, limit=2, pace=0.1, transport=fake)
-
-    assert [bar.open_time for bar in bars] == [0, DAY]
-    assert starts(fake) == [0, DAY + 1]
-    assert fake.paced == [0.1]
+def table(times, **columns):
+    times = pa.array(times, type=pa.uint64())
+    return pa.table({"event_time": times, "available_time": times, **columns})
 
 
-def test_fetch_stops_at_the_request_ceiling():
-    fake = Fake([[row(0)], [row(DAY)], [row(2 * DAY)]])
-    with pytest.raises(ValueError, match="stopped after 2 requests"):
-        data.fetch_klines(
-            "BTCUSDT",
-            "1d",
-            0,
-            limit=1,
-            max_requests=2,
-            closed_only=False,
-            transport=fake,
-        )
+def bar_table(times, prices=None):
+    prices = prices if prices is not None else [10.] * len(times)
+    return table(times, **{k: np.array(prices, dtype=float) for k in multi_data.OHLCV})
 
 
-def test_cache_round_trips_and_resume_starts_after_the_last_bar(tmp_path):
-    original = 29_000.123_456_789_1
-    first = Fake([[row(0, original), row(DAY, 0.000_000_012_3)]])
-    bars = data.fetch_cached("BTCUSDT", "1d", 0, directory=tmp_path, transport=first)
-    loaded = data.load_cached("BTCUSDT", "1d", directory=tmp_path)
-
-    assert [bar.close for bar in loaded] == [bar.close for bar in bars]
-    assert loaded[0].close.hex() == original.hex()
-
-    second = Fake([[]])
-    assert data.fetch_cached(
-        "BTCUSDT", "1d", 0, directory=tmp_path, transport=second
-    ) == loaded
-    assert starts(second) == [2 * DAY]
+def source(tmp_path, definition, tables, extension="parquet"):
+    paths = {}
+    for i, (key, batch) in enumerate(tables.items()):
+        path = tmp_path / f"input-{i}.{extension}"
+        (csv.write_csv if extension == "csv" else pq.write_table)(batch, path)
+        paths[key] = path
+    return barq.data.files(paths, schema=definition)
 
 
-@pytest.mark.parametrize(
-    "contents,message",
-    [
-        ("time,price\n1,2\n", "header"),
-        (
-            "open_time,open,high,low,close,volume,close_time\n"
-            "86400000,1,1,1,1,1,2\n0,1,1,1,1,1,2\n",
-            "does not follow",
-        ),
-        (
-            "open_time,open,high,low,close,volume,close_time\n1,x,3,4,5,6,7\n",
-            "non-numeric",
-        ),
-    ],
-)
-def test_bad_cache_is_rejected(tmp_path, contents, message):
-    (tmp_path / "BTCUSDT-1d.csv").write_text(contents)
-    with pytest.raises(ValueError, match=message):
-        data.load_cached("BTCUSDT", "1d", directory=tmp_path)
+def test_three_sources_have_identical_end_to_end_results_and_are_read_only(tmp_path):
+    results = []
+    for kind in ("catalog", "parquet", "csv"):
+        root = tmp_path / kind
+        multi_data.write_samples(root, kind)
+        before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        result = multi_data.run(root, kind)
+        assert {p: p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+        results.append(result)
+    first = results[0]
+    for current in results[1:]:
+        np.testing.assert_array_equal(first[0].time, current[0].time)
+        for name in multi_data.OHLCV:
+            np.testing.assert_allclose(getattr(first[0], name), getattr(current[0], name), rtol=1e-14)
+        for index in (1, 2):
+            for name in first[index]:
+                np.testing.assert_allclose(first[index][name], current[index][name], equal_nan=True)
+        for index in (3, 4):
+            np.testing.assert_array_equal(first[index], current[index])
+        for name, values in first[5].orders().items():
+            np.testing.assert_allclose(values, current[5].orders()[name])
+        np.testing.assert_allclose(first[5].total_return(), current[5].total_return())
 
 
-def test_fetch_panel_outer_joins_symbols_into_fortran_arrays(tmp_path):
-    fake = Fake(
-        [
-            [row(0, 10.0), row(DAY, 11.0), row(2 * DAY, 12.0)],
-            [row(DAY, 20.0), row(2 * DAY, 21.0)],
-        ],
-        now=4 * DAY,
-    )
-    panel = data.fetch_panel(
-        ["BTCUSDT", "ETHUSDT"], "1d", 0, directory=tmp_path, transport=fake
-    )
-
-    assert panel.symbols == ("BTCUSDT", "ETHUSDT")
-    assert panel.shape == (3, 2)
-    assert np.isnan(panel.close[0, 1])
-    np.testing.assert_allclose(panel.coverage(), [1.0, 2.0 / 3.0])
-    assert all(
-        values.flags.f_contiguous
-        for values in (panel.open, panel.high, panel.low, panel.close, panel.volume)
-    )
-    assert data.bars_per_year("1d") == 365.0
-
-
-def test_sweep_example_runs(capsys):
-    runpy.run_path(ROOT / "examples/sweep.py", run_name="__main__")
-    assert "best:" in capsys.readouterr().out
+@pytest.mark.parametrize("extension", ["csv", "parquet"])
+def test_custom_namespace_bar_detection_projection_missing_and_duplicates(tmp_path, extension):
+    definitions = bar_schema()
+    # Physical fields may be reordered and contain entirely irrelevant fields.
+    a = bar_table([30, 10], [3., 1.]).append_column("ignored", pa.array(["x", "y"]))
+    a = a.select(list(reversed(a.schema.names)))
+    b = bar_table([20], [2.])
+    panel = source(tmp_path, definitions, {OTHER: b, KEY: a}, extension).prepare()
+    assert [str(i) for i in panel.instruments] == ["ETHUSDC.BINANCE", "ADAUSDC.BINANCE"]
+    assert str(panel.bar_types[1]) == KEY and panel.bar_types[1].step == 1
+    np.testing.assert_array_equal(panel.time, [10, 20, 30])
+    np.testing.assert_allclose(panel.close, [[np.nan,1.],[2.,np.nan],[np.nan,3.]], equal_nan=True)
+    assert panel.close.flags.f_contiguous
+    with pytest.raises(ValueError, match="duplicate bar"):
+        source(tmp_path, definitions, {KEY: bar_table([1, 1])}, extension).prepare()
+    with pytest.raises(ValueError, match="close"):
+        source(tmp_path, definitions, {KEY: bar_table([1]).drop(["close"])}, extension).prepare()
+    # Being named bars does not turn a plain instrument into a BarType.
+    with pytest.raises(ValueError, match="STEP"):
+        source(tmp_path, replace(definitions, name="bars"), {"ADAUSDC.BINANCE": bar_table([1])}, extension).prepare()
 
 
-def test_fetch_example_runs_through_fake_transport(tmp_path, monkeypatch, capsys):
-    fake = Fake([[row(0), row(DAY)]])
-    fetch_cached = data.fetch_cached
-
-    def fetch(symbol, interval, start, **kwargs):
-        return fetch_cached(symbol, interval, start, transport=fake, **kwargs)
-
-    monkeypatch.setattr(data, "fetch_cached", fetch)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "fetch.py",
-            "--symbols",
-            "BTCUSDT",
-            "--interval",
-            "1d",
-            "--from",
-            "1970-01-01",
-            "--dir",
-            str(tmp_path),
-        ],
-    )
-    runpy.run_path(ROOT / "examples/fetch.py", run_name="__main__")
-
-    assert "2 bars" in capsys.readouterr().out
-    assert len(data.load_cached("BTCUSDT", "1d", directory=tmp_path)) == 2
+def test_availability_ties_window_boundaries_global_and_row_instruments(tmp_path):
+    panel = source(tmp_path, bar_schema(), {KEY: bar_table([0,10,20,30,40]), OTHER:bar_table([0,10,20,30,40])}).prepare()
+    definition = schema([("value", pa.float64()), ("headline",pa.string())])
+    # Event times are early; rows become visible only at their availability times.
+    t = table([10,20,20,35], value=[1.,2.,4.,8.], headline=["a","b","c","d"])
+    t = t.set_column(0, "event_time", pa.array([0,0,0,0], type=pa.uint64()))
+    data = source(tmp_path, definition, {"ADAUSDC.BINANCE": t}).load()
+    np.testing.assert_allclose(data.asof(panel, field="value")[:,0], [np.nan,1,4,4,8], equal_nan=True)
+    assert np.isnan(data.asof(panel, field="value")[:,1]).all()
+    for agg, expected in [("sum", [0,1,7,6,8]), ("mean",[0,1,7/3,3,8]),("count",[0,1,3,2,1])]:
+        np.testing.assert_allclose(data.window(panel, field="value", window=20, agg=agg, empty=0)[:,0], expected)
+    assert data.batches[0][1]["headline"].to_pylist() == ["a","b","c","d"]
+    # Lifetime survives the original tables and a full Python GC.
+    del t
+    gc.collect()
+    assert data.batches[0][1]["value"].to_pylist() == [1.,2.,4.,8.]
+    global_data = source(tmp_path, replace(definition, instrument=None), {"world":table([10], value=[7.], headline=["global"])}).load()
+    aligned = global_data.asof(panel, field="value")
+    np.testing.assert_allclose(aligned[:,0], aligned[:,1], equal_nan=True)
+    row_schema = schema([("symbol",pa.string()),("venue",pa.string()),("value",pa.float64())], instrument=("symbol","venue"))
+    rows = table([10,10], symbol=["ADAUSDC","ETHUSDC"], venue=["BINANCE","BINANCE"], value=[3.,9.])
+    row_data = source(tmp_path, row_schema, {"arbitrary-filename": rows}).load()
+    np.testing.assert_allclose(row_data.asof(panel, field="value")[1:], [[3.,9.]]*4)
+    with pytest.raises(ValueError, match="numeric"):
+        data.asof(panel, field="headline")
 
 
-def test_crypto_example_runs_from_cache(tmp_path, monkeypatch, capsys):
-    prices = [row(index * DAY, 100.0 + 10.0 * np.sin(index / 10.0)) for index in range(250)]
-    fake = Fake([prices, prices], now=300 * DAY)
-    for symbol in ("BTCUSDT", "ETHUSDT"):
-        data.fetch_cached(symbol, "1d", 0, directory=tmp_path, transport=fake)
+def test_decoded_range_validation_and_catalog_failures_do_not_create_files(tmp_path):
+    data = source(tmp_path, bar_schema(), {KEY:bar_table([3,1,2])})
+    np.testing.assert_array_equal(data.prepare(start=2,end=3).time, [2])
+    assert data.prepare(start=10).shape == (0,1)
+    with pytest.raises(ValueError, match="interval"):
+        data.load(start=2,end=2)
+    with pytest.raises(ValueError, match="cannot contain nulls"):
+        source(tmp_path, bar_schema(), {KEY:bar_table([None])}).load()
+    catalog = barq.data.Catalog(tmp_path / "absent", schemas=[bar_schema()])
+    with pytest.raises(ValueError):
+        catalog.source("custom", keys=[KEY])
+    assert not (tmp_path / "absent").exists()
+    with pytest.raises(ValueError, match="path components"):
+        catalog.source("custom", keys=["../escape"])
 
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "crypto.py",
-            "--symbols",
-            "BTCUSDT,ETHUSDT",
-            "--interval",
-            "1d",
-            "--dir",
-            str(tmp_path),
-        ],
-    )
-    runpy.run_path(ROOT / "examples/crypto.py", run_name="__main__")
-    assert "coverage=" in capsys.readouterr().out
+
+@pytest.mark.parametrize("value", ["ADA", ".BINANCE", "ADA.", "A/B.X", "A X.Y"])
+def test_invalid_instrument(value):
+    with pytest.raises(ValueError):
+        barq.InstrumentId.parse(value)
+
+
+def test_identity_components_are_not_reinterpreted(tmp_path):
+    with pytest.raises(ValueError):
+        barq.InstrumentId("ADA", "BINANCE.SPOT")
+    definition = schema([("symbol",pa.string()),("venue",pa.string()),("value",pa.float64())], instrument=("symbol","venue"))
+    for symbol, venue in [("", "BINANCE"), ("ADA", "BINANCE.SPOT")]:
+        with pytest.raises(ValueError):
+            source(tmp_path, definition, {"events":table([1], symbol=[symbol], venue=[venue], value=[1.])}).load()
+
+
+def test_decoder_controls_time_and_bar_payload(tmp_path):
+    definition = replace(multi_data.schemas()[0], name="user_bars")
+    raw = pa.table({"timestamp_ms":pa.array([1,2,3], type=pa.uint64()),
+                    "published_ms":pa.array([2,3,4], type=pa.uint64()),
+                    **{k: [1.,2.,3.] for k in multi_data.OHLCV}})
+    data = source(tmp_path, definition, {KEY:raw}, "csv")
+    panel = data.prepare(start=3_000_000, end=4_000_000)
+    np.testing.assert_array_equal(panel.time, [3_000_000])
+    np.testing.assert_array_equal(panel.close, [[2.]])
+    definition = schema([(k, pa.float64()) for k in multi_data.OHLCV] + [("extra", pa.string())])
+    data = source(tmp_path, definition, {KEY:bar_table([1]).append_column("extra",pa.array(["retained raw"]))}).load()
+    assert data.prepare().close[0,0] == 10.
+    assert data.batches[0][1]["extra"].to_pylist() == ["retained raw"]

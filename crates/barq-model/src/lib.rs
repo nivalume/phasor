@@ -21,7 +21,7 @@ pub mod enums;
 pub mod ids;
 pub mod types;
 
-pub use bar::{Bar, OhlcvPanel};
+pub use bar::{Bar, BarType, OhlcvPanel};
 pub use enums::{
     AccumulationMode, ConflictMode, Direction, DirectionConflictMode, OppositeEntryMode, OrderSide,
     OrderStatus, SizeType, StatusInfo, StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode,

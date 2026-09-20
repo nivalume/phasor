@@ -64,7 +64,7 @@ Phase 1, building. Bar/OHLCV only.
 | 5 | `barq-analysis` | **Done**: the `Portfolio` type (lazy, `Sync`, caches each derivation once), rebuild chain, all return metrics in scalar and rolling form, benchmark-relative metrics, trade statistics, by-level aggregation, and the 28-row tag-filtered stats registry; 37 + 2,047 + 72 fixtures green, 43/47 mutations caught |
 | 4.6 | `barq-indicators` | **Done**: the eight reference indicators plus the parameter sweep; 480 fixtures green, 24/24 mutations caught |
 | 6 | `barq-expr` | **Core implemented**: Qlib DSL, Alpha158, Alpha360, matrix bridge, committed Qlib numeric fixtures and factor-to-portfolio test |
-| 7 | `barq-py` | **Done for the Python boundary**: PyO3 + rust-numpy for simulation, shared accounts with grouped analysis, and expressions, plus Python `barq.data` for Binance paging, resumable CSV caching and outer-join alignment. Differential tests compare records and all 37 log fields against the reference. See [crates/barq-py/README.md](../crates/barq-py/README.md). |
+| 7 | `barq-py` | **Done for the Python boundary**: PyO3 + rust-numpy for simulation, shared accounts with grouped analysis, and expressions, plus Rust `barq-data` and Python `barq.data` for read-only CSV/Parquet/catalog sources, user decoders, first-class BarPanel and auxiliary event alignment. Column maps share source prices across parameter sweeps. Differential tests compare records and all 37 log fields against the reference. See [crates/barq-py/README.md](../crates/barq-py/README.md). |
 
 Phase 2 — the event-driven tier with the Nautilus-style strategy API — is out of
 scope for now, but phase 1 carries two constraints on its behalf: the execution
@@ -87,13 +87,15 @@ python benchmarks/compare.py                    # head-to-head
 python benchmarks/compare.py --check-baseline   # regression gate
 
 # The Python bindings
-python -m pip install -e 'crates/barq-py[test]'
+python -m pip install -e 'crates/barq-py[test,data]'
 pytest crates/barq-py/tests -q
 
 # Public examples
 python examples/sweep.py
-python examples/fetch.py --symbols BTCUSDT,ETHUSDT --interval 1d --from 2021-01-01
-python examples/crypto.py --symbols BTCUSDT,ETHUSDT --interval 1d
+python examples/multi_data.py --source catalog
+python examples/crypto.py --demo
+python examples/fetch.py --symbols BTCUSDT.BINANCE,ETHUSDT.BINANCE --interval 1d --from 2021-01-01
+python examples/crypto.py --symbols BTCUSDT.BINANCE,ETHUSDT.BINANCE --interval 1d
 ```
 
 **The engine crates have no external dependencies.** Parallelism uses
@@ -103,6 +105,7 @@ be owned locally. A work-stealing pool can replace it behind one function when i
 earns its place. Factor expressions reuse the engine's column-major matrices and
 rolling kernels, so they do not add another runtime dependency.
 
-`barq-py` is the one exception: PyO3 and rust-numpy are the binding, and its
-Python shell owns market-data I/O. It is a leaf crate, so the engine stays free
-of HTTP and cache dependencies whether or not the package is built.
+`barq-py` uses PyO3 and rust-numpy for bindings. `barq-data` adds Arrow and
+Parquet dependencies for local file preparation, separately from the compute
+crates (`barq` exposes it under its optional `data` feature). PyArrow is an
+optional Python extra for decoders. No library crate downloads or writes data.

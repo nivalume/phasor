@@ -12,9 +12,11 @@ workspace = true
 
 [features]
 default = []
+data = ["dep:barq-data"]
 polars = ["barq-expr/polars"]
 
 [dependencies]
+barq-data = { workspace = true, optional = true }
 barq-analysis = { workspace = true }
 barq-core = { workspace = true }
 barq-exec = { workspace = true }

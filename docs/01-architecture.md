@@ -83,21 +83,29 @@ before buying. Returns and metrics come from account equity, while positions,
 trades and logs retain their original symbol columns. No automatic allocation
 or risk policy is applied.
 
-**Bars only.** Tick and L2 order book data are deferred. Bar execution alone
+**Bar execution.** Generic funding/news/event datasets may provide factor inputs;
+tick and L2 order book execution are deferred. Bar execution alone
 already carries enough semantics to get wrong (see
 [04 Execution model](04-execution-model.md)).
 
 **Rust engine, Python boundary.** Simulation, expressions and analysis live in
-Rust. Python is the user-facing array, data-I/O and example layer. Market-data
-HTTP and caching do not strengthen the engine by living in a crate, while
-keeping the compute path native avoids two implementations to reconcile.
+Rust. `barq-data` reads local CSV/Parquet and prepares OHLCV panels or numeric
+views of user-defined Arrow datasets. User decoders run before simulation.
+Python exports these interfaces and supplies examples. HTTP and cache writing
+live only in examples; catalog reads never manage or write data.
+
+Parameter sweeps retain source OHLCV as `[T,S]`. `FlexArray::MappedColumns` maps
+logical simulation columns back to source columns in both execution and
+analysis. Signals and account state use `[T,C]`. Dynamic Schemas, strings and
+Python callbacks stay outside the simulation loops.
 
 ## Crates
 
 | Crate | Responsibility |
 |---|---|
 | `barq-core` | `FlexArray`, column labels, float tolerances, errors |
-| `barq-model` | Fixed-point values, identifiers, bars, execution enums |
+| `barq-model` | Fixed-point values, instrument/BarType identities, bars, execution enums |
+| `barq-data` | Local CSV/Parquet readers, user Schema decoding, BarPanel and auxiliary alignment |
 | `barq-exec` | `execute_order` — shared by both tiers |
 | `barq-sim` | Vectorized loops; where threading is applied |
 | `barq-records` | Record schemas, trade derivation, `RecordSink` |

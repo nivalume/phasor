@@ -124,6 +124,20 @@ Each parameter set gets an independent 100,000 account. The example prints
 account equity, cash, positions and statistics, and checks that equity equals
 cash plus the symbols' market value. Prices are synthetic; no downloads needed.
 
+For Bars + funding + news from a catalog or standalone files:
+
+```bash
+python -m pip install -e 'crates/barq-py[data]'
+python examples/multi_data.py --source catalog  # also parquet / csv
+python examples/crypto.py --demo
+# Full USD-M history from Binance Vision (writes ~/.cache/barq/catalog):
+python examples/download_binance_vision.py
+```
+
+The offline data example uses two complete `symbol.venue` identities and four
+parameter pairs. Prices stay `[T,2]`; signals are `[T,8]`, with `column_map`
+sharing prices across parameters. See the [data API](crates/barq-py/README.md#local-data-and-parameter-sweeps).
+
 ## Developing
 
 ```bash
@@ -133,9 +147,10 @@ cargo fmt --check
 pytest crates/barq-py/tests -q
 ```
 
-The engine crates keep market-data I/O outside Rust. Parallelism uses
-`std::thread::scope`; the Python package uses NumPy plus the standard library
-for Binance HTTP, CSV caching and examples.
+Local CSV/Parquet reading and alignment live in the optional `barq-data` Rust
+crate. User Schemas decode Arrow batches before simulation; the compute crates
+remain independent of file I/O. Binance HTTP and cache writing live only in
+examples. Parallel account execution uses `std::thread::scope`.
 
 ## Licence
 

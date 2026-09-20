@@ -10,7 +10,7 @@ import numpy as np
 
 
 def main():
-    symbols = ("BTC", "ETH", "SOL")
+    symbols = ("BTCUSDT.SIM", "ETHUSDT.SIM", "SOLUSDT.SIM")
     rng = np.random.default_rng(92723)
     close = np.asfortranarray(
         100 * np.cumprod(1 + rng.normal(0.0002, 0.015, (400, len(symbols))), axis=0)
@@ -33,7 +33,7 @@ def main():
         allocated.value(group=0),
         allocated.cash(group=0) + (holdings * close).sum(axis=1),
     )
-    print("1. Equal-weight account: BTC / ETH / SOL share one initial 100,000")
+    print("1. Equal-weight account: BTCUSDT.SIM / ETHUSDT.SIM / SOLUSDT.SIM share one initial 100,000")
     print("Metrics:", allocated.metrics())
     print(f"Ending equity: {allocated.value(group=0)[-1]:,.2f}")
     print(f"Ending cash: {allocated.cash(group=0)[-1]:,.2f}")
@@ -60,7 +60,7 @@ def main():
     # Columns: A-BTC, A-ETH, A-SOL, B-BTC, B-ETH, B-SOL.
     # Each parameter set gets its own 100,000, shared only within its group.
     pf = barq.from_signals(
-        np.tile(close, (1, len(pairs))),
+        close,
         np.concatenate(entries, axis=1),
         np.concatenate(exits, axis=1),
         size=25_000.0,
@@ -71,6 +71,7 @@ def main():
         call_seq="auto",
         fees=0.001,
         threads=2,
+        column_map=np.tile(np.arange(len(symbols)), len(pairs)),
     )
     assert pf.n_cols == 6 and pf.group_lens == (3, 3) and pf.n_groups == 2
     metrics = pf.metrics()

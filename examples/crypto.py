@@ -1,6 +1,11 @@
 """Run a moving-average sweep over cached Binance Spot klines."""
 
 import argparse
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import binance
+import pyarrow as pa
+import pyarrow.compute as pc
 
 import barq
 import numpy as np
@@ -13,26 +18,55 @@ def crossed_above(left, right):
     return crossed
 
 
+def load_panel(instruments, interval, directory):
+    fields = [(name, pa.float64()) for name in ("open", "high", "low", "close", "volume")]
+    schema = barq.data.DataSchema(
+        name="bars",
+        input=pa.schema([("close_time", pa.uint64()), *fields]),
+        output=pa.schema([("time", pa.uint64()), *fields]),
+        event_time="time", available_time="time", decode=decode_cached,
+    )
+    unit = {"m": "MINUTE", "h": "HOUR", "d": "DAY", "w": "WEEK"}[interval[-1]]
+    return barq.data.files({
+        f"{i}-{int(interval[:-1])}-{unit}-LAST-EXTERNAL": binance._cache_path(directory, str(i), interval)
+        for i in instruments
+    }, schema=schema).prepare()
+
+
+def decode_cached(batch, context):
+    # Binance's inclusive closing millisecond becomes the end boundary.
+    time = pc.multiply(pc.add(batch["close_time"], pa.scalar(1, pa.uint64())), pa.scalar(1_000_000, pa.uint64()))
+    fields = ["open", "high", "low", "close", "volume"]
+    return pa.RecordBatch.from_arrays([time, *[batch[n] for n in fields]], names=["time", *fields])
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbols", default="BTCUSDT,ETHUSDT,SOLUSDT")
+    parser.add_argument("--symbols", default="BTCUSDT.BINANCE,ETHUSDT.BINANCE,SOLUSDT.BINANCE")
     parser.add_argument("--interval", default="1d")
     parser.add_argument("--dir", default="data/binance")
+    parser.add_argument("--demo", action="store_true", help="Use temporary offline sample caches")
     args = parser.parse_args()
 
     symbols = tuple(
         symbol.strip() for symbol in args.symbols.split(",") if symbol.strip()
     )
-    series = []
-    for symbol in symbols:
-        bars = barq.data.load_cached(symbol, args.interval, directory=args.dir)
-        if not bars:
-            raise SystemExit(
-                f"no cached data for {symbol}; run examples/fetch.py "
-                f"--symbols {','.join(symbols)} --interval {args.interval} --dir {args.dir}"
-            )
-        series.append((symbol, bars))
-    panel = barq.data.align(series)
+    instruments = tuple(barq.InstrumentId.parse(s) for s in symbols)
+    temporary = TemporaryDirectory(prefix="barq-crypto-") if args.demo else None
+    try:
+        directory = Path(temporary.name if temporary else args.dir)
+        if args.demo:
+            duration = binance._interval_ms(args.interval)
+            for col, instrument in enumerate(instruments):
+                rows = []
+                for i in range(400):
+                    close = 100 + col*30 + 10*np.sin(i/10)
+                    rows.append(binance.Kline(i*duration, close, close+1, close-1, close, 50., (i+1)*duration-1))
+                binance._save_cached(binance._cache_path(directory, str(instrument), args.interval), rows)
+        panel = load_panel(instruments, args.interval, directory)
+    finally:
+        if temporary:
+            temporary.cleanup()
 
     pairs = ((10, 50), (20, 50), (20, 100), (50, 200))
     expressions = {}
@@ -54,15 +88,19 @@ def main():
         ],
         axis=1,
     )
+    entries[1:] = entries[:-1].copy()
+    exits[1:] = exits[:-1].copy()
+    entries[0] = exits[0] = False
     portfolio = barq.from_signals(
-        np.tile(panel.close, (1, len(pairs))),
+        panel.close,
         entries,
         exits,
         init_cash=10_000.0,
         fees=0.001,
         slippage=0.0005,
-        ann_factor=barq.data.bars_per_year(args.interval),
+        ann_factor=binance.bars_per_year(args.interval),
         threads=4,
+        column_map=np.tile(np.arange(len(symbols)), len(pairs)),
     )
 
     labels = [(fast, slow, symbol) for fast, slow in pairs for symbol in symbols]

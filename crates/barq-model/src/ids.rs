@@ -59,6 +59,16 @@ pub struct InstrumentId {
 }
 
 impl InstrumentId {
+    /// Validate separate identity components without reinterpreting a dotted venue.
+    pub fn from_parts(symbol: &str, venue: &str) -> Result<Self, String> {
+        if symbol.is_empty() || venue.is_empty() || venue.contains('.') {
+            return Err(
+                "instrument requires a nonempty symbol and a nonempty venue without dots".into(),
+            );
+        }
+        format!("{symbol}.{venue}").parse()
+    }
+
     /// Builds an instrument id from its parts.
     #[must_use]
     pub const fn new(symbol: Symbol, venue: Venue) -> Self {
@@ -69,6 +79,22 @@ impl InstrumentId {
 impl std::fmt::Display for InstrumentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.symbol.as_str(), self.venue.as_str())
+    }
+}
+
+impl std::str::FromStr for InstrumentId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (symbol, venue) = value.rsplit_once('.').ok_or("expected SYMBOL.VENUE")?;
+        if symbol.is_empty()
+            || venue.is_empty()
+            || value
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '\\'))
+        {
+            return Err("instrument requires nonempty symbol and venue, without whitespace or path separators".into());
+        }
+        Ok(Self::new(Symbol::new(symbol), Venue::new(venue)))
     }
 }
 

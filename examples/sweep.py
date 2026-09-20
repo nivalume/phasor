@@ -12,7 +12,7 @@ def crossed_above(left, right):
 
 
 def main():
-    symbols = ("BTC", "ETH", "SOL", "AVAX")
+    symbols = ("BTCUSDT.SIM", "ETHUSDT.SIM", "SOLUSDT.SIM", "AVAXUSDT.SIM")
     pairs = ((5, 20), (5, 50), (10, 50), (10, 100), (20, 100), (20, 200), (20, 1900))
     rng = np.random.default_rng(20260920)
     close = 100.0 * np.cumprod(
@@ -39,14 +39,17 @@ def main():
         ],
         axis=1,
     )
-    swept_close = np.tile(close, (1, len(pairs)))
+    entries[1:] = entries[:-1].copy()
+    exits[1:] = exits[:-1].copy()
+    entries[0] = exits[0] = False
     portfolio = barq.from_signals(
-        swept_close,
+        close,
         entries,
         exits,
         init_cash=10_000.0,
         fees=0.001,
         threads=4,
+        column_map=np.tile(np.arange(len(symbols)), len(pairs)),
     )
 
     labels = [(fast, slow, symbol) for fast, slow in pairs for symbol in symbols]

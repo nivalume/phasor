@@ -39,6 +39,7 @@ from typing import Any
 import numpy as np
 
 from . import _barq, data
+from ._barq import InstrumentId, BarType
 from ._barq import Portfolio
 
 __all__ = [
@@ -48,6 +49,8 @@ __all__ = [
     "alpha158",
     "alpha360",
     "data",
+    "InstrumentId",
+    "BarType",
     "from_orders",
     "from_signals",
 ]
@@ -248,6 +251,15 @@ def _group_lens(value):
     return [int(n) for n in lengths]
 
 
+def _column_map(value):
+    if value is None:
+        return None
+    a = np.asarray(value)
+    if a.ndim != 1 or a.dtype.kind not in "iu" or a.size == 0 or np.any(a < 0):
+        raise ValueError("column_map must be a nonempty one-dimensional array of nonnegative integers")
+    return a.tolist()
+
+
 def from_signals(
     close,
     entries,
@@ -286,6 +298,7 @@ def from_signals(
     cash_sharing=False,
     group_lens=None,
     call_seq="default",
+    column_map=None,
 ) -> Portfolio:
     """Runs a signal-driven backtest and returns the portfolio.
 
@@ -293,6 +306,9 @@ def from_signals(
     ----------
     close, entries, exits
         ``(n_bars, n_cols)``, or 1-D for a single column. These set the shape.
+    column_map
+        Logical run column -> source market column. Close and OHLC stay (T, S);
+        signals and trading parameters use (T, len(column_map)).
     open, high, low
         The rest of the bar. Only needed for stops, and **required** for them:
         a stop level is tested against the bar's range, so without ``high`` and
@@ -383,6 +399,7 @@ def from_signals(
         cash_sharing=cash_sharing,
         group_lens=_group_lens(group_lens),
         call_seq=call_seq,
+        column_map=_column_map(column_map),
     )
 
 
@@ -415,6 +432,7 @@ def from_orders(
     cash_sharing=False,
     group_lens=None,
     call_seq="default",
+    column_map=None,
 ) -> Portfolio:
     """Runs a backtest from one order request per element.
 
@@ -428,6 +446,9 @@ def from_orders(
 
     Parameters
     ----------
+    column_map
+        Optional logical-column to source-column indices, as in from_signals.
+        Trading parameters use the logical width; market prices retain source width.
     close
         ``(n_bars, n_cols)``, or 1-D for a single column. Sets the shape, and
         resolves the ``inf`` sentinel in ``price`` and ``val_price``.
@@ -498,4 +519,5 @@ def from_orders(
         cash_sharing=cash_sharing,
         group_lens=_group_lens(group_lens),
         call_seq=call_seq,
+        column_map=_column_map(column_map),
     )

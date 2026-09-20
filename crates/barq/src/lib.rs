@@ -30,6 +30,8 @@
 
 pub use barq_analysis as analysis;
 pub use barq_core as core;
+#[cfg(feature = "data")]
+pub use barq_data as data;
 pub use barq_exec as exec;
 pub use barq_expr as expr;
 pub use barq_generic as generic;

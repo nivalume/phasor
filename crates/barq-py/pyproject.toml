@@ -14,6 +14,7 @@ classifiers = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
+data = ["pyarrow>=15"]
 # The reference, for the differential tests. Not needed to use the package —
 # and pinned, because the tests assert what this version does, including which
 # size types it refuses.
