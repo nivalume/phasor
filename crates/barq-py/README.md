@@ -69,6 +69,48 @@ is added.
 
 ## Factor expressions
 
+### Function strategies
+
+Use a Python function to turn a `BarPanel` or field mapping into entry and exit
+signals. A direct call returns raw, undelayed signals. `run` and `sweep` delay
+them one bar by default, then call the existing `from_signals` engine. With its
+default execution price, a decision on bar `t` fills at bar `t+1`'s close.
+
+```python
+@barq.strategy
+def ma_cross(data, fast=10, slow=50):
+    f = barq.factors(data, fast=f"Mean($close, {fast})",
+                     slow=f"Mean($close, {slow})")
+    return (barq.crossed_above(f["fast"], f["slow"]),
+            barq.crossed_above(f["slow"], f["fast"]))
+
+entries, exits = ma_cross({"close": close}, fast=10, slow=50)
+pf = ma_cross.run({"close": close}, params={"fast": 10, "slow": 50}, fees=0.001)
+pf = ma_cross.sweep(
+    {"close": close},
+    params=[{"fast": 10, "slow": 50}, {"fast": 20, "slow": 100}],
+    fees=0.001,
+)
+```
+
+The strategy returns two Boolean arrays of shape `(time, symbols)` (a 1-D
+array also works for one symbol). Each parameter set runs over every symbol;
+result columns follow parameter order, then source symbol order. `signal_delay`
+accepts a nonnegative bar count, including zero. `barq.factors` uses the existing
+factor DSL and rejects expressions marked as using future data. It does not
+inspect arbitrary Python strategy code for lookahead.
+
+For one account per parameter set, pass `cash_sharing=True`; the wrapper groups
+each set's symbols automatically, leaving sets independent. Execution options
+such as `size`, `fees`, `slippage`, `init_cash`, and `threads` pass through to
+`from_signals`. OHLC fields come from the input panel or mapping. The wrapper
+owns the signal arrays, price column map, and group boundaries.
+
+`barq.crossed_above` uses the engine's crossing rules for equality and missing
+values. These differ from the earlier examples' NumPy
+comparison, so migrated strategies can produce different trades at those
+boundaries.
+
 Compile one custom expression once and evaluate it against any same-shaped
 fields:
 

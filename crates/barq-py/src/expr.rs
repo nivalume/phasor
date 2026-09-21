@@ -7,6 +7,26 @@ use pyo3::types::{PyDict, PyDictMethods};
 
 use crate::array::{columns_of, to_py_err};
 
+#[pyfunction]
+pub fn crossed_above(
+    left: PyReadonlyArray2<'_, f64>,
+    right: PyReadonlyArray2<'_, f64>,
+) -> PyResult<Vec<Vec<bool>>> {
+    let (a, rows, cols) = columns_of(&left)?;
+    let (b, other_rows, other_cols) = columns_of(&right)?;
+    if (rows, cols) != (other_rows, other_cols) {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "crossed_above inputs must have the same shape",
+        ));
+    }
+    Ok((0..cols)
+        .map(|col| {
+            let start = col * rows;
+            barq_generic::crossed_above_1d(&a[start..start + rows], &b[start..start + rows], 0)
+        })
+        .collect())
+}
+
 /// A compiled set of named factor expressions.
 #[pyclass(name = "_FactorSet", module = "barq._barq")]
 #[derive(Debug)]

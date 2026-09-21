@@ -1100,6 +1100,7 @@ fn _barq(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(from_orders, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha158, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha360, m)?)?;
+    m.add_function(wrap_pyfunction!(expr::crossed_above, m)?)?;
     m.add(
         "__doc__",
         "Rust engine for barq. Use the `barq` package, not this.",

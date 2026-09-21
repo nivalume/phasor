@@ -22,6 +22,7 @@ arrow-schema = { workspace = true, features = ["ffi"] }
 barq-analysis = { workspace = true }
 barq-core = { workspace = true }
 barq-expr = { workspace = true }
+barq-generic = { workspace = true }
 barq-model = { workspace = true }
 barq-records = { workspace = true }
 barq-sim = { workspace = true }

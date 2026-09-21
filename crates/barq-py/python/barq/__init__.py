@@ -53,6 +53,9 @@ __all__ = [
     "BarType",
     "from_orders",
     "from_signals",
+    "strategy",
+    "factors",
+    "crossed_above",
 ]
 __version__ = "0.1.0"
 
@@ -521,3 +524,6 @@ def from_orders(
         call_seq=call_seq,
         column_map=_column_map(column_map),
     )
+
+
+from .strategy import crossed_above, factors, strategy

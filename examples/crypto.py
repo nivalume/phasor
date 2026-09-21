@@ -11,11 +11,17 @@ import barq
 import numpy as np
 
 
-def crossed_above(left, right):
-    above = (left > right) & np.isfinite(left) & np.isfinite(right)
-    crossed = np.zeros_like(above, dtype=bool)
-    crossed[1:] = above[1:] & ~above[:-1]
-    return crossed
+@barq.strategy
+def ma_cross(data, fast=10, slow=50):
+    values = barq.factors(
+        data,
+        fast=f"Mean($close, {fast})",
+        slow=f"Mean($close, {slow})",
+    )
+    return (
+        barq.crossed_above(values["fast"], values["slow"]),
+        barq.crossed_above(values["slow"], values["fast"]),
+    )
 
 
 def load_panel(instruments, interval, directory):
@@ -69,38 +75,14 @@ def main():
             temporary.cleanup()
 
     pairs = ((10, 50), (20, 50), (20, 100), (50, 200))
-    expressions = {}
-    for index, (fast, slow) in enumerate(pairs):
-        expressions[f"fast_{index}"] = f"Mean($close, {fast})"
-        expressions[f"slow_{index}"] = f"Mean($close, {slow})"
-    values = barq.FactorSet.compile(expressions).evaluate({"close": panel.close})
-    entries = np.concatenate(
-        [
-            crossed_above(values[f"fast_{i}"], values[f"slow_{i}"])
-            for i in range(len(pairs))
-        ],
-        axis=1,
-    )
-    exits = np.concatenate(
-        [
-            crossed_above(values[f"slow_{i}"], values[f"fast_{i}"])
-            for i in range(len(pairs))
-        ],
-        axis=1,
-    )
-    entries[1:] = entries[:-1].copy()
-    exits[1:] = exits[:-1].copy()
-    entries[0] = exits[0] = False
-    portfolio = barq.from_signals(
-        panel.close,
-        entries,
-        exits,
+    portfolio = ma_cross.sweep(
+        panel,
+        params=[{"fast": fast, "slow": slow} for fast, slow in pairs],
         init_cash=10_000.0,
         fees=0.001,
         slippage=0.0005,
         ann_factor=binance.bars_per_year(args.interval),
         threads=4,
-        column_map=np.tile(np.arange(len(symbols)), len(pairs)),
     )
 
     labels = [(fast, slow, symbol) for fast, slow in pairs for symbol in symbols]

@@ -71,6 +71,15 @@ scope for now, but phase 1 carries two constraints on its behalf: the execution
 kernel must be callable for a single bar in isolation, and record writes go
 through a `RecordSink` trait. Both are cheap now and expensive to retrofit.
 
+## Future enhancements (TODO)
+
+These are ideas to evaluate after the first function-strategy interface, not
+implemented features or scheduled work:
+
+- [ ] Automatic parameter search: choose combinations from ranges and constraints against an objective and a separate validation interval, beyond explicit sweeps.
+- [ ] Cross-run factor caching: evaluate safe reuse across strategies and backtests with data identity, invalidation, and memory limits; first measure reuse within one sweep.
+- [ ] Declarative trading rules: consider factor-name references and conditions such as crossings, reusing the existing expression DSL where possible.
+
 ## Developing
 
 ```bash
