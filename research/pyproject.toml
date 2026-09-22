@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "barq-lab"
+version = "0.1.0"
+description = "Pre-registered factor research protocol on barq"
+requires-python = ">=3.10"
+dependencies = ["barq[data]", "numpy", "pyyaml", "pymupdf", "openai>=1"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+barq-lab = "barq_lab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["barq_lab*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
