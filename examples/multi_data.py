@@ -6,18 +6,18 @@ existing inputs only: data/{schema}/{key}/*.parquet for catalog, or
 {schema}-{column}.{parquet,csv} for standalone files (columns 0 and 1).
 """
 import argparse
-from pathlib import Path
 import resource
 import sys
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
+from typing import Any
 
 import barq
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
-import pyarrow.csv as csv
-import pyarrow.parquet as parquet
+from pyarrow import csv, parquet
 
 INSTRUMENTS = ("ADAUSDC.BINANCE", "ETHUSDC.BINANCE")
 BAR_TYPES = tuple(f"{i}-1-MINUTE-LAST-EXTERNAL" for i in INSTRUMENTS)
@@ -29,8 +29,8 @@ def decode(batch, context):
     """User-owned conversion: vendor milliseconds -> availability nanoseconds."""
     names = [name for name in batch.schema.names if name not in ("timestamp_ms", "published_ms")]
     return pa.RecordBatch.from_arrays(
-        [pc.multiply(batch["timestamp_ms"], pa.scalar(1_000_000, pa.uint64())),
-         pc.multiply(batch["published_ms"], pa.scalar(1_000_000, pa.uint64())),
+        [pc.call_function("multiply", [batch["timestamp_ms"], pa.scalar(1_000_000, pa.uint64())]),
+         pc.call_function("multiply", [batch["published_ms"], pa.scalar(1_000_000, pa.uint64())]),
          *[batch[name] for name in names]],
         names=["event_time", "available_time", *names],
     )
@@ -61,7 +61,7 @@ def write_samples(root, source):
             step = {"bars": 1, "funding": 80, "news": 13}[name]
             t = times[::step]
             # News published two minutes after the event cannot enter earlier factors.
-            content = {"timestamp_ms": t, "published_ms": t + (120_000 if name == "news" else 0)}
+            content: dict[str, Any] = {"timestamp_ms": t, "published_ms": t + (120_000 if name == "news" else 0)}
             if name == "bars":
                 content.update(open=open_, high=np.maximum(open_, close)*1.01,
                                low=np.minimum(open_, close)*0.99, close=close,

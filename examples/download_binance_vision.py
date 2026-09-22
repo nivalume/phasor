@@ -33,12 +33,12 @@ import io
 import itertools
 import json
 import os
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from zipfile import ZipFile
@@ -80,10 +80,9 @@ def _month_cursor(value: str | date) -> date:
     if isinstance(value, date):
         return value.replace(day=1)
     try:
-        parsed = datetime.strptime(value, "%Y-%m")
+        return date.fromisoformat(f"{value}-01")
     except ValueError as error:
         raise ValueError(f"expected YYYY-MM, got {value!r}") from error
-    return parsed.date()
 
 
 def _next_month(value: date) -> date:
@@ -99,7 +98,7 @@ def _iter_months(start: date, end: date) -> Iterable[date]:
 
 def _parse_date(value: str) -> date:
     try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
+        return date.fromisoformat(value)
     except ValueError as error:
         raise ValueError(f"expected YYYY-MM-DD, got {value!r}") from error
 
@@ -180,8 +179,8 @@ def _parse_rows(payload: bytes) -> pa.Table:
     open_time = pa.array(collected[0], type=pa.uint64())
     close_time = pa.array(collected[6], type=pa.uint64())
     columns = {
-        "event_time": pc.multiply(open_time, pa.scalar(1_000_000, pa.uint64())),
-        "available_time": pc.multiply(close_time, pa.scalar(1_000_000, pa.uint64())),
+        "event_time": pc.call_function("multiply", [open_time, pa.scalar(1_000_000, pa.uint64())]),
+        "available_time": pc.call_function("multiply", [close_time, pa.scalar(1_000_000, pa.uint64())]),
         "open": pa.array(collected[1], type=pa.float64()),
         "high": pa.array(collected[2], type=pa.float64()),
         "low": pa.array(collected[3], type=pa.float64()),
@@ -244,9 +243,9 @@ def _download_month(archive: Archive, *, dry_run: bool, keep_archive: bool) -> t
         return result
     # Monthly archives can be absent for a newly listed contract or a partial
     # month. Recover the same month from daily files without losing the key.
-    month = datetime.strptime(archive.period, "%Y-%m").date()
+    month = _month_cursor(archive.period)
     last = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
-    today = date.today()
+    today = datetime.now(UTC).date()
     if month.year == today.year and month.month == today.month:
         # Vision cannot publish future daily files. The current day's archive
         # is normally incomplete as well, so stop at the previous UTC day.
@@ -274,7 +273,7 @@ def download(*, root: Path, symbols: Iterable[str] = DEFAULT_SYMBOLS, intervals:
     if unknown:
         raise ValueError(f"unsupported interval(s): {', '.join(unknown)}")
     begin = _month_cursor(start)
-    finish = _month_cursor(end) if end else date.today().replace(day=1)
+    finish = _month_cursor(end) if end else datetime.now(UTC).date().replace(day=1)
     if begin >= finish:
         raise ValueError("start must be before end")
     archives = _archives(root, symbols, intervals, begin, finish)
@@ -289,7 +288,7 @@ def download(*, root: Path, symbols: Iterable[str] = DEFAULT_SYMBOLS, intervals:
             print(f"{period}: {status} ({rows:,} rows)")
     if not dry_run:
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"source": BASE_URL, "symbols": symbols, "intervals": intervals, "start": begin.isoformat(), "end": finish.isoformat(), "generated_at": datetime.now(timezone.utc).isoformat()}, indent=2) + "\n")
+        manifest.write_text(json.dumps({"source": BASE_URL, "symbols": symbols, "intervals": intervals, "start": begin.isoformat(), "end": finish.isoformat(), "generated_at": datetime.now(UTC).isoformat()}, indent=2) + "\n")
     print(f"planned={len(archives)} completed={sum(status in ('downloaded', 'cached') or status.startswith('daily:') for _, _, status in results)} root={root}")
 
 

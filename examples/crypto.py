@@ -3,12 +3,12 @@
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import binance
-import pyarrow as pa
-import pyarrow.compute as pc
 
 import barq
+import binance
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 
 
 @barq.strategy
@@ -41,7 +41,13 @@ def load_panel(instruments, interval, directory):
 
 def decode_cached(batch, context):
     # Binance's inclusive closing millisecond becomes the end boundary.
-    time = pc.multiply(pc.add(batch["close_time"], pa.scalar(1, pa.uint64())), pa.scalar(1_000_000, pa.uint64()))
+    time = pc.call_function(
+        "multiply",
+        [
+            pc.call_function("add", [batch["close_time"], pa.scalar(1, pa.uint64())]),
+            pa.scalar(1_000_000, pa.uint64()),
+        ],
+    )
     fields = ["open", "high", "low", "close", "volume"]
     return pa.RecordBatch.from_arrays([time, *[batch[n] for n in fields]], names=["time", *fields])
 

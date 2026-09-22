@@ -1,0 +1,11 @@
+[project]
+name = "barq-dev"
+version = "0.0.0"
+requires-python = ">=3.14,<3.15"
+dependencies = ["barq[data]"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+barq = { path = "crates/barq-py", editable = true }

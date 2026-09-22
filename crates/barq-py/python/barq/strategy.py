@@ -5,11 +5,20 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import wraps
 from inspect import signature
+from typing import Any, Protocol, cast
 
 import numpy as np
 
-from . import _barq, FactorSet, from_signals
+from . import FactorSet, _barq, from_signals
 from .data import BarPanel
+
+
+class StrategyFunction(Protocol):
+    def __call__(self, data: Any, **params: Any) -> Any: ...
+
+    def run(self, data: Any, *, params: Mapping[str, Any] | None = None, signal_delay: int = 1, **options: Any) -> Any: ...
+
+    def sweep(self, data: Any, *, params: Any, signal_delay: int = 1, **options: Any) -> Any: ...
 
 
 def _field(data, name):
@@ -68,7 +77,7 @@ def _delay(array, bars):
     return delayed
 
 
-def strategy(func):
+def strategy(func: Any) -> StrategyFunction:
     """Add run/sweep methods to a signal-producing function."""
     if not callable(func):
         raise TypeError("strategy requires a callable")
@@ -135,6 +144,7 @@ def strategy(func):
             signal_delay=signal_delay, **options,
         )
 
-    wrapped.run = run
-    wrapped.sweep = sweep
-    return wrapped
+    managed = cast(StrategyFunction, wrapped)
+    managed.run = run
+    managed.sweep = sweep
+    return managed

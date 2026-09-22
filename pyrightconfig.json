@@ -1,0 +1,13 @@
+{
+  "include": ["examples", "crates/barq-py/python"],
+  "exclude": [".venv", "target"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "executionEnvironments": [
+    {
+      "root": "examples",
+      "extraPaths": ["crates/barq-py/python"]
+    }
+  ]
+}
