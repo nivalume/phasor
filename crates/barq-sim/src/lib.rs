@@ -10,7 +10,7 @@
 //! state in `Rc<RefCell<..>>` behind a process-global message bus, so its
 //! sweep is a sequential `for` loop and users are told to run multiple
 //! processes. Keeping every engine instance `Send`, with no global state, is
-//! a hard constraint on this codebase — see `docs/02-parallelism.md`.
+//! a hard constraint on this codebase — see `docs/ARCHITECTURE.md §11.5`.
 //!
 //! [`from_orders::simulate_from_orders_parallel`] returns records equal to the
 //! serial version for the same input, whatever the thread count. That is not

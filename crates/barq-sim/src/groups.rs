@@ -25,7 +25,7 @@
 //!
 //! The last case is the honest limit and it is inherent, not an artefact: a
 //! shared cash balance is a sequential dependency across the whole group.
-//! `docs/02-parallelism.md` carries the measured figures.
+//! `docs/ARCHITECTURE.md §11.2` carries the measured figures.
 //!
 //! # Call order
 //!

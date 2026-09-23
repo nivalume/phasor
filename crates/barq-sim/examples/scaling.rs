@@ -4,7 +4,7 @@
 //! linearly. **Sub-linear scaling is a finding, not a characteristic to
 //! accept** — it means false sharing, allocator contention, memory bandwidth,
 //! or state that is not as column-local as the design claims. See
-//! `docs/02-parallelism.md`.
+//! `docs/ARCHITECTURE.md §11.2`.
 //!
 //! Two workloads run, because they stress different things:
 //!

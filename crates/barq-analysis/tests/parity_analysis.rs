@@ -11,7 +11,7 @@
 //!
 //! The series are compared as well as the scalars. A Sharpe ratio that agrees
 //! over a value curve that does not is a coincidence, not a result — and the
-//! reason `docs/08-verification.md` insists on comparing record arrays rather
+//! reason `docs/ARCHITECTURE.md §14.1` insists on comparing record arrays rather
 //! than aggregates applies here too.
 //!
 //! Fixtures come from `tests/parity/generate_analysis.py` and are committed,

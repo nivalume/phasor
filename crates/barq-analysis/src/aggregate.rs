@@ -178,7 +178,7 @@ mod tests {
     /// Two quantiles crossed with three symbols: 6 columns.
     ///
     /// Parameters repeat and symbols tile, so a parameter's columns are
-    /// contiguous — the layout `docs/03-column-layout.md` fixes.
+    /// contiguous — the layout `docs/ARCHITECTURE.md §3.1` fixes.
     fn sweep() -> Columns {
         let quantile = Level::repeat("quantile", &[Label::from("0.8"), Label::from("0.9")], 3);
         let symbol = Level::tile(

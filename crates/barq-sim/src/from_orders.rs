@@ -587,7 +587,7 @@ pub fn simulate_from_orders_logged(args: &FromOrders<'_>) -> Result<Journal> {
 /// because the crates.io mirror is unavailable in this environment, and partly
 /// because it is a genuine test of the architecture: scoped threads require
 /// the whole argument set to be `Sync` and every column's state to be owned
-/// locally, which is exactly the constraint `docs/02-parallelism.md` imposes.
+/// locally, which is exactly the constraint `docs/ARCHITECTURE.md §11.2` imposes.
 /// Swapping in a real pool later is a change to this function alone.
 ///
 /// # Errors

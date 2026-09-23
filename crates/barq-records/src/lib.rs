@@ -6,7 +6,7 @@
 //! computation is the whole architecture — it means the analysis layer is
 //! written once and works on either tier's results, and it means a
 //! vectorized sweep and an event-driven replay can be compared column by
-//! column. See `docs/01-architecture.md`.
+//! column. See `docs/ARCHITECTURE.md §2.2`.
 //!
 //! # Layout
 //!
@@ -71,7 +71,7 @@ pub trait RecordSink {
 ///
 /// `Send` is part of the bound because the parallel path hands each thread its
 /// own buffer. Nothing is shared, which is the whole design — see
-/// `docs/02-parallelism.md`.
+/// `docs/ARCHITECTURE.md §11.2`.
 pub trait SinkBuffer: RecordSink + logs::LogSink + Send + Sized {
     /// An empty buffer with room for `capacity` fills.
     fn with_capacity(capacity: usize) -> Self;

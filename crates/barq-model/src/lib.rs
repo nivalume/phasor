@@ -5,16 +5,16 @@
 //!
 //! The *execution* enums ([`enums`]) follow the reference vectorized engine,
 //! because reproducing its fill semantics bit-for-bit is the acceptance test
-//! for this project (see `docs/08-verification.md`).
+//! for this project (see `docs/ARCHITECTURE.md §14`).
 //!
 //! The *value and identifier* types ([`types`], [`ids`]) follow
 //! NautilusTrader's shape — fixed-point raw integers with per-instance
 //! precision, interned identifiers — because phase 2 puts a Nautilus-style
 //! strategy API on top of this same model and a mismatch there would mean
-//! converting on every call. See `docs/07-nautilus-compat.md`.
+//! converting on every call. See `docs/ARCHITECTURE.md §17.1`.
 //!
 //! Every line here is an independent implementation written against public
-//! semantics. No code is taken from either project; see `docs/09-licensing.md`.
+//! semantics. No code is taken from either project; see `docs/ARCHITECTURE.md` Appendix A.
 
 pub mod bar;
 pub mod enums;

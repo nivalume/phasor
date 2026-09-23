@@ -80,8 +80,8 @@ takes a completely different execution path but emits the same records — so on
 analysis layer serves both, and a vectorized sweep can be validated against an
 event-driven replay column by column.
 
-**Start with [`docs/`](docs/README.md).** [01 Architecture](docs/01-architecture.md)
-and [02 Parallelism](docs/02-parallelism.md) cover the load-bearing decisions.
+**Start with [the architecture document](docs/ARCHITECTURE.md)** ([中文](docs/ARCHITECTURE.zh-CN.md)).
+It reads top down; §2 (system overview) and §11 (parallelism) cover the load-bearing decisions.
 
 ## Status
 
@@ -96,8 +96,8 @@ aggregation — plus the array layer (rolling, expanding and exponential
 windows), the eight indicators with their parameter sweep, and the signal
 layer that produces entries and exits rather than only consuming them. The factor DSL is
 implemented through Alpha158 and Alpha360, and the Python package provides the
-external market-data boundary. See the stage table in
-[`docs/README.md`](docs/README.md).
+external market-data boundary. See [§17 of the architecture document](docs/ARCHITECTURE.md#17-roadmap-and-known-gaps)
+for what is planned and the known gaps.
 
 ### TODO
 
@@ -176,4 +176,4 @@ Both reference projects are studied as specifications and used as test oracles;
 no code is copied from either. NautilusTrader is LGPL-3.0-only and vectorbt is
 Apache-2.0 with Commons Clause, so every line here is an independent
 implementation written against public semantics. See
-[09 Licensing](docs/09-licensing.md).
+[Appendix A of the architecture document](docs/ARCHITECTURE.md#appendix-a-licensing-and-provenance).

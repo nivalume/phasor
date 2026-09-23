@@ -5,7 +5,7 @@
 //! impossible (mismatched shapes, a level that does not exist, negative
 //! cash). An order that simply cannot be filled is **not** an error; it is a
 //! rejected order carrying a status code, returned through the normal path.
-//! See `docs/04-execution-model.md`.
+//! See `docs/ARCHITECTURE.md §3.5`.
 //!
 //! Written by hand rather than derived, to keep the foundation crate free of
 //! external dependencies.

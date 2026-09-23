@@ -1,7 +1,7 @@
 //! `barq` — a parallel, factor-driven vectorized backtesting engine.
 //!
 //! This crate is the façade: it re-exports the workspace's crates and
-//! provides a [`prelude`]. Read `docs/01-architecture.md` first; the short
+//! provides a [`prelude`]. Read `docs/ARCHITECTURE.md` first; the short
 //! version is:
 //!
 //! - Factor expressions produce a `(time x symbol)` panel.
@@ -26,7 +26,7 @@
 //! layers, the analysis layer, the array layer and the indicators are
 //! implemented and pinned against the reference. The factor DSL computes the
 //! full Alpha158 and Alpha360 expression sets and feeds the existing signal simulator. See
-//! `docs/README.md` for the stage-by-stage status.
+//! `docs/ARCHITECTURE.md §17` for what is planned and known gaps.
 
 pub use barq_analysis as analysis;
 pub use barq_core as core;
