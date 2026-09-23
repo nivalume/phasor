@@ -1,5 +1,5 @@
 {
-  "include": ["examples", "crates/barq-py/python"],
+  "include": ["examples", "research", "crates/barq-py/python"],
   "exclude": [".venv", "target"],
   "venvPath": ".",
   "venv": ".venv",
