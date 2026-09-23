@@ -99,6 +99,16 @@ implemented through Alpha158 and Alpha360, and the Python package provides the
 external market-data boundary. See the stage table in
 [`docs/README.md`](docs/README.md).
 
+### TODO
+
+- **Batched factor output.** `FactorSet::evaluate` returns every factor as one
+  `f64` matrix held in memory at once. Intermediates are released after their
+  last use, so on Alpha158 at 2520×500 nearly all of the ~1.7 GB peak is the
+  158 output matrices themselves; a full A-share panel (5000 symbols × 2520
+  days) would need ~16 GB for the outputs alone. Evaluate in factor batches
+  and hand each batch to a caller-supplied sink (or write it to Arrow/Parquet)
+  so peak memory is bounded by the batch rather than the whole set.
+
 ## Try it
 
 ```bash
