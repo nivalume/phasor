@@ -8,6 +8,7 @@ mod alpha158;
 mod alpha360;
 mod backend;
 mod eval;
+mod order;
 mod parse;
 #[cfg(feature = "polars")]
 mod polars_backend;

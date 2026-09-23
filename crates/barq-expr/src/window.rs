@@ -458,3 +458,74 @@ impl Accumulator<(f64, f64)> for Pair {
         covariance / (va * vb).sqrt()
     }
 }
+
+/// Qlib's rolling `Skew` (adjusted Fisher–Pearson) or `Kurt` (bias-corrected
+/// excess kurtosis) from shifted power sums, `NaN` for a constant window as in
+/// the reference (whose central moments are then exactly zero).
+#[derive(Debug, Default)]
+pub(crate) struct Shape {
+    kurtosis: bool,
+    moments: Moments,
+    sum_cube: f64,
+    sum_fourth: f64,
+}
+
+impl Shape {
+    pub(crate) fn skew() -> Self {
+        Self::default()
+    }
+    pub(crate) fn kurt() -> Self {
+        Self {
+            kurtosis: true,
+            ..Self::default()
+        }
+    }
+}
+
+impl Accumulator<f64> for Shape {
+    fn rebuild(&mut self, window: &[f64], start: usize) {
+        self.moments.rebuild(std::iter::empty());
+        for (offset, &value) in window.iter().enumerate() {
+            self.push(start + offset, value);
+        }
+    }
+    fn push(&mut self, _: usize, value: f64) {
+        if value.is_nan() {
+            return;
+        }
+        if self.moments.is_empty() {
+            (self.sum_cube, self.sum_fourth) = (0.0, 0.0);
+        }
+        self.moments.push(value);
+        let d = value - self.moments.shift;
+        self.sum_cube += d * d * d;
+        self.sum_fourth += d * d * d * d;
+    }
+    fn pop(&mut self, _: usize, value: f64) {
+        if value.is_nan() {
+            return;
+        }
+        let d = value - self.moments.shift;
+        self.moments.pop(value);
+        self.sum_cube -= d * d * d;
+        self.sum_fourth -= d * d * d * d;
+    }
+    fn value(&self, _: &[f64], _: usize) -> f64 {
+        let count = self.moments.count;
+        if count < if self.kurtosis { 4 } else { 3 } || self.moments.constant() {
+            return f64::NAN;
+        }
+        let n = count as f64;
+        let mu = self.moments.sum / n;
+        let (s2, s3) = (self.moments.sum_sq, self.sum_cube);
+        let m2 = self.moments.centered_sq();
+        if self.kurtosis {
+            let m4 = self.sum_fourth - 4.0 * mu * s3 + 6.0 * mu * mu * s2 - 3.0 * n * mu.powi(4);
+            let biased_fisher = n * m4 / (m2 * m2) - 3.0;
+            (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * biased_fisher + 6.0)
+        } else {
+            let m3 = s3 - 3.0 * mu * s2 + 2.0 * n * mu.powi(3);
+            n * (n - 1.0).sqrt() / (n - 2.0) * m3 / m2.powf(1.5)
+        }
+    }
+}

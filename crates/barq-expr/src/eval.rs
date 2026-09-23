@@ -8,8 +8,9 @@ use barq_model::OhlcvPanel;
 use rayon::prelude::*;
 
 use crate::FactorSet;
+use crate::order::{Order, ordered, rolling_arg_extreme};
 use crate::parse::Expression;
-use crate::window::{Deviation, Fit, Pair, Regression, Sum, Wma, slide};
+use crate::window::{Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide};
 
 /// Named column-major fields supplied to a factor set.
 #[derive(Debug, Clone)]
@@ -694,23 +695,19 @@ fn rolling_single(name: &str, input: &[f64], window: usize, q: f64) -> Result<Ve
             if !(0.0..=1.0).contains(&q) {
                 return Err(Error::Invariant("quantile must be in 0..=1".into()));
             }
-            rolling_apply_1d(input, window, Some(1), |_, values| quantile(values, q))
+            Ok(ordered(input, window, Order::Quantile(q)))
         }
-        "Med" => rolling_apply_1d(input, window, Some(1), |_, values| quantile(values, 0.5)),
-        "Mad" => rolling_apply_1d(input, window, Some(1), |_, values| mad(values)),
+        "Med" => Ok(ordered(input, window, Order::Quantile(0.5))),
+        "Mad" => Ok(ordered(input, window, Order::Mad)),
         "Count" => rolling_apply_1d(input, window, Some(1), |_, values| {
             values.iter().filter(|value| !value.is_nan()).count() as f64
         }),
-        "Skew" => rolling_apply_1d(input, window, Some(1), |_, values| skew(values)),
-        "Kurt" => rolling_apply_1d(input, window, Some(1), |_, values| kurt(values)),
+        "Skew" => Ok(slide(input, window, &mut Shape::skew())),
+        "Kurt" => Ok(slide(input, window, &mut Shape::kurt())),
         "WMA" => Ok(slide(input, window, &mut Wma::default())),
-        "Rank" => rolling_apply_1d(input, window, Some(1), |_, values| rank_last(values)),
-        "IdxMax" => rolling_apply_1d(input, window, Some(1), |_, values| {
-            arg_extreme(values, false)
-        }),
-        "IdxMin" => rolling_apply_1d(input, window, Some(1), |_, values| {
-            arg_extreme(values, true)
-        }),
+        "Rank" => Ok(ordered(input, window, Order::Rank)),
+        "IdxMax" => Ok(rolling_arg_extreme(input, window, false)),
+        "IdxMin" => Ok(rolling_arg_extreme(input, window, true)),
         "Slope" => Ok(slide(input, window, &mut Regression::new(Fit::Slope))),
         "Rsquare" => Ok(slide(input, window, &mut Regression::new(Fit::Rsquare))),
         "Resi" => Ok(slide(input, window, &mut Regression::new(Fit::Resi))),
@@ -720,6 +717,7 @@ fn rolling_single(name: &str, input: &[f64], window: usize, q: f64) -> Result<Ve
     }
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn quantile(values: &[f64], q: f64) -> f64 {
     let mut values: Vec<f64> = values.iter().copied().filter(|v| !v.is_nan()).collect();
     values.sort_by(f64::total_cmp);
@@ -732,6 +730,7 @@ pub(crate) fn quantile(values: &[f64], q: f64) -> f64 {
     values[lower] + fraction * (values[index.ceil() as usize] - values[lower])
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn mad(values: &[f64]) -> f64 {
     let values: Vec<f64> = values
         .iter()
@@ -745,6 +744,7 @@ pub(crate) fn mad(values: &[f64]) -> f64 {
     values.iter().map(|value| (value - mean).abs()).sum::<f64>() / values.len() as f64
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn skew(values: &[f64]) -> f64 {
     let values: Vec<f64> = values
         .iter()
@@ -767,6 +767,7 @@ pub(crate) fn skew(values: &[f64]) -> f64 {
     n * (n - 1.0).sqrt() / (n - 2.0) * m3 / m2.powf(1.5)
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn kurt(values: &[f64]) -> f64 {
     let values: Vec<f64> = values
         .iter()
@@ -853,6 +854,7 @@ pub(crate) fn ema_expanding(values: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+#[cfg(any(test, feature = "polars"))]
 #[allow(
     clippy::float_cmp,
     reason = "Qlib's average-rank tie groups are defined by exact equality"
@@ -870,6 +872,7 @@ pub(crate) fn rank_last(values: &[f64]) -> f64 {
     (below + (equal + 1.0) / 2.0) / clean.len() as f64
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn arg_extreme(values: &[f64], minimum: bool) -> f64 {
     let mut best = 0;
     for index in 1..values.len() {
@@ -1057,7 +1060,7 @@ mod tests {
 
     #[test]
     fn incremental_windows_match_a_full_rescan() {
-        let reference: [(&str, Reducer); 7] = [
+        let reference: [(&str, Reducer); 14] = [
             ("Sum", |v| v.iter().filter(|x| !x.is_nan()).sum()),
             ("Std", |v| {
                 rolling_std_qlib(v, v.len(), 1)
@@ -1077,6 +1080,13 @@ mod tests {
             ("Slope", |v| centered_regression(v).0),
             ("Rsquare", |v| centered_regression(v).1),
             ("Resi", |v| centered_regression(v).2),
+            ("Med", |v| quantile(v, 0.5)),
+            ("Mad", mad),
+            ("Skew", skew),
+            ("Kurt", kurt),
+            ("Rank", rank_last),
+            ("IdxMax", |v| arg_extreme(v, false)),
+            ("IdxMin", |v| arg_extreme(v, true)),
         ];
         for (case, series) in stress_series().iter().enumerate() {
             for window in [1, 2, 3, 5, 20, 61, 299, 300, 1000] {
@@ -1086,6 +1096,16 @@ mod tests {
                         rolling_apply_1d(series, window, Some(1), |_, v| reduce(v)).unwrap();
                     assert_close(
                         &format!("{name} case {case} window {window}"),
+                        &fast,
+                        &naive,
+                    );
+                }
+                for q in [0.0, 0.2, 0.5, 0.8, 1.0] {
+                    let fast = rolling_single("Quantile", series, window, q).unwrap();
+                    let naive =
+                        rolling_apply_1d(series, window, Some(1), |_, v| quantile(v, q)).unwrap();
+                    assert_close(
+                        &format!("Quantile {q} case {case} window {window}"),
                         &fast,
                         &naive,
                     );

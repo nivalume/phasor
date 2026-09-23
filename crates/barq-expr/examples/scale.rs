@@ -57,7 +57,14 @@ fn main() {
         "Corr($close,Log($volume+1),60)",
         "Cov($close,$volume,60)",
         "Quantile($close,60,0.8)",
+        "Med($close,60)",
         "Rank($close,60)",
+        "Mad($close,60)",
+        "Skew($close,60)",
+        "Kurt($close,60)",
+        "IdxMax($high,60)",
+        "IdxMin($low,60)",
+        "Count($close,60)",
         "($close-$open)/($high-$low+1e-12)",
     ];
     for source in single {
