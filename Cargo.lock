@@ -293,6 +293,7 @@ dependencies = [
  "barq-model",
  "criterion",
  "polars",
+ "rayon",
 ]
 
 [[package]]

@@ -19,8 +19,13 @@
 //! is enough to move a fill across a threshold. The accumulating form is the
 //! reference's, so it is the one here.
 //!
-//! The minimum and maximum re-scan their window, because there is no
-//! subtraction that removes a value from a maximum.
+//! The minimum and maximum keep a monotonic queue of candidate bars instead:
+//! there is no subtraction that removes a value from a maximum, but a bar that
+//! is dominated by a later one can never be the maximum again, so each bar is
+//! queued and dropped once. The result is a comparison, not an accumulation,
+//! so it is bit-identical to re-scanning the window.
+
+use std::collections::VecDeque;
 
 use barq_core::error::{Error, Result};
 use barq_core::matrix::Matrix;
@@ -221,22 +226,32 @@ fn rolling_extremum_1d(
 ) -> Result<Vec<f64>> {
     let minp = resolve_minp(window, minp)?;
     let mut out = vec![f64::NAN; a.len()];
+    // Indices of the window's non-`NaN` values whose value is still a
+    // candidate: each is strictly better than every later one, so the front is
+    // the extremum and every index is pushed and popped once.
+    let mut candidates = VecDeque::new();
+    let mut cnt = 0_usize;
     for i in 0..a.len() {
-        // Seeded from the current bar, as the reference does, so that a
-        // window whose observations are all `NaN` still carries a `NaN`
-        // rather than an infinity.
-        let mut best = a[i];
-        let mut cnt = 0_usize;
-        let start = (i + 1).saturating_sub(window);
-        for &v in &a[start..=i] {
-            if v.is_nan() {
-                continue;
+        if i >= window && !a[i - window].is_nan() {
+            cnt -= 1;
+            if candidates.front() == Some(&(i - window)) {
+                candidates.pop_front();
             }
-            if best.is_nan() || (if want_min { v < best } else { v > best }) {
-                best = v;
-            }
-            cnt += 1;
         }
+        let v = a[i];
+        if !v.is_nan() {
+            cnt += 1;
+            while candidates
+                .back()
+                .is_some_and(|&j: &usize| if want_min { a[j] >= v } else { a[j] <= v })
+            {
+                candidates.pop_back();
+            }
+            candidates.push_back(i);
+        }
+        // An all-`NaN` window carries the current bar's `NaN`, as the
+        // reference's seed does, rather than an infinity.
+        let best = candidates.front().map_or(v, |&j| a[j]);
         out[i] = if cnt < minp { f64::NAN } else { best };
     }
     Ok(out)

@@ -5,9 +5,11 @@ use barq_core::error::{Error, Result};
 use barq_core::matrix::Matrix;
 use barq_generic::rolling::{rolling_apply_1d, rolling_max_1d, rolling_mean_1d, rolling_min_1d};
 use barq_model::OhlcvPanel;
+use rayon::prelude::*;
 
 use crate::FactorSet;
 use crate::parse::Expression;
+use crate::window::{Accumulator, Deviation, Fit, Pair, Regression, Sum, Wma, slide};
 
 /// Named column-major fields supplied to a factor set.
 #[derive(Debug, Clone)]
@@ -146,6 +148,20 @@ impl FactorValues {
             .iter()
             .zip(&self.values)
             .map(|(name, value)| (name.as_str(), value.as_ref()))
+    }
+
+    /// Takes the matrices in factor-set order. A matrix is moved out rather
+    /// than copied unless two factors share the same expression.
+    pub fn into_matrices(self) -> impl ExactSizeIterator<Item = (String, Matrix)> {
+        self.names
+            .into_iter()
+            .zip(self.values)
+            .map(|(name, value)| {
+                (
+                    name,
+                    Arc::try_unwrap(value).unwrap_or_else(|shared| (*shared).clone()),
+                )
+            })
     }
 }
 
@@ -362,23 +378,41 @@ fn call(
             rolling_pair(
                 &left,
                 &right,
+                || {
+                    if name == "Corr" {
+                        Pair::corr()
+                    } else {
+                        Pair::cov()
+                    }
+                },
                 window,
-                if name == "Corr" { corr } else { cov },
             )
         }
         _ => Err(Error::Invariant(format!("unsupported operator {name}"))),
     }
 }
 
-fn map1(input: &Matrix, f: impl Fn(f64) -> f64) -> Result<Matrix> {
+/// Elementwise work below this many cells stays on the calling thread.
+const PARALLEL_CELLS: usize = 1 << 14;
+
+fn map1(input: &Matrix, f: impl Fn(f64) -> f64 + Sync + Send) -> Result<Matrix> {
     Matrix::from_column_major(
-        input.as_slice().iter().copied().map(f).collect(),
+        input
+            .as_slice()
+            .par_iter()
+            .with_min_len(PARALLEL_CELLS)
+            .map(|&value| f(value))
+            .collect(),
         input.n_rows(),
         input.n_cols(),
     )
 }
 
-fn map2(left: &Matrix, right: &Matrix, f: impl Fn(f64, f64) -> f64) -> Result<Matrix> {
+fn map2(
+    left: &Matrix,
+    right: &Matrix,
+    f: impl Fn(f64, f64) -> f64 + Sync + Send,
+) -> Result<Matrix> {
     if (left.n_rows(), left.n_cols()) != (right.n_rows(), right.n_cols()) {
         return Err(Error::Broadcast {
             left: (left.n_rows(), left.n_cols()),
@@ -387,8 +421,9 @@ fn map2(left: &Matrix, right: &Matrix, f: impl Fn(f64, f64) -> f64) -> Result<Ma
     }
     Matrix::from_column_major(
         left.as_slice()
-            .iter()
+            .par_iter()
             .zip(right.as_slice())
+            .with_min_len(PARALLEL_CELLS)
             .map(|(&a, &b)| f(a, b))
             .collect(),
         left.n_rows(),
@@ -400,7 +435,7 @@ fn map3(
     first: &Matrix,
     second: &Matrix,
     third: &Matrix,
-    f: impl Fn(f64, f64, f64) -> f64,
+    f: impl Fn(f64, f64, f64) -> f64 + Sync + Send,
 ) -> Result<Matrix> {
     if (first.n_rows(), first.n_cols()) != (second.n_rows(), second.n_cols())
         || (first.n_rows(), first.n_cols()) != (third.n_rows(), third.n_cols())
@@ -412,9 +447,10 @@ fn map3(
     Matrix::from_column_major(
         first
             .as_slice()
-            .iter()
+            .par_iter()
             .zip(second.as_slice())
             .zip(third.as_slice())
+            .with_min_len(PARALLEL_CELLS)
             .map(|((&a, &b), &c)| f(a, b, c))
             .collect(),
         first.n_rows(),
@@ -422,13 +458,26 @@ fn map3(
     )
 }
 
-fn map_columns(input: &Matrix, mut f: impl FnMut(&[f64]) -> Result<Vec<f64>>) -> Result<Matrix> {
-    let mut out = Matrix::zeros(input.n_rows(), input.n_cols());
-    for col in 0..input.n_cols() {
-        let values = f(input.column(col))?;
-        out.column_mut(col).copy_from_slice(&values);
+fn map_columns(input: &Matrix, f: impl Fn(&[f64]) -> Result<Vec<f64>> + Sync) -> Result<Matrix> {
+    columns_into(input.n_rows(), input.n_cols(), |col, out| {
+        out.copy_from_slice(&f(input.column(col))?);
+        Ok(())
+    })
+}
+
+/// Builds a matrix by filling each output column independently, in parallel.
+fn columns_into(
+    n_rows: usize,
+    n_cols: usize,
+    fill: impl Fn(usize, &mut [f64]) -> Result<()> + Sync,
+) -> Result<Matrix> {
+    let mut data = vec![0.0; n_rows * n_cols];
+    if n_rows > 0 {
+        data.par_chunks_mut(n_rows)
+            .enumerate()
+            .try_for_each(|(col, out)| fill(col, out))?;
     }
-    Ok(out)
+    Matrix::from_column_major(data, n_rows, n_cols)
 }
 
 fn number(expr: &Expression, label: &str) -> Result<f64> {
@@ -460,14 +509,11 @@ fn window(expr: &Expression) -> Result<usize> {
 fn rolling_single(name: &str, input: &[f64], window: usize, q: f64) -> Result<Vec<f64>> {
     match name {
         "Mean" => rolling_mean_1d(input, window, Some(1)),
-        "Std" => rolling_std_qlib(input, window, 1),
-        "Var" => rolling_std_qlib(input, window, 1)
-            .map(|values| values.into_iter().map(|value| value * value).collect()),
+        "Std" => Ok(slide(input, window, &mut Deviation::std())),
+        "Var" => Ok(slide(input, window, &mut Deviation::var())),
         "Max" => rolling_max_1d(input, window, Some(1)),
         "Min" => rolling_min_1d(input, window, Some(1)),
-        "Sum" => rolling_apply_1d(input, window, Some(1), |_, values| {
-            values.iter().filter(|v| !v.is_nan()).sum()
-        }),
+        "Sum" => Ok(slide(input, window, &mut Sum::default())),
         "Quantile" => {
             if !(0.0..=1.0).contains(&q) {
                 return Err(Error::Invariant("quantile must be in 0..=1".into()));
@@ -481,7 +527,7 @@ fn rolling_single(name: &str, input: &[f64], window: usize, q: f64) -> Result<Ve
         }),
         "Skew" => rolling_apply_1d(input, window, Some(1), |_, values| skew(values)),
         "Kurt" => rolling_apply_1d(input, window, Some(1), |_, values| kurt(values)),
-        "WMA" => rolling_apply_1d(input, window, Some(1), |_, values| wma(values)),
+        "WMA" => Ok(slide(input, window, &mut Wma::default())),
         "Rank" => rolling_apply_1d(input, window, Some(1), |_, values| rank_last(values)),
         "IdxMax" => rolling_apply_1d(input, window, Some(1), |_, values| {
             arg_extreme(values, false)
@@ -489,29 +535,13 @@ fn rolling_single(name: &str, input: &[f64], window: usize, q: f64) -> Result<Ve
         "IdxMin" => rolling_apply_1d(input, window, Some(1), |_, values| {
             arg_extreme(values, true)
         }),
-        "Slope" => rolling_apply_1d(input, window, Some(1), |_, values| regression(values).0),
-        "Rsquare" => rolling_apply_1d(input, window, Some(1), |_, values| regression(values).1),
-        "Resi" => rolling_apply_1d(input, window, Some(1), |_, values| regression(values).2),
+        "Slope" => Ok(slide(input, window, &mut Regression::new(Fit::Slope))),
+        "Rsquare" => Ok(slide(input, window, &mut Regression::new(Fit::Rsquare))),
+        "Resi" => Ok(slide(input, window, &mut Regression::new(Fit::Resi))),
         _ => Err(Error::Invariant(format!(
             "unsupported rolling operator {name}"
         ))),
     }
-}
-
-fn rolling_std_qlib(input: &[f64], window: usize, ddof: usize) -> Result<Vec<f64>> {
-    rolling_apply_1d(input, window, Some(1), |_, values| {
-        let count = values.iter().filter(|value| !value.is_nan()).count();
-        if count <= ddof {
-            return f64::NAN;
-        }
-        let mean = values.iter().filter(|value| !value.is_nan()).sum::<f64>() / count as f64;
-        let m2 = values
-            .iter()
-            .filter(|value| !value.is_nan())
-            .map(|value| (value - mean).powi(2))
-            .sum::<f64>();
-        (m2 / (count - ddof) as f64).sqrt()
-    })
 }
 
 pub(crate) fn quantile(values: &[f64], q: f64) -> f64 {
@@ -584,6 +614,7 @@ pub(crate) fn kurt(values: &[f64]) -> f64 {
     (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * biased_fisher + 6.0)
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn wma(values: &[f64]) -> f64 {
     let weight_sum = (values.len() * (values.len() + 1) / 2) as f64;
     let mut sum = 0.0;
@@ -681,6 +712,7 @@ pub(crate) fn arg_extreme(values: &[f64], minimum: bool) -> f64 {
     (best + 1) as f64
 }
 
+#[cfg(any(test, feature = "polars"))]
 /// `(slope, r², residual-at-last-row)` against row positions.
 pub(crate) fn regression(values: &[f64]) -> (f64, f64, f64) {
     let points: Vec<(f64, f64)> = values
@@ -713,11 +745,11 @@ pub(crate) fn regression(values: &[f64]) -> (f64, f64, f64) {
     (slope, rsquare, residual)
 }
 
-fn rolling_pair(
+fn rolling_pair<A: Accumulator<(f64, f64)>>(
     left: &Matrix,
     right: &Matrix,
+    accumulator: impl Fn() -> A + Sync,
     window: usize,
-    reducer: impl Fn(&[f64], &[f64]) -> f64,
 ) -> Result<Matrix> {
     if (left.n_rows(), left.n_cols()) != (right.n_rows(), right.n_cols()) {
         return Err(Error::Broadcast {
@@ -725,19 +757,19 @@ fn rolling_pair(
             right: (right.n_rows(), right.n_cols()),
         });
     }
-    let mut out = Matrix::filled(left.n_rows(), left.n_cols(), f64::NAN);
-    for col in 0..left.n_cols() {
-        for row in 0..left.n_rows() {
-            let start = (row + 1).saturating_sub(window);
-            out.column_mut(col)[row] = reducer(
-                &left.column(col)[start..=row],
-                &right.column(col)[start..=row],
-            );
-        }
-    }
-    Ok(out)
+    columns_into(left.n_rows(), left.n_cols(), |col, out| {
+        let pairs: Vec<(f64, f64)> = left
+            .column(col)
+            .iter()
+            .copied()
+            .zip(right.column(col).iter().copied())
+            .collect();
+        out.copy_from_slice(&slide(&pairs, window, &mut accumulator()));
+        Ok(())
+    })
 }
 
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn corr(left: &[f64], right: &[f64]) -> f64 {
     let standalone_std = |values: &[f64]| {
         let (count, sum) = values
@@ -786,21 +818,6 @@ pub(crate) fn corr(left: &[f64], right: &[f64]) -> f64 {
     covariance / (va * vb).sqrt()
 }
 
-fn cov(left: &[f64], right: &[f64]) -> f64 {
-    let pairs: Vec<(f64, f64)> = left
-        .iter()
-        .zip(right)
-        .filter_map(|(&a, &b)| (!a.is_nan() && !b.is_nan()).then_some((a, b)))
-        .collect();
-    if pairs.len() < 2 {
-        return f64::NAN;
-    }
-    let n = pairs.len() as f64;
-    let ma = pairs.iter().map(|p| p.0).sum::<f64>() / n;
-    let mb = pairs.iter().map(|p| p.1).sum::<f64>() / n;
-    pairs.iter().map(|p| (p.0 - ma) * (p.1 - mb)).sum::<f64>() / (n - 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,11 +828,231 @@ mod tests {
         assert!((rank_last(&[1.0, 2.0, 2.0]) - 2.5 / 3.0).abs() < 1e-12);
     }
 
+    /// Series that stress the running sums: gaps, all-`NaN` stretches,
+    /// constant runs, a large level with small moves, and plain noise.
+    fn stress_series() -> Vec<Vec<f64>> {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let mut out = Vec::new();
+        for case in 0..6 {
+            let series = (0..300)
+                .map(|row| {
+                    let u = next();
+                    match case {
+                        0 => u,
+                        1 if u < 0.2 => f64::NAN,
+                        1 => 100.0 + u,
+                        2 if (40..80).contains(&row) => f64::NAN,
+                        2 if (120..170).contains(&row) => 7.25,
+                        2 => 1e6 * u,
+                        3 if u < 0.6 => f64::NAN,
+                        3 => (u * 4.0).floor(),
+                        4 => 1e4 + row as f64 * 0.5 + u * 1e-3,
+                        _ => (row / 25) as f64,
+                    }
+                })
+                .collect();
+            out.push(series);
+        }
+        out
+    }
+
+    /// [`regression`] with two-pass centered sums instead of raw ones. The
+    /// raw-sum form carries the reference's own cancellation error (a
+    /// two-point fit of prices near 100 gives r² = 0.999999998), so the
+    /// incremental kernels are checked against the exact form here and against
+    /// Qlib itself in `tests/parity_qlib.rs`.
+    fn centered_regression(values: &[f64]) -> (f64, f64, f64) {
+        let points: Vec<(f64, f64)> = values
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &y)| (!y.is_nan()).then_some(((i + 1) as f64, y)))
+            .collect();
+        if points.len() < 2 {
+            return (f64::NAN, f64::NAN, f64::NAN);
+        }
+        let n = points.len() as f64;
+        let mx = points.iter().map(|p| p.0).sum::<f64>() / n;
+        let my = points.iter().map(|p| p.1).sum::<f64>() / n;
+        let sxx: f64 = points.iter().map(|p| (p.0 - mx).powi(2)).sum();
+        let syy: f64 = points.iter().map(|p| (p.1 - my).powi(2)).sum();
+        let sxy: f64 = points.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
+        let slope = sxy / sxx;
+        let sample_std = (syy / (n - 1.0)).sqrt();
+        let rsquare = if sxx <= 0.0 || syy <= 0.0 || sample_std <= 2e-5 {
+            f64::NAN
+        } else {
+            sxy * sxy / (sxx * syy)
+        };
+        let residual = values.last().copied().unwrap_or(f64::NAN)
+            - (slope * values.len() as f64 + my - slope * mx);
+        (slope, rsquare, residual)
+    }
+
+    type Reducer = fn(&[f64]) -> f64;
+
+    fn assert_close(label: &str, fast: &[f64], naive: &[f64]) {
+        for (row, (&a, &b)) in fast.iter().zip(naive).enumerate() {
+            let ok = (a.is_nan() && b.is_nan()) || (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+            assert!(ok, "{label}[{row}]: incremental={a:?}, rescan={b:?}");
+        }
+    }
+
+    #[test]
+    fn incremental_windows_match_a_full_rescan() {
+        let reference: [(&str, Reducer); 7] = [
+            ("Sum", |v| v.iter().filter(|x| !x.is_nan()).sum()),
+            ("Std", |v| {
+                rolling_std_qlib(v, v.len(), 1)
+                    .unwrap()
+                    .last()
+                    .copied()
+                    .unwrap()
+            }),
+            ("Var", |v| {
+                rolling_std_qlib(v, v.len(), 1)
+                    .unwrap()
+                    .last()
+                    .map(|x| x * x)
+                    .unwrap()
+            }),
+            ("WMA", wma),
+            ("Slope", |v| centered_regression(v).0),
+            ("Rsquare", |v| centered_regression(v).1),
+            ("Resi", |v| centered_regression(v).2),
+        ];
+        for (case, series) in stress_series().iter().enumerate() {
+            for window in [1, 2, 3, 5, 20, 61, 299, 300, 1000] {
+                for (name, reduce) in reference {
+                    let fast = rolling_single(name, series, window, 0.0).unwrap();
+                    let naive =
+                        rolling_apply_1d(series, window, Some(1), |_, v| reduce(v)).unwrap();
+                    assert_close(
+                        &format!("{name} case {case} window {window}"),
+                        &fast,
+                        &naive,
+                    );
+                }
+                for (name, fast, reducer) in [
+                    (
+                        "Max",
+                        rolling_single("Max", series, window, 0.0).unwrap(),
+                        (|v: &[f64]| {
+                            v.iter()
+                                .copied()
+                                .filter(|x| !x.is_nan())
+                                .fold(f64::NAN, f64::max)
+                        }) as Reducer,
+                    ),
+                    (
+                        "Min",
+                        rolling_single("Min", series, window, 0.0).unwrap(),
+                        |v: &[f64]| {
+                            v.iter()
+                                .copied()
+                                .filter(|x| !x.is_nan())
+                                .fold(f64::NAN, f64::min)
+                        },
+                    ),
+                ] {
+                    let naive =
+                        rolling_apply_1d(series, window, Some(1), |_, v| reducer(v)).unwrap();
+                    assert_close(
+                        &format!("{name} case {case} window {window}"),
+                        &fast,
+                        &naive,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_pairs_match_a_full_rescan() {
+        let series = stress_series();
+        for (i, left) in series.iter().enumerate() {
+            for (j, right) in series.iter().enumerate() {
+                let left = Matrix::from_column_major(left.clone(), left.len(), 1).unwrap();
+                let right = Matrix::from_column_major(right.clone(), right.len(), 1).unwrap();
+                for window in [1, 2, 5, 20, 61, 300] {
+                    let label = format!("case {i}x{j} window {window}");
+                    let fast = rolling_pair(&left, &right, Pair::corr, window).unwrap();
+                    let naive = naive_rolling_pair(&left, &right, window, corr).unwrap();
+                    assert_close(&format!("Corr {label}"), fast.as_slice(), naive.as_slice());
+                    let fast = rolling_pair(&left, &right, Pair::cov, window).unwrap();
+                    let naive = naive_rolling_pair(&left, &right, window, cov).unwrap();
+                    assert_close(&format!("Cov {label}"), fast.as_slice(), naive.as_slice());
+                }
+            }
+        }
+    }
+
     #[test]
     fn regression_finds_a_line_and_its_last_residual() {
         let (slope, r2, residual) = regression(&[2.0, 4.0, 6.0]);
         assert!((slope - 2.0).abs() < 1e-12);
         assert!((r2 - 1.0).abs() < 1e-12);
         assert!(residual.abs() < 1e-12);
+    }
+
+    fn rolling_std_qlib(input: &[f64], window: usize, ddof: usize) -> Result<Vec<f64>> {
+        rolling_apply_1d(input, window, Some(1), |_, values| {
+            let count = values.iter().filter(|value| !value.is_nan()).count();
+            if count <= ddof {
+                return f64::NAN;
+            }
+            let mean = values.iter().filter(|value| !value.is_nan()).sum::<f64>() / count as f64;
+            let m2 = values
+                .iter()
+                .filter(|value| !value.is_nan())
+                .map(|value| (value - mean).powi(2))
+                .sum::<f64>();
+            (m2 / (count - ddof) as f64).sqrt()
+        })
+    }
+
+    fn naive_rolling_pair(
+        left: &Matrix,
+        right: &Matrix,
+        window: usize,
+        reducer: impl Fn(&[f64], &[f64]) -> f64,
+    ) -> Result<Matrix> {
+        if (left.n_rows(), left.n_cols()) != (right.n_rows(), right.n_cols()) {
+            return Err(Error::Broadcast {
+                left: (left.n_rows(), left.n_cols()),
+                right: (right.n_rows(), right.n_cols()),
+            });
+        }
+        let mut out = Matrix::filled(left.n_rows(), left.n_cols(), f64::NAN);
+        for col in 0..left.n_cols() {
+            for row in 0..left.n_rows() {
+                let start = (row + 1).saturating_sub(window);
+                out.column_mut(col)[row] = reducer(
+                    &left.column(col)[start..=row],
+                    &right.column(col)[start..=row],
+                );
+            }
+        }
+        Ok(out)
+    }
+
+    fn cov(left: &[f64], right: &[f64]) -> f64 {
+        let pairs: Vec<(f64, f64)> = left
+            .iter()
+            .zip(right)
+            .filter_map(|(&a, &b)| (!a.is_nan() && !b.is_nan()).then_some((a, b)))
+            .collect();
+        if pairs.len() < 2 {
+            return f64::NAN;
+        }
+        let n = pairs.len() as f64;
+        let ma = pairs.iter().map(|p| p.0).sum::<f64>() / n;
+        let mb = pairs.iter().map(|p| p.1).sum::<f64>() / n;
+        pairs.iter().map(|p| (p.0 - ma) * (p.1 - mb)).sum::<f64>() / (n - 1.0)
     }
 }

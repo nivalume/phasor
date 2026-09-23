@@ -11,6 +11,7 @@ mod eval;
 mod parse;
 #[cfg(feature = "polars")]
 mod polars_backend;
+mod window;
 
 pub use alpha158::alpha158;
 pub use alpha360::alpha360;

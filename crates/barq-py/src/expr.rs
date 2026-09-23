@@ -86,10 +86,14 @@ impl PyFactorSet {
             inputs = inputs.with_field(name, values).map_err(to_py_err)?;
         }
 
-        let values = self.inner.evaluate(&inputs).map_err(to_py_err)?;
+        // The inputs borrow NumPy buffers that stay alive for this call, and
+        // the evaluation touches no Python object, so other threads may run.
+        let values = py
+            .detach(|| self.inner.evaluate(&inputs))
+            .map_err(to_py_err)?;
         let out = PyDict::new(py);
-        for (name, value) in values.iter() {
-            out.set_item(name, value.as_slice().to_vec().into_pyarray(py))?;
+        for (name, value) in values.into_matrices() {
+            out.set_item(name, value.into_vec().into_pyarray(py))?;
         }
         Ok(out)
     }

@@ -28,6 +28,7 @@ description = "Parallel factor-driven vectorized backtesting engine"
 barq-data = { path = "crates/barq-data", version = "0.1.0" }
 arrow-array = "59"
 arrow-schema = "59"
+rayon = "1.10"
 
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 polars = { version = "0.46", default-features = false, features = [
