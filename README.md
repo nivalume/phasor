@@ -108,6 +108,12 @@ external market-data boundary. See the stage table in
   days) would need ~16 GB for the outputs alone. Evaluate in factor batches
   and hand each batch to a caller-supplied sink (or write it to Arrow/Parquet)
   so peak memory is bounded by the batch rather than the whole set.
+- **Cross-sectional operators run in stages.** The native evaluator compiles a
+  factor set into one dependency graph and runs it one symbol at a time,
+  symbols in parallel, which is only valid while every operator reads a single
+  symbol's series. Adding `CSRank`, `CSZScore` or neutralisation means
+  splitting the graph at those nodes: symbols in parallel within a stage, one
+  cross-sectional pass over every symbol between stages.
 
 ## Try it
 
