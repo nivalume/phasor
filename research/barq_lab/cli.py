@@ -61,7 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "propose":
         from barq_lab.llm import LLM
 
-        pages = tuple(int(x) for x in args.pages.split("-")) if args.pages else None
+        pages: tuple[int, int] | None = None
+        if args.pages:
+            page_parts = args.pages.split("-", 1)
+            if len(page_parts) != 2:
+                parser.error("--pages must be START-END")
+            pages = (int(page_parts[0]), int(page_parts[1]))
         items = lab.propose(
             LLM(), symbols=_symbols(args.symbols), n=args.n, prompt=args.prompt, pdf=args.pdf, pages=pages
         )

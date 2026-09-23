@@ -9,3 +9,14 @@ package = false
 
 [tool.uv.sources]
 barq = { path = "crates/barq-py", editable = true }
+
+[dependency-groups]
+research = ["openai>=1", "pymupdf", "pytest>=7", "pyyaml"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = ["E501"]

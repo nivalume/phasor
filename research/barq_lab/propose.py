@@ -114,7 +114,10 @@ def generate(
         item_id = hashlib.sha256(json.dumps([card.get("title"), _now()]).encode()).hexdigest()[:8]
         items.append({"id": item_id, "created": _now(), "card": card, "spec": normalized or spec, "problems": problems})
         if normalized is not None:
-            tried = {**tried, card["title"]: normalized["expression"]}
+            title = card.get("title")
+            if not isinstance(title, str):
+                raise ValueError("normalized card is missing a title")
+            tried = {**tried, title: normalized["expression"]}
     return items
 
 

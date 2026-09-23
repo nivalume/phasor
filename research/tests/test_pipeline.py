@@ -4,11 +4,12 @@ import json
 
 import pytest
 import yaml
-
 from barq_lab import pipeline
 from barq_lab.protocol import experiment_type
 from barq_lab.types.factor_ts import FactorTS
+
 from tests.test_spec_and_cards import CARD, MA_GAP
+
 
 def _result(t: float, members: float = 0.8, cross: float = 1.0, sharpe_2x: float = 0.5) -> dict:
     return {

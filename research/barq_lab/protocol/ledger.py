@@ -20,6 +20,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Sequence
 
 GENESIS = "0" * 64
 
@@ -64,7 +65,7 @@ class Ledger:
             previous = entry["hash"]
         return entries
 
-    def append(self, kind: str, payload: dict, message: str | None = None, files: list[Path] = ()) -> dict:
+    def append(self, kind: str, payload: dict, message: str | None = None, files: Sequence[Path] = ()) -> dict:
         entry = {
             "seq": len(self.entries),
             "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -79,7 +80,7 @@ class Ledger:
         self.commit(message or f"{kind} {payload.get('spec_id', '')}".strip(), [self.file, *files])
         return entry
 
-    def commit(self, message: str, files: list[Path]) -> None:
+    def commit(self, message: str, files: Sequence[Path]) -> None:
         if not self.commit_enabled:
             return
         self._git("add", *[str(Path(f).relative_to(self.root)) for f in files])
