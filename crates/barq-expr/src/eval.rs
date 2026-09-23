@@ -9,7 +9,7 @@ use rayon::prelude::*;
 
 use crate::FactorSet;
 use crate::parse::Expression;
-use crate::window::{Accumulator, Deviation, Fit, Pair, Regression, Sum, Wma, slide};
+use crate::window::{Deviation, Fit, Pair, Regression, Sum, Wma, slide};
 
 /// Named column-major fields supplied to a factor set.
 #[derive(Debug, Clone)]
@@ -166,319 +166,495 @@ impl FactorValues {
 }
 
 pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<FactorValues> {
-    let mut cache = HashMap::new();
+    let mut evaluator = Evaluator::new(set, inputs);
     let mut names = Vec::with_capacity(set.factors.len());
     let mut values = Vec::with_capacity(set.factors.len());
     for (name, expr) in &set.factors {
         names.push(name.clone());
-        values.push(eval(expr, inputs, &mut cache)?);
+        values.push(evaluator.eval(expr)?.into_matrix(inputs));
     }
+    debug_assert!(
+        evaluator.cache.is_empty(),
+        "every cached value is released by its last use"
+    );
     Ok(FactorValues { names, values })
 }
 
-#[allow(
-    clippy::float_cmp,
-    reason = "the expression language exposes exact Eq/Ne and boolean numeric operators"
-)]
-fn eval(
-    expr: &Expression,
-    inputs: &FactorInputs<'_>,
-    cache: &mut HashMap<Expression, Arc<Matrix>>,
-) -> Result<Arc<Matrix>> {
-    if let Some(value) = cache.get(expr) {
-        return Ok(Arc::clone(value));
-    }
-    let value = match expr {
-        Expression::Number(bits) => {
-            Matrix::filled(inputs.n_rows, inputs.n_cols, f64::from_bits(*bits))
-        }
-        Expression::Field(name) => {
-            let values = inputs.fields.get(name).ok_or_else(|| {
-                Error::Invariant(format!("factor input is missing field ${name}"))
-            })?;
-            Matrix::from_column_major(values.to_vec(), inputs.n_rows, inputs.n_cols)?
-        }
-        Expression::Unary('+', child) => (*eval(child, inputs, cache)?).clone(),
-        Expression::Unary('-', child) => {
-            map1(eval(child, inputs, cache)?.as_ref(), |value| -value)?
-        }
-        Expression::Unary(op, _) => {
-            return Err(Error::Invariant(format!("unsupported unary {op}")));
-        }
-        Expression::Binary(op, left, right) => {
-            let left = eval(left, inputs, cache)?;
-            let right = eval(right, inputs, cache)?;
-            map2(&left, &right, |a, b| match op.as_str() {
-                "+" => a + b,
-                "-" => a - b,
-                "*" => a * b,
-                "/" => a / b,
-                "**" => a.powf(b),
-                ">" => f64::from(a > b),
-                "<" => f64::from(a < b),
-                ">=" => f64::from(a >= b),
-                "<=" => f64::from(a <= b),
-                "==" => f64::from(a == b),
-                "!=" => f64::from(a != b),
-                "&" => f64::from(a != 0.0 && b != 0.0),
-                "|" => f64::from(a != 0.0 || b != 0.0),
-                _ => f64::NAN,
-            })?
-        }
-        Expression::Call(name, args) => call(name, args, inputs, cache)?,
-    };
-    let value = Arc::new(value);
-    cache.insert(expr.clone(), Arc::clone(&value));
-    Ok(value)
+/// An evaluated node. Constants and input fields are not materialised as
+/// matrices: a literal is broadcast where it is used, and a field borrows the
+/// caller's buffer.
+#[derive(Debug, Clone)]
+enum Value<'a> {
+    Scalar(f64),
+    Field(&'a [f64]),
+    Matrix(Arc<Matrix>),
 }
 
-#[allow(
-    clippy::float_cmp,
-    reason = "Qlib's Eq/Ne and numeric boolean operators use exact NumPy comparisons"
-)]
-fn call(
-    name: &str,
-    args: &[Expression],
-    inputs: &FactorInputs<'_>,
-    cache: &mut HashMap<Expression, Arc<Matrix>>,
-) -> Result<Matrix> {
-    match name {
-        "Abs" => map1(eval(&args[0], inputs, cache)?.as_ref(), f64::abs),
-        "Sign" => map1(eval(&args[0], inputs, cache)?.as_ref(), |value| {
-            if value == 0.0 { 0.0 } else { value.signum() }
-        }),
-        "Log" => map1(eval(&args[0], inputs, cache)?.as_ref(), f64::ln),
-        "Not" => map1(eval(&args[0], inputs, cache)?.as_ref(), |value| {
-            f64::from(value == 0.0)
-        }),
-        "Power" | "Add" | "Sub" | "Mul" | "Div" | "Gt" | "Ge" | "Lt" | "Le" | "Eq" | "Ne"
-        | "And" | "Or" => {
-            let left = eval(&args[0], inputs, cache)?;
-            let right = eval(&args[1], inputs, cache)?;
-            map2(&left, &right, |a, b| match name {
-                "Power" => a.powf(b),
-                "Add" => a + b,
-                "Sub" => a - b,
-                "Mul" => a * b,
-                "Div" => a / b,
-                "Gt" => f64::from(a > b),
-                "Ge" => f64::from(a >= b),
-                "Lt" => f64::from(a < b),
-                "Le" => f64::from(a <= b),
-                "Eq" => f64::from(a == b),
-                "Ne" => f64::from(a != b),
-                "And" => f64::from(a != 0.0 && b != 0.0),
-                "Or" => f64::from(a != 0.0 || b != 0.0),
-                _ => unreachable!(),
-            })
+impl Value<'_> {
+    /// Column-major cells, or `None` for a scalar.
+    fn cells(&self) -> Option<&[f64]> {
+        match self {
+            Self::Scalar(_) => None,
+            Self::Field(values) => Some(values),
+            Self::Matrix(matrix) => Some(matrix.as_slice()),
         }
-        "If" => {
-            let condition = eval(&args[0], inputs, cache)?;
-            let left = eval(&args[1], inputs, cache)?;
-            let right = eval(&args[2], inputs, cache)?;
-            map3(&condition, &left, &right, |condition, yes, no| {
-                if condition != 0.0 { yes } else { no }
-            })
+    }
+
+    fn into_matrix(self, inputs: &FactorInputs<'_>) -> Arc<Matrix> {
+        match self {
+            Self::Scalar(value) => Arc::new(Matrix::filled(inputs.n_rows, inputs.n_cols, value)),
+            Self::Field(values) => Arc::new(
+                Matrix::from_column_major(values.to_vec(), inputs.n_rows, inputs.n_cols)
+                    .expect("field lengths are checked when they are added"),
+            ),
+            Self::Matrix(matrix) => matrix,
         }
-        "Greater" | "Less" => {
-            let left = eval(&args[0], inputs, cache)?;
-            let right = eval(&args[1], inputs, cache)?;
-            map2(&left, &right, |a, b| {
-                if a.is_nan() || b.is_nan() {
-                    f64::NAN
-                } else if name == "Greater" {
-                    a.max(b)
-                } else {
-                    a.min(b)
+    }
+}
+
+/// Evaluates a factor set once per distinct subexpression.
+///
+/// A subexpression shared by several factors (Alpha158 reads `Ref($close, 1)`
+/// dozens of times) is computed once and cached, but only until its last
+/// consumer has read it: `uses` counts, per distinct node, how many times
+/// evaluation will ask for it, and the cache entry is dropped when that count
+/// reaches zero. Without that, every intermediate of every factor stays alive
+/// until the end, and peak memory grows with the size of the whole set.
+struct Evaluator<'e, 'a> {
+    inputs: &'e FactorInputs<'a>,
+    uses: HashMap<&'e Expression, usize>,
+    cache: HashMap<&'e Expression, Value<'a>>,
+}
+
+impl<'e, 'a> Evaluator<'e, 'a> {
+    fn new(set: &'e FactorSet, inputs: &'e FactorInputs<'a>) -> Self {
+        fn count<'e>(expr: &'e Expression, uses: &mut HashMap<&'e Expression, usize>) {
+            let seen = uses.entry(expr).or_insert(0);
+            *seen += 1;
+            // Only the first request computes the node and so requests its
+            // operands; later ones are served from the cache.
+            if *seen == 1 {
+                for operand in operands(expr) {
+                    count(operand, uses);
                 }
-            })
+            }
         }
-        "Ref" => {
-            let source = eval(&args[0], inputs, cache)?;
-            let offset = integer(&args[1], "Ref offset")?;
-            map_columns(&source, |column| {
-                Ok((0..column.len())
-                    .map(|row| {
-                        if offset == 0 {
-                            column[row]
-                        } else {
-                            let source_row = row as i64 - offset;
-                            if source_row < 0 || source_row >= column.len() as i64 {
+        let mut uses = HashMap::new();
+        for (_, expr) in &set.factors {
+            count(expr, &mut uses);
+        }
+        Self {
+            inputs,
+            uses,
+            cache: HashMap::new(),
+        }
+    }
+
+    fn eval(&mut self, expr: &'e Expression) -> Result<Value<'a>> {
+        let value = match self.cache.get(expr) {
+            Some(value) => value.clone(),
+            None => {
+                let value = self.compute(expr)?;
+                self.cache.insert(expr, value.clone());
+                value
+            }
+        };
+        let remaining = self.uses.get_mut(expr).map(|uses| {
+            *uses = uses.saturating_sub(1);
+            *uses
+        });
+        debug_assert!(remaining.is_some(), "uses are counted for every operand");
+        if remaining.unwrap_or(0) == 0 {
+            self.cache.remove(expr);
+        }
+        Ok(value)
+    }
+
+    #[allow(
+        clippy::float_cmp,
+        reason = "the expression language exposes exact Eq/Ne and boolean numeric operators"
+    )]
+    fn compute(&mut self, expr: &'e Expression) -> Result<Value<'a>> {
+        Ok(match expr {
+            Expression::Number(bits) => Value::Scalar(f64::from_bits(*bits)),
+            Expression::Field(name) => {
+                Value::Field(self.inputs.fields.get(name).ok_or_else(|| {
+                    Error::Invariant(format!("factor input is missing field ${name}"))
+                })?)
+            }
+            Expression::Unary('+', child) => self.eval(child)?,
+            Expression::Unary('-', child) => {
+                let child = self.eval(child)?;
+                self.map1(&child, |value| -value)
+            }
+            Expression::Unary(op, _) => {
+                return Err(Error::Invariant(format!("unsupported unary {op}")));
+            }
+            Expression::Binary(op, left, right) => {
+                let left = self.eval(left)?;
+                let right = self.eval(right)?;
+                self.map2(&left, &right, |a, b| match op.as_str() {
+                    "+" => a + b,
+                    "-" => a - b,
+                    "*" => a * b,
+                    "/" => a / b,
+                    "**" => a.powf(b),
+                    ">" => f64::from(a > b),
+                    "<" => f64::from(a < b),
+                    ">=" => f64::from(a >= b),
+                    "<=" => f64::from(a <= b),
+                    "==" => f64::from(a == b),
+                    "!=" => f64::from(a != b),
+                    "&" => f64::from(a != 0.0 && b != 0.0),
+                    "|" => f64::from(a != 0.0 || b != 0.0),
+                    _ => f64::NAN,
+                })
+            }
+            Expression::Call(name, args) => self.call(name, args)?,
+        })
+    }
+
+    #[allow(
+        clippy::float_cmp,
+        reason = "Qlib's Eq/Ne and numeric boolean operators use exact NumPy comparisons"
+    )]
+    fn call(&mut self, name: &str, args: &'e [Expression]) -> Result<Value<'a>> {
+        // Every `self.eval` here must be listed by `operands`, or the node's
+        // use count is wrong and it is either recomputed or never released.
+        Ok(match name {
+            "Abs" => {
+                let source = self.eval(&args[0])?;
+                self.map1(&source, f64::abs)
+            }
+            "Sign" => {
+                let source = self.eval(&args[0])?;
+                self.map1(
+                    &source,
+                    |value| {
+                        if value == 0.0 { 0.0 } else { value.signum() }
+                    },
+                )
+            }
+            "Log" => {
+                let source = self.eval(&args[0])?;
+                self.map1(&source, f64::ln)
+            }
+            "Not" => {
+                let source = self.eval(&args[0])?;
+                self.map1(&source, |value| f64::from(value == 0.0))
+            }
+            "Power" | "Add" | "Sub" | "Mul" | "Div" | "Gt" | "Ge" | "Lt" | "Le" | "Eq" | "Ne"
+            | "And" | "Or" => {
+                let left = self.eval(&args[0])?;
+                let right = self.eval(&args[1])?;
+                self.map2(&left, &right, |a, b| match name {
+                    "Power" => a.powf(b),
+                    "Add" => a + b,
+                    "Sub" => a - b,
+                    "Mul" => a * b,
+                    "Div" => a / b,
+                    "Gt" => f64::from(a > b),
+                    "Ge" => f64::from(a >= b),
+                    "Lt" => f64::from(a < b),
+                    "Le" => f64::from(a <= b),
+                    "Eq" => f64::from(a == b),
+                    "Ne" => f64::from(a != b),
+                    "And" => f64::from(a != 0.0 && b != 0.0),
+                    "Or" => f64::from(a != 0.0 || b != 0.0),
+                    _ => unreachable!(),
+                })
+            }
+            "If" => {
+                let condition = self.eval(&args[0])?;
+                let left = self.eval(&args[1])?;
+                let right = self.eval(&args[2])?;
+                self.map3(&condition, &left, &right, |condition, yes, no| {
+                    if condition != 0.0 { yes } else { no }
+                })
+            }
+            "Greater" | "Less" => {
+                let left = self.eval(&args[0])?;
+                let right = self.eval(&args[1])?;
+                self.map2(&left, &right, |a, b| {
+                    if a.is_nan() || b.is_nan() {
+                        f64::NAN
+                    } else if name == "Greater" {
+                        a.max(b)
+                    } else {
+                        a.min(b)
+                    }
+                })
+            }
+            "Ref" => {
+                let source = self.eval(&args[0])?;
+                let offset = integer(&args[1], "Ref offset")?;
+                self.map_columns(&source, |column| {
+                    Ok((0..column.len())
+                        .map(|row| {
+                            if offset == 0 {
+                                column[row]
+                            } else {
+                                let source_row = row as i64 - offset;
+                                if source_row < 0 || source_row >= column.len() as i64 {
+                                    f64::NAN
+                                } else {
+                                    column[source_row as usize]
+                                }
+                            }
+                        })
+                        .collect())
+                })?
+            }
+            "Mean" | "Std" | "Sum" | "Max" | "Min" | "Quantile" | "Rank" | "IdxMax" | "IdxMin"
+            | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew" | "Kurt" | "Med" | "Mad" | "Count"
+            | "WMA" => {
+                let source = self.eval(&args[0])?;
+                let window = self.window(&args[1])?;
+                let q = if name == "Quantile" {
+                    number(&args[2], "quantile")?
+                } else {
+                    0.0
+                };
+                self.map_columns(&source, |column| rolling_single(name, column, window, q))?
+            }
+            "Delta" => {
+                let source = self.eval(&args[0])?;
+                let offset = integer(&args[1], "Delta offset")?;
+                if offset < 0 {
+                    return Err(Error::Invariant("Delta offset cannot be negative".into()));
+                }
+                self.map_columns(&source, |column| {
+                    Ok((0..column.len())
+                        .map(|row| {
+                            if offset == 0 {
+                                if column[row].is_nan() { f64::NAN } else { 0.0 }
+                            } else if row < offset as usize {
                                 f64::NAN
                             } else {
-                                column[source_row as usize]
+                                column[row] - column[row - offset as usize]
                             }
-                        }
-                    })
-                    .collect())
-            })
-        }
-        "Mean" | "Std" | "Sum" | "Max" | "Min" | "Quantile" | "Rank" | "IdxMax" | "IdxMin"
-        | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew" | "Kurt" | "Med" | "Mad" | "Count"
-        | "WMA" => {
-            let source = eval(&args[0], inputs, cache)?;
-            let window = window(&args[1])?;
-            let q = if name == "Quantile" {
-                number(&args[2], "quantile")?
-            } else {
-                0.0
-            };
-            let window = if window == 0 {
-                source.n_rows().max(1)
-            } else {
-                window
-            };
-            map_columns(&source, |column| rolling_single(name, column, window, q))
-        }
-        "Delta" => {
-            let source = eval(&args[0], inputs, cache)?;
-            let offset = integer(&args[1], "Delta offset")?;
-            if offset < 0 {
-                return Err(Error::Invariant("Delta offset cannot be negative".into()));
+                        })
+                        .collect())
+                })?
             }
-            map_columns(&source, |column| {
-                Ok((0..column.len())
-                    .map(|row| {
-                        if offset == 0 {
-                            if column[row].is_nan() { f64::NAN } else { 0.0 }
-                        } else if row < offset as usize {
-                            f64::NAN
-                        } else {
-                            column[row] - column[row - offset as usize]
-                        }
-                    })
-                    .collect())
-            })
-        }
-        "EMA" => {
-            let source = eval(&args[0], inputs, cache)?;
-            let parameter = number(&args[1], "EMA parameter")?;
-            if parameter < 0.0 {
-                return Err(Error::Invariant("EMA parameter cannot be negative".into()));
-            }
-            if parameter == 0.0 {
-                return map_columns(&source, |column| Ok(ema_expanding(column)));
-            }
-            let alpha = if parameter < 1.0 {
-                parameter
-            } else {
-                2.0 / (parameter + 1.0)
-            };
-            map_columns(&source, |column| Ok(ema_adjusted(column, alpha)))
-        }
-        "Corr" | "Cov" => {
-            let left = eval(&args[0], inputs, cache)?;
-            let right = eval(&args[1], inputs, cache)?;
-            let window = window(&args[2])?;
-            let window = if window == 0 {
-                left.n_rows().max(1)
-            } else {
-                window
-            };
-            rolling_pair(
-                &left,
-                &right,
-                || {
-                    if name == "Corr" {
-                        Pair::corr()
+            "EMA" => {
+                let source = self.eval(&args[0])?;
+                let parameter = number(&args[1], "EMA parameter")?;
+                if parameter < 0.0 {
+                    return Err(Error::Invariant("EMA parameter cannot be negative".into()));
+                }
+                if parameter == 0.0 {
+                    self.map_columns(&source, |column| Ok(ema_expanding(column)))?
+                } else {
+                    let alpha = if parameter < 1.0 {
+                        parameter
                     } else {
-                        Pair::cov()
+                        2.0 / (parameter + 1.0)
+                    };
+                    self.map_columns(&source, |column| Ok(ema_adjusted(column, alpha)))?
+                }
+            }
+            "Corr" | "Cov" => {
+                let left = self.eval(&args[0])?;
+                let right = self.eval(&args[1])?;
+                let window = self.window(&args[2])?;
+                let corr = name == "Corr";
+                self.map_column_pairs(&left, &right, |left, right| {
+                    let pairs: Vec<(f64, f64)> =
+                        left.iter().copied().zip(right.iter().copied()).collect();
+                    if corr {
+                        slide(&pairs, window, &mut Pair::corr())
+                    } else {
+                        slide(&pairs, window, &mut Pair::cov())
                     }
-                },
-                window,
-            )
+                })?
+            }
+            _ => return Err(Error::Invariant(format!("unsupported operator {name}"))),
+        })
+    }
+
+    /// A window argument, where `0` means the whole series.
+    fn window(&self, expr: &Expression) -> Result<usize> {
+        let window = window(expr)?;
+        Ok(if window == 0 {
+            self.inputs.n_rows.max(1)
+        } else {
+            window
+        })
+    }
+
+    fn map1(&self, input: &Value<'_>, f: impl Fn(f64) -> f64 + Sync + Send) -> Value<'a> {
+        let Some(cells) = input.cells() else {
+            return Value::Scalar(f(scalar(input)));
+        };
+        self.matrix(
+            cells
+                .par_iter()
+                .with_min_len(PARALLEL_CELLS)
+                .map(|&value| f(value))
+                .collect(),
+        )
+    }
+
+    fn map2(
+        &self,
+        left: &Value<'_>,
+        right: &Value<'_>,
+        f: impl Fn(f64, f64) -> f64 + Sync + Send,
+    ) -> Value<'a> {
+        let cells = match (left.cells(), right.cells()) {
+            (None, None) => return Value::Scalar(f(scalar(left), scalar(right))),
+            (Some(a), Some(b)) => a
+                .par_iter()
+                .zip(b)
+                .with_min_len(PARALLEL_CELLS)
+                .map(|(&a, &b)| f(a, b))
+                .collect(),
+            (Some(a), None) => {
+                let b = scalar(right);
+                a.par_iter()
+                    .with_min_len(PARALLEL_CELLS)
+                    .map(|&a| f(a, b))
+                    .collect()
+            }
+            (None, Some(b)) => {
+                let a = scalar(left);
+                b.par_iter()
+                    .with_min_len(PARALLEL_CELLS)
+                    .map(|&b| f(a, b))
+                    .collect()
+            }
+        };
+        self.matrix(cells)
+    }
+
+    fn map3(
+        &self,
+        first: &Value<'_>,
+        second: &Value<'_>,
+        third: &Value<'_>,
+        f: impl Fn(f64, f64, f64) -> f64 + Sync + Send,
+    ) -> Value<'a> {
+        if [first, second, third]
+            .iter()
+            .all(|value| value.cells().is_none())
+        {
+            return Value::Scalar(f(scalar(first), scalar(second), scalar(third)));
         }
-        _ => Err(Error::Invariant(format!("unsupported operator {name}"))),
+        let at = |value: &Value<'_>, index: usize| match value.cells() {
+            Some(cells) => cells[index],
+            None => scalar(value),
+        };
+        self.matrix(
+            (0..self.inputs.n_rows * self.inputs.n_cols)
+                .into_par_iter()
+                .with_min_len(PARALLEL_CELLS)
+                .map(|index| f(at(first, index), at(second, index), at(third, index)))
+                .collect(),
+        )
+    }
+
+    /// Applies a per-symbol series transform to every column in parallel.
+    fn map_columns(
+        &self,
+        input: &Value<'_>,
+        f: impl Fn(&[f64]) -> Result<Vec<f64>> + Sync,
+    ) -> Result<Value<'a>> {
+        let n_rows = self.inputs.n_rows;
+        let filled;
+        let cells = match input.cells() {
+            Some(cells) => cells,
+            None => {
+                filled = vec![scalar(input); n_rows * self.inputs.n_cols];
+                &filled
+            }
+        };
+        self.columns_into(|col, out| {
+            out.copy_from_slice(&f(&cells[col * n_rows..(col + 1) * n_rows])?);
+            Ok(())
+        })
+    }
+
+    /// Applies a two-series transform to every pair of columns in parallel.
+    fn map_column_pairs(
+        &self,
+        left: &Value<'_>,
+        right: &Value<'_>,
+        f: impl Fn(&[f64], &[f64]) -> Vec<f64> + Sync,
+    ) -> Result<Value<'a>> {
+        let n_rows = self.inputs.n_rows;
+        let len = n_rows * self.inputs.n_cols;
+        let (left_filled, right_filled);
+        let left = match left.cells() {
+            Some(cells) => cells,
+            None => {
+                left_filled = vec![scalar(left); len];
+                &left_filled
+            }
+        };
+        let right = match right.cells() {
+            Some(cells) => cells,
+            None => {
+                right_filled = vec![scalar(right); len];
+                &right_filled
+            }
+        };
+        self.columns_into(|col, out| {
+            let rows = col * n_rows..(col + 1) * n_rows;
+            out.copy_from_slice(&f(&left[rows.clone()], &right[rows]));
+            Ok(())
+        })
+    }
+
+    /// Builds a matrix by filling each output column independently, in parallel.
+    fn columns_into(
+        &self,
+        fill: impl Fn(usize, &mut [f64]) -> Result<()> + Sync,
+    ) -> Result<Value<'a>> {
+        let n_rows = self.inputs.n_rows;
+        let mut data = vec![0.0; n_rows * self.inputs.n_cols];
+        if n_rows > 0 {
+            data.par_chunks_mut(n_rows)
+                .enumerate()
+                .try_for_each(|(col, out)| fill(col, out))?;
+        }
+        Ok(self.matrix(data))
+    }
+
+    fn matrix(&self, cells: Vec<f64>) -> Value<'a> {
+        Value::Matrix(Arc::new(
+            Matrix::from_column_major(cells, self.inputs.n_rows, self.inputs.n_cols)
+                .expect("every operand has the input shape"),
+        ))
+    }
+}
+
+fn scalar(value: &Value<'_>) -> f64 {
+    match value {
+        Value::Scalar(value) => *value,
+        _ => unreachable!("only called for scalar operands"),
+    }
+}
+
+/// The operands [`Evaluator::call`] evaluates. Window lengths, offsets and
+/// other literal parameters are read from the tree, not evaluated.
+fn operands(expr: &Expression) -> Vec<&Expression> {
+    match expr {
+        Expression::Number(_) | Expression::Field(_) => Vec::new(),
+        Expression::Unary(_, child) => vec![child],
+        Expression::Binary(_, left, right) => vec![left, right],
+        Expression::Call(name, args) => match name.as_str() {
+            "Ref" | "Delta" | "EMA" | "Mean" | "Std" | "Sum" | "Max" | "Min" | "Quantile"
+            | "Rank" | "IdxMax" | "IdxMin" | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew"
+            | "Kurt" | "Med" | "Mad" | "Count" | "WMA" => args.iter().take(1).collect(),
+            "Corr" | "Cov" => args.iter().take(2).collect(),
+            _ => args.iter().collect(),
+        },
     }
 }
 
 /// Elementwise work below this many cells stays on the calling thread.
 const PARALLEL_CELLS: usize = 1 << 14;
-
-fn map1(input: &Matrix, f: impl Fn(f64) -> f64 + Sync + Send) -> Result<Matrix> {
-    Matrix::from_column_major(
-        input
-            .as_slice()
-            .par_iter()
-            .with_min_len(PARALLEL_CELLS)
-            .map(|&value| f(value))
-            .collect(),
-        input.n_rows(),
-        input.n_cols(),
-    )
-}
-
-fn map2(
-    left: &Matrix,
-    right: &Matrix,
-    f: impl Fn(f64, f64) -> f64 + Sync + Send,
-) -> Result<Matrix> {
-    if (left.n_rows(), left.n_cols()) != (right.n_rows(), right.n_cols()) {
-        return Err(Error::Broadcast {
-            left: (left.n_rows(), left.n_cols()),
-            right: (right.n_rows(), right.n_cols()),
-        });
-    }
-    Matrix::from_column_major(
-        left.as_slice()
-            .par_iter()
-            .zip(right.as_slice())
-            .with_min_len(PARALLEL_CELLS)
-            .map(|(&a, &b)| f(a, b))
-            .collect(),
-        left.n_rows(),
-        left.n_cols(),
-    )
-}
-
-fn map3(
-    first: &Matrix,
-    second: &Matrix,
-    third: &Matrix,
-    f: impl Fn(f64, f64, f64) -> f64 + Sync + Send,
-) -> Result<Matrix> {
-    if (first.n_rows(), first.n_cols()) != (second.n_rows(), second.n_cols())
-        || (first.n_rows(), first.n_cols()) != (third.n_rows(), third.n_cols())
-    {
-        return Err(Error::Invariant(
-            "three factor operands have different shapes".into(),
-        ));
-    }
-    Matrix::from_column_major(
-        first
-            .as_slice()
-            .par_iter()
-            .zip(second.as_slice())
-            .zip(third.as_slice())
-            .with_min_len(PARALLEL_CELLS)
-            .map(|((&a, &b), &c)| f(a, b, c))
-            .collect(),
-        first.n_rows(),
-        first.n_cols(),
-    )
-}
-
-fn map_columns(input: &Matrix, f: impl Fn(&[f64]) -> Result<Vec<f64>> + Sync) -> Result<Matrix> {
-    columns_into(input.n_rows(), input.n_cols(), |col, out| {
-        out.copy_from_slice(&f(input.column(col))?);
-        Ok(())
-    })
-}
-
-/// Builds a matrix by filling each output column independently, in parallel.
-fn columns_into(
-    n_rows: usize,
-    n_cols: usize,
-    fill: impl Fn(usize, &mut [f64]) -> Result<()> + Sync,
-) -> Result<Matrix> {
-    let mut data = vec![0.0; n_rows * n_cols];
-    if n_rows > 0 {
-        data.par_chunks_mut(n_rows)
-            .enumerate()
-            .try_for_each(|(col, out)| fill(col, out))?;
-    }
-    Matrix::from_column_major(data, n_rows, n_cols)
-}
 
 fn number(expr: &Expression, label: &str) -> Result<f64> {
     match expr {
@@ -745,30 +921,6 @@ pub(crate) fn regression(values: &[f64]) -> (f64, f64, f64) {
     (slope, rsquare, residual)
 }
 
-fn rolling_pair<A: Accumulator<(f64, f64)>>(
-    left: &Matrix,
-    right: &Matrix,
-    accumulator: impl Fn() -> A + Sync,
-    window: usize,
-) -> Result<Matrix> {
-    if (left.n_rows(), left.n_cols()) != (right.n_rows(), right.n_cols()) {
-        return Err(Error::Broadcast {
-            left: (left.n_rows(), left.n_cols()),
-            right: (right.n_rows(), right.n_cols()),
-        });
-    }
-    columns_into(left.n_rows(), left.n_cols(), |col, out| {
-        let pairs: Vec<(f64, f64)> = left
-            .column(col)
-            .iter()
-            .copied()
-            .zip(right.column(col).iter().copied())
-            .collect();
-        out.copy_from_slice(&slide(&pairs, window, &mut accumulator()));
-        Ok(())
-    })
-}
-
 #[cfg(any(test, feature = "polars"))]
 pub(crate) fn corr(left: &[f64], right: &[f64]) -> f64 {
     let standalone_std = |values: &[f64]| {
@@ -977,16 +1129,18 @@ mod tests {
         let series = stress_series();
         for (i, left) in series.iter().enumerate() {
             for (j, right) in series.iter().enumerate() {
+                let pairs: Vec<(f64, f64)> =
+                    left.iter().copied().zip(right.iter().copied()).collect();
                 let left = Matrix::from_column_major(left.clone(), left.len(), 1).unwrap();
                 let right = Matrix::from_column_major(right.clone(), right.len(), 1).unwrap();
                 for window in [1, 2, 5, 20, 61, 300] {
                     let label = format!("case {i}x{j} window {window}");
-                    let fast = rolling_pair(&left, &right, Pair::corr, window).unwrap();
+                    let fast = slide(&pairs, window, &mut Pair::corr());
                     let naive = naive_rolling_pair(&left, &right, window, corr).unwrap();
-                    assert_close(&format!("Corr {label}"), fast.as_slice(), naive.as_slice());
-                    let fast = rolling_pair(&left, &right, Pair::cov, window).unwrap();
+                    assert_close(&format!("Corr {label}"), &fast, naive.as_slice());
+                    let fast = slide(&pairs, window, &mut Pair::cov());
                     let naive = naive_rolling_pair(&left, &right, window, cov).unwrap();
-                    assert_close(&format!("Cov {label}"), fast.as_slice(), naive.as_slice());
+                    assert_close(&format!("Cov {label}"), &fast, naive.as_slice());
                 }
             }
         }

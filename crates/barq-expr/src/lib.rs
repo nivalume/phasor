@@ -125,6 +125,43 @@ mod tests {
     use barq_model::OhlcvPanel;
 
     #[test]
+    fn literals_and_fields_broadcast_and_shared_nodes_are_reused() {
+        let panel = OhlcvPanel {
+            close: vec![1.0, 2.0, 4.0, 10.0, 20.0, 40.0],
+            n_rows: 3,
+            n_cols: 2,
+            ..OhlcvPanel::default()
+        };
+        let inputs = FactorInputs::from_ohlcv(&panel).unwrap();
+        let factors = FactorSet::compile([
+            ("constant", "1 + 2"),
+            ("field", "+$close"),
+            ("left", "2 * $close"),
+            ("right", "$close - 1"),
+            ("choice", "If($close > 3, 1, -1)"),
+            ("rolling_literal", "Mean(4, 2)"),
+            ("pair_literal", "Cov($close, 5, 2)"),
+            ("shared", "Ref($close, 1) / Ref($close, 1)"),
+            ("repeat", "2 * $close"),
+        ])
+        .unwrap();
+        let values = factors.evaluate(&inputs).unwrap();
+        let column = |name: &str, col: usize| values.get(name).unwrap().column(col).to_vec();
+
+        assert_eq!(column("constant", 1), [3.0; 3]);
+        assert_eq!(column("field", 1), [10.0, 20.0, 40.0]);
+        assert_eq!(column("left", 0), [2.0, 4.0, 8.0]);
+        assert_eq!(column("right", 1), [9.0, 19.0, 39.0]);
+        assert_eq!(column("choice", 0), [-1.0, -1.0, 1.0]);
+        assert_eq!(column("rolling_literal", 1), [4.0; 3]);
+        assert!(column("pair_literal", 0)[0].is_nan());
+        assert_eq!(column("pair_literal", 0)[1..], [0.0, 0.0]);
+        assert!(column("shared", 0)[0].is_nan());
+        assert_eq!(column("shared", 1)[1..], [1.0, 1.0]);
+        assert_eq!(column("repeat", 1), column("left", 1));
+    }
+
+    #[test]
     fn expressions_feed_column_major_factor_matrices() {
         let panel = OhlcvPanel {
             close: vec![1.0, 2.0, 4.0, 10.0, 20.0, 40.0],
