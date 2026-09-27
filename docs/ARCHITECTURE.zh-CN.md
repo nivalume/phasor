@@ -548,7 +548,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 | barq-sim `simulate_into_parallel` | `std::thread::scope`，连续分块 | 账户组 |
 | barq-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | 一个标的跑完整张图 |
 | barq-expr Polars 后端 | Polars 线程池 | lazy frame |
-| barq-py `expr.rs`、`data.rs` | `py.detach`（释放 GIL） | — |
+| barq-py `lib.rs`、`expr.rs`、`data.rs` | `py.detach`（释放 GIL） | — |
 
 其余都是单线程。
 
@@ -607,9 +607,9 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 12.5 `barq.Portfolio` 与 GIL
 
-- 持有记录、源宽度的收盘价、列映射、分组、评分设置。每个方法都会重建一个借用的 Rust `Portfolio`，所以请用批量的 `metrics()` / `stats()`。
+- 持有记录（共享组时只排序一次）、源宽度的收盘价、列映射、分组、评分设置，以及一个 `barq_analysis::Cache`：每个方法借用的 Rust `Portfolio`（`Portfolio::from_borrowed`）读写它，一次调用算出的净值曲线下次直接用；`clear_cache()` 释放。
 - 记录以 NumPy 数组组成的 dict 返回（`orders()`、`trades()`、`logs()`、`reason_counts(col)`）。
-- **GIL**：因子求值和数据加载会释放；`from_signals` / `from_orders` 不释放（§17.4）。
+- **GIL**：因子求值、数据加载、`from_signals` / `from_orders` 和所有 `Portfolio` 推导都释放（`py.detach`）；只有 NumPy 转换持有。
 - 未公开：滚动指标、回撤记录、技术指标、barq-signals、`CallSeq::Explicit`、Polars。
 
 ---
@@ -824,8 +824,6 @@ python docs/img/generate.py               # 重新生成本文的图
 |---|---|
 | 两个循环都没接上 `reject_prob` | §7.6 |
 | `CallSeq::Explicit` 未公开给 Python | §12.3 |
-| 模拟期间持有 GIL | §12.5 |
-| Python `Portfolio` 每次调用都重建 Rust 缓存 | §12.5 |
 | `Symbol` / `Venue` 未驻留，但模块注释说已驻留 | §3.6 |
 | 过时注释：barq-analysis 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程 | crate 文档 |
 | `propose.py` 引用 `tests/test_propose.py`，实际检查在 `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |

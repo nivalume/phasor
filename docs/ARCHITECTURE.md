@@ -641,7 +641,7 @@ Titles and order match vectorbt's `Portfolio.stats()`, pinned row by row (§14.3
 | barq-sim `simulate_into_parallel` | `std::thread::scope`, contiguous chunks | account group |
 | barq-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | one symbol through the whole graph |
 | barq-expr Polars backend | Polars pool | lazy frames |
-| barq-py `expr.rs`, `data.rs` | `py.detach` (GIL released) | — |
+| barq-py `lib.rs`, `expr.rs`, `data.rs` | `py.detach` (GIL released) | — |
 
 Everything else is single-threaded.
 
@@ -717,9 +717,9 @@ price memory); stops need `high` and `low`.
 
 ### 12.5 `barq.Portfolio` and the GIL
 
-- Owns records, close at source width, column map, groups, scoring. Each method rebuilds a borrowing Rust `Portfolio`, so use bulk `metrics()` / `stats()`.
+- Owns records (sorted once for shared groups), close at source width, column map, groups, scoring, and a `barq_analysis::Cache` that every method's borrowing Rust `Portfolio` reads and fills (`Portfolio::from_borrowed`), so a value curve derived for one call serves the next; `clear_cache()` releases it.
 - Records come back as dicts of NumPy arrays (`orders()`, `trades()`, `logs()`, `reason_counts(col)`).
-- **GIL**: factor evaluation and data loading release it; `from_signals` / `from_orders` do not (§17.4).
+- **GIL**: factor evaluation, data loading, `from_signals` / `from_orders` and every `Portfolio` derivation release it (`py.detach`); only the NumPy conversions hold it.
 - Not exposed: rolling metrics, drawdown records, indicators, barq-signals, `CallSeq::Explicit`, Polars.
 
 ---
@@ -958,8 +958,6 @@ None affects correctness of results.
 |---|---|
 | `reject_prob` not wired in either loop | §7.6 |
 | `CallSeq::Explicit` not exposed to Python | §12.3 |
-| simulation holds the GIL | §12.5 |
-| Python `Portfolio` rebuilds the Rust cache per call | §12.5 |
 | `Symbol` / `Venue` not interned despite a module comment | §3.6 |
 | stale comments: barq-analysis says no cash sharing; `from_orders.rs` justifies scoped threads by a missing mirror | crate docs |
 | `propose.py` cites `tests/test_propose.py`; the check is `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |

@@ -52,9 +52,8 @@ def crossed_above(left, right):
         a, b = a[:, None], b[:, None]
     if 0 in a.shape:
         return np.zeros(a.shape, dtype=bool)
-    return np.asarray(
-        _barq.crossed_above(np.asfortranarray(a), np.asfortranarray(b)), dtype=bool
-    ).T.reshape(a.shape)
+    flat = _barq.crossed_above(np.asfortranarray(a), np.asfortranarray(b))
+    return flat.reshape(a.shape, order="F")
 
 
 def _signal(value, name, shape):

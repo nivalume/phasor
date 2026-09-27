@@ -198,6 +198,30 @@ impl OrderRecords {
         self.side.extend_from_slice(&other.side);
     }
 
+    /// Puts the records into column-major order: by column, then by row.
+    ///
+    /// A shared-cash group emits its fills in execution order, which is the
+    /// order the call sequence chose within each bar; the analysis layer's
+    /// per-symbol derivations want them grouped by column instead. Stable,
+    /// so fills of one column on one bar keep their execution order.
+    pub fn sort_by_column(&mut self) {
+        if self.col.windows(2).all(|w| w[0] < w[1])
+            && self
+                .col
+                .windows(2)
+                .zip(self.idx.windows(2))
+                .all(|(c, i)| c[0] < c[1] || i[0] <= i[1])
+        {
+            return;
+        }
+        let mut indices: Vec<usize> = (0..self.len()).collect();
+        indices.sort_by_key(|&i| (self.col[i], self.idx[i]));
+        macro_rules! reorder {
+            ($($field:ident),*) => { $(self.$field = indices.iter().map(|&i| self.$field[i]).collect();)* };
+        }
+        reorder!(col, idx, size, price, fees, side);
+    }
+
     /// Merges buffers that are already in column order.
     ///
     /// A dense parallel run produces millions of fills per thread, and copying

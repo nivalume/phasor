@@ -1,17 +1,22 @@
 //! Python boundary for the factor-expression engine.
 
 use barq_expr::{FactorInputs, FactorSet};
-use numpy::{IntoPyArray, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyDictMethods};
 
 use crate::array::{columns_of, to_py_err};
 
+/// The crossings, as one column-major boolean array the caller reshapes with
+/// `order="F"`. Returned flat rather than as nested lists: a list of lists is
+/// one Python object per cell, and `np.asarray` over it was the slowest step
+/// of a sweep that used it.
 #[pyfunction]
-pub fn crossed_above(
+pub fn crossed_above<'py>(
+    py: Python<'py>,
     left: PyReadonlyArray2<'_, f64>,
     right: PyReadonlyArray2<'_, f64>,
-) -> PyResult<Vec<Vec<bool>>> {
+) -> PyResult<Bound<'py, PyArray1<bool>>> {
     let (a, rows, cols) = columns_of(&left)?;
     let (b, other_rows, other_cols) = columns_of(&right)?;
     if (rows, cols) != (other_rows, other_cols) {
@@ -19,12 +24,19 @@ pub fn crossed_above(
             "crossed_above inputs must have the same shape",
         ));
     }
-    Ok((0..cols)
-        .map(|col| {
+    let flat = py.detach(|| {
+        let mut out = Vec::with_capacity(rows * cols);
+        for col in 0..cols {
             let start = col * rows;
-            barq_generic::crossed_above_1d(&a[start..start + rows], &b[start..start + rows], 0)
-        })
-        .collect())
+            out.extend(barq_generic::crossed_above_1d(
+                &a[start..start + rows],
+                &b[start..start + rows],
+                0,
+            ));
+        }
+        out
+    });
+    Ok(flat.into_pyarray(py))
 }
 
 /// A compiled set of named factor expressions.
