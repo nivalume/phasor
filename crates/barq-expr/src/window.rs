@@ -34,15 +34,27 @@ pub(crate) trait Accumulator<T: Copy> {
 }
 
 /// Runs `acc` over every trailing window of `values`.
+#[cfg(test)]
 pub(crate) fn slide<T: Copy>(
     values: &[T],
     window: usize,
     acc: &mut impl Accumulator<T>,
 ) -> Vec<f64> {
+    let mut out = vec![0.0; values.len()];
+    slide_into(values, window, acc, &mut out);
+    out
+}
+
+/// [`slide`] into a caller-supplied series of the same length.
+pub(crate) fn slide_into<T: Copy>(
+    values: &[T],
+    window: usize,
+    acc: &mut impl Accumulator<T>,
+    out: &mut [f64],
+) {
     let window = window.max(1);
-    let mut out = Vec::with_capacity(values.len());
     let mut rebuilt = 0;
-    for row in 0..values.len() {
+    for (row, slot) in out.iter_mut().enumerate() {
         let start = (row + 1).saturating_sub(window);
         if row == 0 || row - rebuilt >= window {
             acc.rebuild(&values[start..=row], start);
@@ -53,9 +65,8 @@ pub(crate) fn slide<T: Copy>(
                 acc.pop(row - window, values[row - window]);
             }
         }
-        out.push(acc.value(&values[start..=row], start));
+        *slot = acc.value(&values[start..=row], start);
     }
-    out
 }
 
 /// Count, shifted first and second moments, and an exact-constant detector
@@ -179,6 +190,28 @@ impl Accumulator<f64> for Sum {
     }
     fn value(&self, _: &[f64], _: usize) -> f64 {
         if self.count == 0 { f64::NAN } else { self.sum }
+    }
+}
+
+/// Rolling count of non-`NaN` values; `NaN` for an all-`NaN` window.
+///
+/// Integer bookkeeping, so it never needs the periodic rebuild for accuracy;
+/// it takes it anyway because every accumulator does.
+#[derive(Debug, Default)]
+pub(crate) struct Count(usize);
+
+impl Accumulator<f64> for Count {
+    fn rebuild(&mut self, window: &[f64], _: usize) {
+        self.0 = window.iter().filter(|value| !value.is_nan()).count();
+    }
+    fn push(&mut self, _: usize, value: f64) {
+        self.0 += usize::from(!value.is_nan());
+    }
+    fn pop(&mut self, _: usize, value: f64) {
+        self.0 -= usize::from(!value.is_nan());
+    }
+    fn value(&self, _: &[f64], _: usize) -> f64 {
+        if self.0 == 0 { f64::NAN } else { self.0 as f64 }
     }
 }
 

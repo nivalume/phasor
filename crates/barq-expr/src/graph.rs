@@ -12,9 +12,15 @@
 //! * **Constant-folded.** Elementwise operators whose operands are all
 //!   literals become literals.
 //! * **Scheduled.** Nodes are stored in dependency order, and every computed
-//!   node gets a scratch slot that is reused once the node's last consumer has
-//!   run. A symbol's whole factor set therefore needs only [`Graph::slots`]
-//!   series of scratch, however many factors and intermediates it has.
+//!   node that a later node reads gets a scratch slot that is reused once the
+//!   node's last reader has run. A symbol's whole factor set therefore needs
+//!   only [`Graph::slots`] series of scratch, however many factors and
+//!   intermediates it has. A node nothing reads is written straight into its
+//!   factor's output and takes no slot.
+//! * **Shifted views.** `Ref(x, k)` with `k >= 0` is not computed at all: it
+//!   is a view of `x` displaced by `k` rows, and elementwise operators read it
+//!   through the offset. Alpha360 is 354 such nodes over six fields, so this
+//!   is the difference between one pass per factor and three.
 //!
 //! Every operator is currently a per-symbol time-series operator, so the graph
 //! is evaluated one symbol (column) at a time, symbols in parallel. A future
@@ -124,10 +130,15 @@ pub(crate) enum Op {
 pub(crate) struct Node {
     pub(crate) op: Op,
     pub(crate) inputs: Vec<NodeId>,
-    /// Scratch slot for a computed node; `None` for fields and literals.
+    /// Scratch slot for a computed node that a later node reads; `None` for
+    /// fields, literals, views and nodes only an output consumes.
     pub(crate) slot: Option<usize>,
     /// Output positions that take this node's value.
     pub(crate) outputs: Vec<usize>,
+    /// Whether any later node reads this one.
+    pub(crate) read: bool,
+    /// For a shifted view: the node it displaces and by how many rows.
+    pub(crate) view: Option<(NodeId, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -169,13 +180,31 @@ impl Graph {
         Ok(graph)
     }
 
-    /// Assigns each computed node a scratch slot, reusing a slot once the
-    /// node that held it has had its last reader.
+    /// Resolves views, then assigns each computed node a scratch slot,
+    /// reusing a slot once the node that held it has had its last reader.
     fn schedule(&mut self) {
+        for at in 0..self.nodes.len() {
+            let Op::Ref(offset) = self.nodes[at].op else {
+                continue;
+            };
+            let Ok(offset) = usize::try_from(offset) else {
+                continue; // reads the future: computed
+            };
+            let input = self.nodes[at].inputs[0];
+            self.nodes[at].view = match (self.nodes[input].op, self.nodes[input].view) {
+                (Op::Const(_), _) => None,
+                (_, Some((base, shift))) => Some((base, shift + offset)),
+                _ => Some((input, offset)),
+            };
+        }
+        // A read of a view is a read of the series it displaces.
+        let base = |nodes: &[Node], id: NodeId| nodes[id].view.map_or(id, |(base, _)| base);
         let mut last_read = vec![None; self.nodes.len()];
-        for (at, node) in self.nodes.iter().enumerate() {
-            for &input in &node.inputs {
-                last_read[input] = Some(at);
+        for at in 0..self.nodes.len() {
+            for i in 0..self.nodes[at].inputs.len() {
+                let input = self.nodes[at].inputs[i];
+                self.nodes[input].read = true;
+                last_read[base(&self.nodes, input)] = Some(at);
             }
         }
         for (position, &node) in self.outputs.iter().enumerate() {
@@ -184,28 +213,27 @@ impl Graph {
         let mut free = Vec::new();
         let mut slots = 0;
         for at in 0..self.nodes.len() {
-            if matches!(self.nodes[at].op, Op::Field(_) | Op::Const(_)) {
-                continue;
-            }
+            let computed = !matches!(self.nodes[at].op, Op::Field(_) | Op::Const(_))
+                && self.nodes[at].view.is_none();
             // Allocate before releasing this node's inputs, so a node never
-            // writes into a slot it is reading.
-            let slot = free.pop().unwrap_or_else(|| {
-                slots += 1;
-                slots - 1
-            });
-            self.nodes[at].slot = Some(slot);
+            // writes into a slot it is reading. A node nothing reads is only
+            // an output, written as it is computed, and needs no slot.
+            if computed && self.nodes[at].read {
+                let slot = free.pop().unwrap_or_else(|| {
+                    slots += 1;
+                    slots - 1
+                });
+                self.nodes[at].slot = Some(slot);
+            }
             let mut released = Vec::new();
-            for &input in &self.nodes[at].inputs {
+            for i in 0..self.nodes[at].inputs.len() {
+                let input = base(&self.nodes, self.nodes[at].inputs[i]);
                 if last_read[input] == Some(at) && !released.contains(&input) {
                     released.push(input);
                     if let Some(slot) = self.nodes[input].slot {
                         free.push(slot);
                     }
                 }
-            }
-            // A node nothing reads is only an output, written as it is computed.
-            if last_read[at].is_none() {
-                free.push(slot);
             }
         }
         self.slots = slots;
@@ -234,6 +262,8 @@ impl Builder {
             inputs: key.1.clone(),
             slot: None,
             outputs: Vec::new(),
+            read: false,
+            view: None,
         });
         self.interned.insert(key, id);
         id
@@ -546,14 +576,40 @@ mod tests {
 
     #[test]
     fn slots_are_reused_after_the_last_read() {
-        // A chain of ten operators never needs more than two live series.
+        // A chain of ten operators never needs more than two live series, and
+        // the last one, which nothing reads, goes straight to the output.
         let g = graph(&["Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs($close))))))))))"]).unwrap();
         assert_eq!(g.slots, 2);
+        assert_eq!(g.nodes[g.outputs[0]].slot, None);
+        assert!(!g.nodes[g.outputs[0]].read);
         for node in &g.nodes {
             if let (Some(slot), [input]) = (node.slot, node.inputs.as_slice()) {
                 assert_ne!(Some(slot), g.nodes[*input].slot);
             }
         }
+    }
+
+    #[test]
+    fn past_refs_are_views_that_keep_their_base_alive() {
+        // Ref(Ref(x,1),2) is x displaced by 3; the views take no slot, and
+        // the series they displace stays live until the view's last reader.
+        let g = graph(&["Ref(Ref(Abs($close),1),2) / $close", "Ref($close,-1)"]).unwrap();
+        let abs = g
+            .nodes
+            .iter()
+            .position(|n| n.op == Op::Unary(UnaryOp::Abs))
+            .unwrap();
+        let view = g.nodes.iter().position(|n| n.op == Op::Ref(2)).unwrap();
+        assert_eq!(g.nodes[view].view, Some((abs, 3)));
+        assert_eq!(g.nodes[view].slot, None);
+        assert!(g.nodes[abs].read);
+        assert!(g.nodes[abs].slot.is_some());
+        // The future-reading Ref stays a computed node.
+        let future = g.nodes.iter().find(|n| n.op == Op::Ref(-1)).unwrap();
+        assert_eq!(future.view, None);
+        // Abs, the division; the views and the future Ref (an unread output)
+        // take none.
+        assert_eq!(g.slots, 1);
     }
 
     #[test]

@@ -279,9 +279,9 @@ def graph(t):
     N = {
         "close": (430, 400, "$close", "field", "plain"),
         "open": (690, 400, "$open", "field", "plain"),
-        "ref5": (400, 290, "Ref(·,5)", "slot 0", "accent"),
-        "ref1": (540, 290, "Ref(·,1)", "slot 1", "accent"),
-        "sub": (680, 290, "−", "slot 2", "accent"),
+        "ref5": (400, 290, "Ref(·,5)", t("view"), "ghost"),
+        "ref1": (540, 290, "Ref(·,1)", t("view"), "ghost"),
+        "sub": (680, 290, "−", "slot 0", "accent"),
         "div1": (400, 200, "÷", "→ ROC5", "ok"),
         "div2": (540, 200, "÷", "slot 0", "accent"),
         "minus": (540, 110, "− 1", "→ RET", "ok"),
@@ -289,7 +289,7 @@ def graph(t):
     }
     W, H = 110, 44
     for k, (x, y, a, b, tone) in N.items():
-        s.box(x, y, W, H, a, b, tone=tone, size=12)
+        s.box(x, y, W, H, a, b, tone=tone, size=12, mono_sub=(tone != "ghost"))
 
     def up(a, b):
         ax, ay = N[a][:2]
@@ -613,8 +613,9 @@ EN = {
     "validation": "compile-time checks", "validation_sub": "windows, offsets, quantiles",
     "folding": "constant folding", "folding_sub": "-(1+2)*3 → -9",
     "order": "dependency order", "order_sub": "inputs always come first",
-    "slots": "scratch slots", "slots_sub": "reused after the last reader",
-    "graph_caption": "$close is read by five nodes but stored once; Alpha158: 357 nodes, 18 slots",
+    "slots": "scratch slots", "slots_sub": "freed after the last reader",
+    "graph_caption": "$close is read by five nodes but stored once; Alpha158: 357 nodes, 17 slots",
+    "view": "view, no slot",
     "eval_title": "Native evaluation: each thread runs the whole graph for one symbol at a time",
     "inputs": "input fields (T × S)", "outputs": "outputs (one column slice per task)",
     "thread": "thread", "scratch": "scratch: graph.slots series of length T",
@@ -690,8 +691,9 @@ ZH = {
     "validation": "编译期校验", "validation_sub": "窗口、偏移、分位数",
     "folding": "常量折叠", "folding_sub": "-(1+2)*3 → -9",
     "order": "依赖顺序", "order_sub": "输入总在前面",
-    "slots": "暂存槽位", "slots_sub": "最后一个读者之后复用",
-    "graph_caption": "$close 被五个节点读取但只存一份；Alpha158：357 个节点、18 个槽位",
+    "slots": "暂存槽位", "slots_sub": "最后一个读者之后复用；输出直接写",
+    "graph_caption": "$close 被五个节点读取但只存一份；Alpha158：357 个节点、17 个槽位",
+    "view": "视图，不占槽位",
     "eval_title": "原生求值：每个线程一次对一个标的跑完整张图",
     "inputs": "输入字段（T × S）", "outputs": "输出（每个任务一段列切片）",
     "thread": "线程", "scratch": "暂存：graph.slots 条长度为 T 的序列",

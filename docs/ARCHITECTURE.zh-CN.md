@@ -283,9 +283,10 @@ let trend: &Matrix = values.get("trend").unwrap();   // 时间 × 标的
 2. **编译期校验**，参数解析成带类型的算子（`Ref(i64)`、`Rolling(kind, Window)` 等）；报错信息带上因子名。
 3. **常量折叠**：操作数全为字面量的逐元素节点。
 4. **依赖顺序**：节点总是追加在其输入之后。
-5. **槽位调度**（`Graph::schedule`）：槽位在最后一个读者之后释放；节点不会复用自己输入的槽位。
+5. **视图**：`k ≥ 0` 的 `Ref(x, k)` 不计算，它就是延后 `k` 行读取的 `x`，逐元素算子通过偏移直接读（Alpha360 有 354 个这样的节点）。
+6. **槽位调度**（`Graph::schedule`）：槽位在最后一个读者之后释放；节点不会复用自己输入的槽位；没有任何节点读取的节点直接写进因子输出，不占槽位。
 
-Alpha158 → 357 个节点、18 个槽位：一个标的的整个因子集只需要 18 条暂存序列。
+Alpha158 → 357 个节点、17 个槽位、148 个直接写输出；Alpha360 → 722 个节点、1 个槽位。
 
 ### 5.4 原生求值
 
@@ -309,9 +310,9 @@ Alpha158 → 357 个节点、18 个槽位：一个标的的整个因子集只需
 | `Mean` | 前缀和（`barq_generic::rolling`） | O(1) |
 | `Max Min` | 单调双端队列 | 均摊 O(1) |
 | `Sum Std Var Skew Kurt WMA Slope Rsquare Resi Corr Cov` | 增量累加器（`window.rs`） | O(1) |
-| `Quantile Med Rank Mad` | 基于排序位置的树状数组（`order.rs`） | O(log n) |
+| `Quantile Med Rank Mad` | 窗口 ≤ 256 用有序环缓冲，否则用基于排序位置的树状数组（`order.rs`） | O(window) 移位 / O(log n) |
 | `IdxMax IdxMin` | 单调队列（`order.rs:rolling_arg_extreme`） | 均摊 O(1) |
-| `Count` | `rolling_apply_1d` | O(window) |
+| `Count` | `Count` 累加器（`window.rs`） | O(1) |
 | `EMA` | 递推 | O(1)；`EMA(x, 0)` 为 O(n) |
 
 累加器的几个处理各有原因：**每个窗口重建一次**把舍入漂移限制在两个窗口内，总代价仍是 O(n)；**平移求和**避免大数平方相减的抵消；**常量窗口检测**在 Qlib 做 `== 0` 判断的地方给出精确的零方差。树状数组只处理整数位置，所以 `Quantile/Med/Rank` 与排序结果逐位一致。每个核心都在 NaN 段、常量段、高价位小波动等序列上与全量重算比对（`1e-9`）；最终结果由 Qlib 测试夹具固定（§14.3）。
@@ -743,6 +744,7 @@ python benchmarks/compare.py [--check-baseline]
 | 用完即释放中间结果、广播字面量、借用字段 | 2520×500 RSS：3.5 → 1.7 GB |
 | O(log n) 顺序统计、单调队列 | 2520×200：860 → 629 ms |
 | 依赖图、按标的并行求值 | 约 −20%；2520×16：160 → 75 ms |
+| 有序环顺序统计、`Ref` 视图、直接写输出、固定暂存 | 2520×200：576 → 448 ms；20000×16：418 → 270 ms（Alpha360 280 → 225 ms） |
 
 ---
 

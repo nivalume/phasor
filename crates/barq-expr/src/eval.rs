@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use barq_core::error::{Error, Result};
 use barq_core::matrix::Matrix;
-use barq_generic::rolling::{rolling_apply_1d, rolling_max_1d, rolling_mean_1d, rolling_min_1d};
+use barq_generic::rolling::{rolling_max_1d, rolling_mean_1d, rolling_min_1d};
 use barq_model::OhlcvPanel;
 use rayon::prelude::*;
 
 use crate::FactorSet;
-use crate::graph::{self, BinaryOp, Graph, NodeId, Op, Rolling};
-use crate::order::{Order, ordered, rolling_arg_extreme};
-use crate::window::{Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide};
+use crate::graph::{self, BinaryOp, Graph, NodeId, Op, Rolling, UnaryOp};
+use crate::order::{Order, ordered_into, rolling_arg_extreme_into};
+use crate::window::{Count, Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide_into};
 
 /// Named column-major fields supplied to a factor set.
 #[derive(Debug, Clone)]
@@ -197,13 +197,13 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
             }
         }
         columns.into_par_iter().enumerate().for_each_init(
-            || vec![Vec::new(); graph.slots],
+            || Scratch::new(graph.slots, n_rows),
             |scratch, (col, mut out)| {
                 let fields: Vec<&[f64]> = fields
                     .iter()
                     .map(|values| &values[col * n_rows..(col + 1) * n_rows])
                     .collect();
-                run_column(graph, &fields, n_rows, scratch, &mut out);
+                run_column(graph, &fields, scratch, &mut out);
             },
         );
     }
@@ -215,182 +215,326 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
     FactorValues::from_matrices(names, matrices)
 }
 
-/// An operand of one symbol's step: a literal, or a series.
+/// One worker's scratch: the graph's slots, each a series of `n_rows`, plus a
+/// spare for materializing a literal or a view where a kernel needs a series.
+/// Allocated once per worker and reused across every column it evaluates.
+struct Scratch {
+    slots: Vec<Vec<f64>>,
+    spare: Vec<Vec<f64>>,
+}
+
+impl Scratch {
+    fn new(slots: usize, n_rows: usize) -> Self {
+        Self {
+            slots: (0..slots).map(|_| vec![0.0; n_rows]).collect(),
+            spare: (0..2).map(|_| vec![0.0; n_rows]).collect(),
+        }
+    }
+}
+
+/// An operand of one symbol's step: a literal, a series, or a series read
+/// `offset` rows late (`Ref`), which is `NaN` for the first `offset` rows.
 #[derive(Clone, Copy)]
 enum Arg<'s> {
     Scalar(f64),
     Series(&'s [f64]),
+    Shifted { values: &'s [f64], offset: usize },
+}
+
+/// An operand restricted to a row range over which it is one plain thing.
+#[derive(Clone, Copy)]
+enum Seg<'s> {
+    Scalar(f64),
+    Slice(&'s [f64]),
 }
 
 impl<'s> Arg<'s> {
-    fn at(self, row: usize) -> f64 {
+    /// Row boundaries inside `0..n_rows` where this operand changes form.
+    fn cut(self, n_rows: usize) -> Option<usize> {
         match self {
-            Self::Scalar(value) => value,
-            Self::Series(values) => values[row],
+            Self::Shifted { offset, .. } if offset < n_rows => Some(offset),
+            _ => None,
         }
     }
 
-    /// The operand as a series, filling `buffer` for a literal.
-    fn series<'b>(self, buffer: &'b mut Vec<f64>, n_rows: usize) -> &'b [f64]
+    /// The operand over `start..end`, which must not straddle its cut.
+    fn segment(self, start: usize, end: usize) -> Seg<'s> {
+        match self {
+            Self::Scalar(value) => Seg::Scalar(value),
+            Self::Series(values) => Seg::Slice(&values[start..end]),
+            Self::Shifted { values, offset } => {
+                if offset >= end {
+                    Seg::Scalar(f64::NAN)
+                } else {
+                    Seg::Slice(&values[start - offset..end - offset])
+                }
+            }
+        }
+    }
+
+    /// The operand as a series, materializing a literal or a view into `buffer`.
+    fn series<'b>(self, buffer: &'b mut [f64]) -> &'b [f64]
     where
         's: 'b,
     {
         match self {
             Self::Series(values) => values,
             Self::Scalar(value) => {
-                buffer.clear();
-                buffer.resize(n_rows, value);
+                buffer.fill(value);
+                buffer
+            }
+            Self::Shifted { values, offset } => {
+                let n = buffer.len();
+                let offset = offset.min(n);
+                buffer[..offset].fill(f64::NAN);
+                buffer[offset..].copy_from_slice(&values[..n - offset]);
                 buffer
             }
         }
     }
 }
 
+/// Splits `0..n_rows` at every operand's cut, so each piece can run as a
+/// straight loop over plain slices and scalars.
+fn segments(args: &[Arg<'_>], n_rows: usize) -> impl Iterator<Item = (usize, usize)> {
+    let mut cuts = [n_rows; 4];
+    let mut count = 0;
+    for arg in args {
+        if let Some(cut) = arg.cut(n_rows) {
+            cuts[count] = cut;
+            count += 1;
+        }
+    }
+    cuts.sort_unstable();
+    let mut start = 0;
+    cuts.into_iter().filter_map(move |end| {
+        let piece = (end > start).then_some((start, end));
+        start = start.max(end);
+        piece
+    })
+}
+
 /// Evaluates the whole graph for one symbol, writing each factor's column.
-fn run_column(
-    graph: &Graph,
-    fields: &[&[f64]],
-    n_rows: usize,
-    scratch: &mut [Vec<f64>],
-    out: &mut [&mut [f64]],
-) {
+fn run_column(graph: &Graph, fields: &[&[f64]], scratch: &mut Scratch, out: &mut [&mut [f64]]) {
+    let n_rows = out.first().map_or(fields[0].len(), |column| column.len());
     for node in &graph.nodes {
-        let Some(slot) = node.slot else {
-            // Fields and literals are read in place; write them only if a
-            // factor is the bare field or literal.
-            for &position in &node.outputs {
-                match node.op {
-                    Op::Field(index) => out[position].copy_from_slice(fields[index]),
-                    Op::Const(bits) => out[position].fill(f64::from_bits(bits)),
-                    _ => unreachable!("only fields and literals have no slot"),
-                }
-            }
-            continue;
-        };
-        // Take the target out of the scratch so its inputs can be borrowed;
-        // the schedule never gives a node the slot of one of its inputs.
-        let mut target = std::mem::take(&mut scratch[slot]);
-        {
-            let arg = |id: NodeId| {
-                let input = &graph.nodes[id];
-                match (input.op, input.slot) {
-                    (Op::Const(bits), _) => Arg::Scalar(f64::from_bits(bits)),
-                    (Op::Field(index), _) => Arg::Series(fields[index]),
-                    (_, Some(slot)) => Arg::Series(&scratch[slot]),
-                    (_, None) => unreachable!("computed nodes have slots"),
+        fn arg<'s>(
+            graph: &Graph,
+            fields: &[&'s [f64]],
+            slots: &'s [Vec<f64>],
+            id: NodeId,
+        ) -> Arg<'s> {
+            let input = &graph.nodes[id];
+            let series = |id: NodeId| -> &'s [f64] {
+                match (graph.nodes[id].op, graph.nodes[id].slot) {
+                    (Op::Field(index), _) => fields[index],
+                    (_, Some(slot)) => slots[slot].as_slice(),
+                    (_, None) => unreachable!("computed inputs have slots"),
                 }
             };
+            match (input.op, input.view) {
+                (Op::Const(bits), _) => Arg::Scalar(f64::from_bits(bits)),
+                (_, Some((base, offset))) => Arg::Shifted {
+                    values: series(base),
+                    offset,
+                },
+                _ => Arg::Series(series(id)),
+            }
+        }
+        let is_source = matches!(node.op, Op::Field(_) | Op::Const(_)) || node.view.is_some();
+        // Take the spare and the target out of the scratch so the inputs can
+        // be borrowed; the schedule never gives a node an input's slot.
+        let mut spare = std::mem::take(&mut scratch.spare);
+        let mut target = node
+            .slot
+            .map(|slot| std::mem::take(&mut scratch.slots[slot]));
+        if is_source {
+            // Read in place by later nodes; written only where a factor is
+            // the bare field, literal or shifted series.
+            if let Some((&first, rest)) = node.outputs.split_first() {
+                let value = match node.op {
+                    Op::Field(index) => Arg::Series(fields[index]),
+                    Op::Const(bits) => Arg::Scalar(f64::from_bits(bits)),
+                    _ => {
+                        let (base, offset) =
+                            node.view.expect("a source is a field, literal or view");
+                        arg(graph, fields, &scratch.slots, base).shifted(offset)
+                    }
+                };
+                out[first].copy_from_slice(value.series(&mut spare[0]));
+                for &position in rest {
+                    let (done, later) = out.split_at_mut(position);
+                    later[0].copy_from_slice(done[first]);
+                }
+            }
+        } else {
             let mut args = [Arg::Scalar(0.0); 3];
             for (slot, &id) in args.iter_mut().zip(&node.inputs) {
-                *slot = arg(id);
+                *slot = arg(graph, fields, &scratch.slots, id);
             }
-            step(node.op, &args[..node.inputs.len()], n_rows, &mut target);
+            let args = &args[..node.inputs.len()];
+            match &mut target {
+                Some(target) => {
+                    step(node.op, args, target, &mut spare);
+                    for &position in &node.outputs {
+                        out[position].copy_from_slice(target);
+                    }
+                }
+                None => {
+                    // Nothing reads this node: compute it straight into its output.
+                    let (&first, rest) = node
+                        .outputs
+                        .split_first()
+                        .expect("a computed node is read or is an output");
+                    step(node.op, args, out[first], &mut spare);
+                    for &position in rest {
+                        let (done, later) = out.split_at_mut(position);
+                        later[0].copy_from_slice(done[first]);
+                    }
+                }
+            }
         }
-        for &position in &node.outputs {
-            out[position].copy_from_slice(&target);
+        scratch.spare = spare;
+        if let (Some(slot), Some(target)) = (node.slot, target) {
+            scratch.slots[slot] = target;
         }
-        scratch[slot] = target;
+        debug_assert!(n_rows == 0 || node.outputs.iter().all(|&p| out[p].len() == n_rows));
+    }
+}
+
+impl<'s> Arg<'s> {
+    /// This operand read `offset` rows late.
+    fn shifted(self, offset: usize) -> Self {
+        match self {
+            Self::Scalar(value) => Self::Scalar(value),
+            Self::Series(values) => Self::Shifted { values, offset },
+            Self::Shifted { values, offset: o } => Self::Shifted {
+                values,
+                offset: o + offset,
+            },
+        }
     }
 }
 
 /// Computes one node's series for one symbol into `target`.
-fn step(op: Op, args: &[Arg<'_>], n_rows: usize, target: &mut Vec<f64>) {
-    let mut buffer = Vec::new();
+fn step(op: Op, args: &[Arg<'_>], target: &mut [f64], spare: &mut [Vec<f64>]) {
+    let n_rows = target.len();
+    let (first, second) = spare.split_at_mut(1);
+    let (first, second) = (first[0].as_mut_slice(), second[0].as_mut_slice());
     match op {
-        Op::Unary(op) => {
-            fill(target, n_rows, |row| graph::unary(op, args[0].at(row)));
+        Op::Unary(op) => unary_series(op, args[0], target),
+        Op::Binary(op) => binary_series(op, args[0], args[1], target),
+        Op::If => {
+            for (start, end) in segments(args, n_rows) {
+                let (c, a, b) = (
+                    args[0].segment(start, end),
+                    args[1].segment(start, end),
+                    args[2].segment(start, end),
+                );
+                for (row, slot) in target[start..end].iter_mut().enumerate() {
+                    *slot = graph::if_else(c.at(row), a.at(row), b.at(row));
+                }
+            }
         }
-        Op::Binary(op) => binary_series(op, args[0], args[1], n_rows, target),
-        Op::If => fill(target, n_rows, |row| {
-            graph::if_else(args[0].at(row), args[1].at(row), args[2].at(row))
-        }),
         Op::Ref(offset) => {
-            let column = args[0].series(&mut buffer, n_rows);
-            fill(target, n_rows, |row| {
-                let source = row as i64 - offset;
-                if offset == 0 {
-                    column[row]
-                } else if source < 0 || source >= n_rows as i64 {
-                    f64::NAN
-                } else {
-                    column[source as usize]
-                }
-            });
+            // Only a future-reading Ref is computed; the past is a view.
+            let column = args[0].series(first);
+            let ahead = offset.unsigned_abs() as usize;
+            let kept = n_rows.saturating_sub(ahead);
+            target[..kept].copy_from_slice(&column[ahead..]);
+            target[kept..].fill(f64::NAN);
         }
-        Op::Delta(offset) => {
-            let column = args[0].series(&mut buffer, n_rows);
-            fill(target, n_rows, |row| {
-                if offset == 0 {
-                    if column[row].is_nan() { f64::NAN } else { 0.0 }
-                } else if row < offset {
-                    f64::NAN
-                } else {
-                    column[row] - column[row - offset]
-                }
-            });
-        }
+        Op::Delta(offset) => binary_series(BinaryOp::Sub, args[0], args[0].shifted(offset), target),
         Op::Ema(alpha) => {
-            let column = args[0].series(&mut buffer, n_rows);
-            *target = match alpha {
-                None => ema_expanding(column),
-                Some(bits) => ema_adjusted(column, f64::from_bits(bits)),
-            };
+            let column = args[0].series(first);
+            match alpha {
+                None => ema_expanding_into(column, target),
+                Some(bits) => ema_adjusted_into(column, f64::from_bits(bits), target),
+            }
         }
         Op::Rolling(kind, window) => {
-            let column = args[0].series(&mut buffer, n_rows);
-            *target = rolling(kind, column, window.resolve(n_rows));
+            let column = args[0].series(first);
+            rolling_into(kind, column, window.resolve(n_rows), target);
         }
         Op::Pair { corr, window } => {
-            let mut other = Vec::new();
-            let left = args[0].series(&mut buffer, n_rows);
-            let right = args[1].series(&mut other, n_rows);
+            let left = args[0].series(first);
+            let right = args[1].series(second);
             let pairs: Vec<(f64, f64)> = left.iter().copied().zip(right.iter().copied()).collect();
             let window = window.resolve(n_rows);
-            *target = if corr {
-                slide(&pairs, window, &mut Pair::corr())
+            if corr {
+                slide_into(&pairs, window, &mut Pair::corr(), target);
             } else {
-                slide(&pairs, window, &mut Pair::cov())
-            };
+                slide_into(&pairs, window, &mut Pair::cov(), target);
+            }
         }
         Op::Field(_) | Op::Const(_) => unreachable!("fields and literals are not computed"),
     }
 }
 
-fn fill(target: &mut Vec<f64>, n_rows: usize, f: impl Fn(usize) -> f64) {
-    target.clear();
-    target.extend((0..n_rows).map(f));
+impl Seg<'_> {
+    fn at(self, row: usize) -> f64 {
+        match self {
+            Self::Scalar(value) => value,
+            Self::Slice(values) => values[row],
+        }
+    }
 }
 
-/// An elementwise binary operator with the operator and operand kinds
-/// resolved outside the loop, so each case compiles to a straight loop.
-fn binary_series(
-    op: BinaryOp,
-    left: Arg<'_>,
-    right: Arg<'_>,
-    n_rows: usize,
-    target: &mut Vec<f64>,
-) {
-    fn apply(
-        left: Arg<'_>,
-        right: Arg<'_>,
-        n_rows: usize,
-        target: &mut Vec<f64>,
-        f: impl Fn(f64, f64) -> f64,
-    ) {
-        target.clear();
-        match (left, right) {
-            (Arg::Series(a), Arg::Series(b)) => {
-                target.extend(a.iter().zip(b).map(|(&a, &b)| f(a, b)))
+/// An elementwise unary operator with the operator and operand kind resolved
+/// outside the loop.
+fn unary_series(op: UnaryOp, input: Arg<'_>, target: &mut [f64]) {
+    fn apply(input: Arg<'_>, target: &mut [f64], f: impl Fn(f64) -> f64) {
+        for (start, end) in segments(&[input], target.len()) {
+            match input.segment(start, end) {
+                Seg::Slice(values) => {
+                    for (slot, &value) in target[start..end].iter_mut().zip(values) {
+                        *slot = f(value);
+                    }
+                }
+                Seg::Scalar(value) => target[start..end].fill(f(value)),
             }
-            (Arg::Series(a), Arg::Scalar(b)) => target.extend(a.iter().map(|&a| f(a, b))),
-            (Arg::Scalar(a), Arg::Series(b)) => target.extend(b.iter().map(|&b| f(a, b))),
-            (Arg::Scalar(a), Arg::Scalar(b)) => target.resize(n_rows, f(a, b)),
         }
     }
     macro_rules! dispatch {
         ($($variant:ident),*) => {
             match op {
-                $(BinaryOp::$variant => apply(left, right, n_rows, target, |a, b| {
+                $(UnaryOp::$variant => apply(input, target, |a| graph::unary(UnaryOp::$variant, a)),)*
+            }
+        };
+    }
+    dispatch!(Neg, Abs, Sign, Log, Not);
+}
+
+/// An elementwise binary operator with the operator and operand kinds
+/// resolved outside the loop, so each case compiles to a straight loop.
+fn binary_series(op: BinaryOp, left: Arg<'_>, right: Arg<'_>, target: &mut [f64]) {
+    fn apply(left: Arg<'_>, right: Arg<'_>, target: &mut [f64], f: impl Fn(f64, f64) -> f64) {
+        for (start, end) in segments(&[left, right], target.len()) {
+            let out = &mut target[start..end];
+            match (left.segment(start, end), right.segment(start, end)) {
+                (Seg::Slice(a), Seg::Slice(b)) => {
+                    for (slot, (&a, &b)) in out.iter_mut().zip(a.iter().zip(b)) {
+                        *slot = f(a, b);
+                    }
+                }
+                (Seg::Slice(a), Seg::Scalar(b)) => {
+                    for (slot, &a) in out.iter_mut().zip(a) {
+                        *slot = f(a, b);
+                    }
+                }
+                (Seg::Scalar(a), Seg::Slice(b)) => {
+                    for (slot, &b) in out.iter_mut().zip(b) {
+                        *slot = f(a, b);
+                    }
+                }
+                (Seg::Scalar(a), Seg::Scalar(b)) => out.fill(f(a, b)),
+            }
+        }
+    }
+    macro_rules! dispatch {
+        ($($variant:ident),*) => {
+            match op {
+                $(BinaryOp::$variant => apply(left, right, target, |a, b| {
                     graph::binary(BinaryOp::$variant, a, b)
                 }),)*
             }
@@ -401,32 +545,45 @@ fn binary_series(
     );
 }
 
+/// [`rolling_into`] as a fresh series, for tests.
+#[cfg(test)]
 fn rolling(kind: Rolling, input: &[f64], window: usize) -> Vec<f64> {
+    let mut out = vec![0.0; input.len()];
+    rolling_into(kind, input, window, &mut out);
+    out
+}
+
+fn rolling_into(kind: Rolling, input: &[f64], window: usize, out: &mut [f64]) {
     let window = window.max(1);
     let checked = "window and min_periods are valid";
     match kind {
-        Rolling::Mean => rolling_mean_1d(input, window, Some(1)).expect(checked),
-        Rolling::Std => slide(input, window, &mut Deviation::std()),
-        Rolling::Var => slide(input, window, &mut Deviation::var()),
-        Rolling::Max => rolling_max_1d(input, window, Some(1)).expect(checked),
-        Rolling::Min => rolling_min_1d(input, window, Some(1)).expect(checked),
-        Rolling::Sum => slide(input, window, &mut Sum::default()),
-        Rolling::Quantile(q) => ordered(input, window, Order::Quantile(f64::from_bits(q))),
-        Rolling::Med => ordered(input, window, Order::Quantile(0.5)),
-        Rolling::Mad => ordered(input, window, Order::Mad),
-        Rolling::Count => rolling_apply_1d(input, window, Some(1), |_, values| {
-            values.iter().filter(|value| !value.is_nan()).count() as f64
-        })
-        .expect(checked),
-        Rolling::Skew => slide(input, window, &mut Shape::skew()),
-        Rolling::Kurt => slide(input, window, &mut Shape::kurt()),
-        Rolling::Wma => slide(input, window, &mut Wma::default()),
-        Rolling::Rank => ordered(input, window, Order::Rank),
-        Rolling::IdxMax => rolling_arg_extreme(input, window, false),
-        Rolling::IdxMin => rolling_arg_extreme(input, window, true),
-        Rolling::Slope => slide(input, window, &mut Regression::new(Fit::Slope)),
-        Rolling::Rsquare => slide(input, window, &mut Regression::new(Fit::Rsquare)),
-        Rolling::Resi => slide(input, window, &mut Regression::new(Fit::Resi)),
+        Rolling::Mean => {
+            out.copy_from_slice(&rolling_mean_1d(input, window, Some(1)).expect(checked));
+        }
+        Rolling::Max => {
+            out.copy_from_slice(&rolling_max_1d(input, window, Some(1)).expect(checked));
+        }
+        Rolling::Min => {
+            out.copy_from_slice(&rolling_min_1d(input, window, Some(1)).expect(checked));
+        }
+        Rolling::Std => slide_into(input, window, &mut Deviation::std(), out),
+        Rolling::Var => slide_into(input, window, &mut Deviation::var(), out),
+        Rolling::Sum => slide_into(input, window, &mut Sum::default(), out),
+        Rolling::Count => slide_into(input, window, &mut Count::default(), out),
+        Rolling::Quantile(q) => {
+            ordered_into(input, window, Order::Quantile(f64::from_bits(q)), out);
+        }
+        Rolling::Med => ordered_into(input, window, Order::Quantile(0.5), out),
+        Rolling::Mad => ordered_into(input, window, Order::Mad, out),
+        Rolling::Rank => ordered_into(input, window, Order::Rank, out),
+        Rolling::Skew => slide_into(input, window, &mut Shape::skew(), out),
+        Rolling::Kurt => slide_into(input, window, &mut Shape::kurt(), out),
+        Rolling::Wma => slide_into(input, window, &mut Wma::default(), out),
+        Rolling::IdxMax => rolling_arg_extreme_into(input, window, false, out),
+        Rolling::IdxMin => rolling_arg_extreme_into(input, window, true, out),
+        Rolling::Slope => slide_into(input, window, &mut Regression::new(Fit::Slope), out),
+        Rolling::Rsquare => slide_into(input, window, &mut Regression::new(Fit::Rsquare), out),
+        Rolling::Resi => slide_into(input, window, &mut Regression::new(Fit::Resi), out),
     }
 }
 
@@ -526,33 +683,38 @@ pub(crate) fn wma(values: &[f64]) -> f64 {
     clippy::float_cmp,
     reason = "zero denominator exactly means no EMA observation has appeared"
 )]
-fn ema_adjusted(values: &[f64], alpha: f64) -> Vec<f64> {
+fn ema_adjusted_into(values: &[f64], alpha: f64, out: &mut [f64]) {
     let decay = 1.0 - alpha;
     let (mut numerator, mut denominator) = (0.0, 0.0);
-    values
-        .iter()
-        .map(|&value| {
-            numerator *= decay;
-            denominator *= decay;
-            if !value.is_nan() {
-                numerator += value;
-                denominator += 1.0;
-            }
-            if denominator == 0.0 {
-                f64::NAN
-            } else {
-                numerator / denominator
-            }
-        })
-        .collect()
+    for (&value, slot) in values.iter().zip(out) {
+        numerator *= decay;
+        denominator *= decay;
+        if !value.is_nan() {
+            numerator += value;
+            denominator += 1.0;
+        }
+        *slot = if denominator == 0.0 {
+            f64::NAN
+        } else {
+            numerator / denominator
+        };
+    }
 }
 
+/// Qlib's `EMA(x, 0)`: the decay depends on how many rows have been seen, so
+/// every row is a fresh weighted average of its whole prefix.
+#[cfg(any(test, feature = "polars"))]
 pub(crate) fn ema_expanding(values: &[f64]) -> Vec<f64> {
-    (1..=values.len())
-        .map(|length| {
-            if values[..length].iter().all(|value| value.is_nan()) {
-                return f64::NAN;
-            }
+    let mut out = vec![0.0; values.len()];
+    ema_expanding_into(values, &mut out);
+    out
+}
+
+fn ema_expanding_into(values: &[f64], out: &mut [f64]) {
+    for (length, slot) in (1..=values.len()).zip(out) {
+        *slot = if values[..length].iter().all(|value| value.is_nan()) {
+            f64::NAN
+        } else {
             let decay = 1.0 - 2.0 / (1.0 + length as f64);
             let denominator: f64 = (0..length)
                 .map(|index| decay.powi((length - index - 1) as i32))
@@ -563,8 +725,8 @@ pub(crate) fn ema_expanding(values: &[f64]) -> Vec<f64> {
                 .filter(|(_, value)| !value.is_nan())
                 .map(|(index, value)| decay.powi((length - index - 1) as i32) / denominator * value)
                 .sum()
-        })
-        .collect()
+        };
+    }
 }
 
 #[cfg(any(test, feature = "polars"))]
@@ -689,6 +851,8 @@ pub(crate) fn corr(left: &[f64], right: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::window::slide;
+    use barq_generic::rolling::rolling_apply_1d;
 
     #[test]
     fn qlib_rank_is_the_last_values_percentile() {

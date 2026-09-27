@@ -319,9 +319,10 @@ and the Polars backend.
 2. **Compile-time validation** into typed ops (`Ref(i64)`, `Rolling(kind, Window)`, …); errors name the factor.
 3. **Constant folding** of all-literal elementwise nodes.
 4. **Dependency order**: nodes are appended after their inputs.
-5. **Slot scheduling** (`Graph::schedule`): a slot is freed after its last reader; a node never reuses an input's slot.
+5. **Views**: `Ref(x, k)` with `k ≥ 0` is not computed; it is `x` read `k` rows late, and elementwise operators read it through the offset (Alpha360 is 354 such nodes).
+6. **Slot scheduling** (`Graph::schedule`): a slot is freed after its last reader; a node never reuses an input's slot; a node nothing reads is written straight into its factor's output and takes no slot.
 
-Alpha158 → 357 nodes, 18 slots: a symbol's whole factor set needs 18 scratch series.
+Alpha158 → 357 nodes, 17 slots, 148 written directly; Alpha360 → 722 nodes, 1 slot.
 
 ### 5.4 Native evaluation
 
@@ -346,9 +347,9 @@ essentially the outputs. `each_symbol_evaluates_exactly_as_it_would_alone` pins 
 | `Mean` | prefix sums (`barq_generic::rolling`) | O(1) |
 | `Max Min` | monotonic deque | amortized O(1) |
 | `Sum Std Var Skew Kurt WMA Slope Rsquare Resi Corr Cov` | incremental accumulators (`window.rs`) | O(1) |
-| `Quantile Med Rank Mad` | Fenwick tree over sorted positions (`order.rs`) | O(log n) |
+| `Quantile Med Rank Mad` | sorted ring for windows ≤ 256, else Fenwick tree over sorted positions (`order.rs`) | O(window) shift / O(log n) |
 | `IdxMax IdxMin` | monotonic queue (`order.rs:rolling_arg_extreme`) | amortized O(1) |
-| `Count` | `rolling_apply_1d` | O(window) |
+| `Count` | `Count` accumulator (`window.rs`) | O(1) |
 | `EMA` | recurrence | O(1); `EMA(x, 0)` O(n) |
 
 Why each accumulator trick exists: **rebuild every window** bounds rounding drift
@@ -876,6 +877,7 @@ Ranges, because the Numba loop loses more to a busy machine than barq does.
 | release intermediates, broadcast literals, borrow fields | RSS 2520×500: 3.5 → 1.7 GB |
 | O(log n) order statistics, monotonic queues | 2520×200: 860 → 629 ms |
 | dependency graph, per-symbol parallel eval | ~−20%; 2520×16: 160 → 75 ms |
+| sorted-ring order statistics, `Ref` views, direct output writes, fixed scratch | 2520×200: 576 → 448 ms; 20000×16: 418 → 270 ms (Alpha360 280 → 225 ms) |
 
 ---
 
