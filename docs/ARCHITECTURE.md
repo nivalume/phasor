@@ -533,6 +533,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 
 - `DEFAULT_MIN_SIZE = 1e-8` (reference) vs kernel default `0.0`; logs found the difference (§9.4).
 - Logged variants write one row per order *considered*; off by default (a log row is ~5× an order record). A test asserts logging does not change orders.
+- Both loops build each column's `ValidatedOrder` once (a second, slippage-free one for stops resting at their level in `from_signals`) and rebuild per bar only when a parameter varies by row; a bar with no signal and no armed stop skips sizing.
 - Both loops are generic over `SinkBuffer` (§9.3).
 
 ---
@@ -648,7 +649,8 @@ Everything else is single-threaded.
 
 ![Account groups are cut into contiguous chunks; each thread owns its sink and counters; buffers are concatenated in chunk order with ids re-based](img/en/threads.svg)
 
-- `n_threads` clamped to `[1, n_groups]`; chunk size `ceil(n_groups / n_threads)`. No shared mutable state, no reduction.
+- `n_threads` clamped to `[1, n_groups]`; `Groups::chunks` cuts contiguous runs at fractions of the total column count, so every thread gets work and a wide group is its own run. No shared mutable state, no reduction.
+- Buffers are preallocated to a fill bound (cells with a usable size; twice the set signal cells), not to `n_rows × n_cols`. Above 65,536 fills the merge copies the parts in parallel (`OrderRecords::concat`).
 - Serial and threaded output are bit-identical (tested); the lowest failing chunk's error wins.
 - Scoped threads, not a pool: they force `Sync` inputs and column-local state; tasks are 10⁴–10⁶ iterations, so scheduling cost is noise.
 
@@ -959,7 +961,6 @@ None affects correctness of results.
 | simulation holds the GIL | §12.5 |
 | Python `Portfolio` rebuilds the Rust cache per call | §12.5 |
 | `Symbol` / `Venue` not interned despite a module comment | §3.6 |
-| serial preallocation and worker-panic handling differ between loops | barq-sim |
 | stale comments: barq-analysis says no cash sharing; `from_orders.rs` justifies scoped threads by a missing mirror | crate docs |
 | `propose.py` cites `tests/test_propose.py`; the check is `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |
 | the two Qlib fixtures used different Qlib/NumPy/pandas versions | fixture headers |

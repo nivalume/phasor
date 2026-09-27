@@ -457,6 +457,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 - `DEFAULT_MIN_SIZE = 1e-8`（参考实现）与内核默认 `0.0` 不同；是日志发现的这个差异（§9.4）。
 - 带日志的版本为每笔*被考虑*的订单写一行；默认关闭（一行日志约为订单记录的 5 倍宽）。有测试断言开日志不改变订单。
+- 两个循环都为每列只构建一次 `ValidatedOrder`（`from_signals` 另建一个无滑点的版本给挂在触发价上的止损用），只在参数逐行变化时每根 K 线重建；没有信号也没有布置止损的 K 线跳过数量计算。
 - 两个循环都对 `SinkBuffer` 泛型（§9.3）。
 
 ---
@@ -555,7 +556,8 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 
 ![账户组被切成连续的块；每个线程拥有自己的 sink 和计数器；缓冲区按块顺序拼接并重新定基 id](img/zh/threads.svg)
 
-- `n_threads` 限制在 `[1, n_groups]`；块大小 `ceil(n_groups / n_threads)`。没有共享可变状态，也没有归约。
+- `n_threads` 限制在 `[1, n_groups]`；`Groups::chunks` 按总列数的等分点切出连续的块，每个线程都有活干，宽的组自成一块。没有共享可变状态，也没有归约。
+- 缓冲区按成交上界预分配（size 可用的单元数；信号置位单元数的两倍），而不是 `n_rows × n_cols`。超过 65,536 笔成交时合并阶段并行拷贝（`OrderRecords::concat`）。
 - 串行与多线程输出逐位一致（有测试）；多个块出错时取序号最小的块。
 - 用作用域线程而不是线程池：它强制输入为 `Sync`、状态局部于列；单个任务 10⁴–10⁶ 次迭代，调度开销可以忽略。
 
@@ -825,7 +827,6 @@ python docs/img/generate.py               # 重新生成本文的图
 | 模拟期间持有 GIL | §12.5 |
 | Python `Portfolio` 每次调用都重建 Rust 缓存 | §12.5 |
 | `Symbol` / `Venue` 未驻留，但模块注释说已驻留 | §3.6 |
-| 两个循环的串行预分配和工作线程 panic 处理不同 | barq-sim |
 | 过时注释：barq-analysis 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程 | crate 文档 |
 | `propose.py` 引用 `tests/test_propose.py`，实际检查在 `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |
 | 两个 Qlib 夹具使用了不同版本的 Qlib/NumPy/pandas | 夹具文件头 |

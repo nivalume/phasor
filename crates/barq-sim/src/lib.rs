@@ -45,6 +45,51 @@ pub mod from_signals;
 pub mod groups;
 pub mod signals;
 
+/// How many cells of `array` over `cols` satisfy `pred`, without expanding it.
+///
+/// The loops preallocate their record buffers to a bound on the fills, and a
+/// bound of one fill per cell reserves `n_rows × n_cols` records — eight
+/// gigabytes of address space for 100k bars × 2,000 columns — when the
+/// inputs say most cells cannot fill at all. Counting the cells that can is
+/// one pass over the inputs, which the simulation reads anyway.
+pub(crate) fn count_where<T: Copy>(
+    array: &barq_core::flex::FlexArray<'_, T>,
+    n_rows: usize,
+    cols: std::ops::Range<usize>,
+    pred: impl Fn(T) -> bool,
+) -> usize {
+    use barq_core::flex::FlexArray;
+    let count = |cells: &[T]| cells.iter().filter(|&&v| pred(v)).count();
+    match *array {
+        FlexArray::Scalar(v) => {
+            if pred(v) {
+                n_rows * cols.len()
+            } else {
+                0
+            }
+        }
+        FlexArray::PerColumn(v) => n_rows * count(&v[cols]),
+        FlexArray::PerRow(v) => count(v) * cols.len(),
+        FlexArray::Full { data, n_rows } => count(&data[cols.start * n_rows..cols.end * n_rows]),
+        FlexArray::MappedColumns {
+            data,
+            n_rows,
+            columns,
+        } => {
+            // Source columns repeat across a sweep, so count each once.
+            let mut counts = vec![usize::MAX; data.len() / n_rows.max(1)];
+            cols.map(|col| {
+                let source = columns[col];
+                if counts[source] == usize::MAX {
+                    counts[source] = count(&data[source * n_rows..(source + 1) * n_rows]);
+                }
+                counts[source]
+            })
+            .sum()
+        }
+    }
+}
+
 /// The smallest fill the reference accepts by default.
 ///
 /// Not zero, which is what one would write. The reference's own default is

@@ -703,7 +703,7 @@ fn ema_adjusted_into(values: &[f64], alpha: f64, out: &mut [f64]) {
 
 /// Qlib's `EMA(x, 0)`: the decay depends on how many rows have been seen, so
 /// every row is a fresh weighted average of its whole prefix.
-#[cfg(any(test, feature = "polars"))]
+#[cfg(feature = "polars")]
 pub(crate) fn ema_expanding(values: &[f64]) -> Vec<f64> {
     let mut out = vec![0.0; values.len()];
     ema_expanding_into(values, &mut out);

@@ -99,6 +99,21 @@ pub struct FromOrders<'a> {
 }
 
 impl FromOrders<'_> {
+    /// An upper bound on the fills columns `cols` can produce.
+    ///
+    /// The record buffers are preallocated to it, matching the parallel path
+    /// so the two have the same memory profile. Measured at +19% on a
+    /// fill-heavy sweep and +6% on a single long column against growing by
+    /// doubling, which spends that on realloc and memcpy. The bound is the
+    /// cells whose size is neither zero nor `NaN`, the two the kernel ignores
+    /// without a record, rather than one fill per cell, which reserved eight
+    /// gigabytes of address space for a 100k × 2,000 sweep however sparse.
+    fn fill_bound(&self, cols: std::ops::Range<usize>) -> usize {
+        crate::count_where(&self.size, self.n_rows, cols, |size| {
+            size != 0.0 && !size.is_nan()
+        })
+    }
+
     /// Whether any parameter [`ValidatedOrder`] covers changes down a column.
     ///
     /// When none does, the column loop checks them once instead of once per
@@ -534,14 +549,8 @@ fn check_groups(args: &FromOrders<'_>) -> Result<()> {
 /// [`OrderRecords`] discards them through `LogSink`'s defaulted no-op, so a run
 /// that is not collecting logs pays nothing for the call site existing.
 fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
-    // Preallocated to the worst case — one fill per element, the bound the
-    // reference's `max_orders` also defaults to — matching the parallel path
-    // so the two have the same memory profile. Measured at +19% on a
-    // fill-heavy sweep and +6% on a single long column; growing by doubling
-    // spends that on realloc and memcpy. Costs memory on a sparse run, where
-    // it measures as noise either way.
     check_groups(args)?;
-    let mut sink = S::with_capacity(args.n_rows * args.n_cols);
+    let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
@@ -587,12 +596,12 @@ pub fn simulate_from_orders_logged(args: &FromOrders<'_>) -> Result<Journal> {
 /// interleave — `simulate_from_orders` and this function return equal records
 /// for the same input, which is asserted in the tests.
 ///
-/// Uses `std::thread::scope` rather than a work-stealing pool. That is partly
-/// because the crates.io mirror is unavailable in this environment, and partly
-/// because it is a genuine test of the architecture: scoped threads require
-/// the whole argument set to be `Sync` and every column's state to be owned
-/// locally, which is exactly the constraint `docs/ARCHITECTURE.md §11.2` imposes.
-/// Swapping in a real pool later is a change to this function alone.
+/// Uses `std::thread::scope` rather than a work-stealing pool, as a genuine
+/// test of the architecture: scoped threads require the whole argument set
+/// to be `Sync` and every column's state to be owned locally, which is
+/// exactly the constraint `docs/ARCHITECTURE.md §11.2` imposes. Tasks are
+/// whole groups of 10⁴–10⁶ iterations, so scheduling is noise. Swapping in a
+/// pool later is a change to this function alone.
 ///
 /// # Errors
 ///
@@ -642,26 +651,19 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
 
     // Contiguous chunks keep each thread's columns adjacent in memory and
     // make the merge an ordered append.
-    let chunk = n_groups.div_ceil(n_threads);
-    let ranges: Vec<(usize, usize)> = (0..n_groups)
-        .step_by(chunk)
-        .map(|start| (start, (start + chunk).min(n_groups)))
-        .collect();
+    let ranges = args.groups.chunks(n_threads);
 
     let results: Vec<Result<S>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .iter()
             .map(|&(start, end)| {
                 scope.spawn(move || {
-                    // Preallocate for the worst case — one fill per element,
-                    // which is what the reference's `max_orders` also defaults
-                    // to. Growing these buffers by doubling puts every thread
-                    // in the allocator on a fill-heavy sweep, and measurably
-                    // costs scaling: 1.46x -> 1.70x on four cores just from
-                    // this. Memory is the trade, and it is bounded by the
-                    // shape the caller already chose.
-                    let n_cols: usize = (start..end).map(|g| args.groups.len_of(g)).sum();
-                    let mut sink = S::with_capacity(args.n_rows * n_cols);
+                    // Preallocated to the fill bound. Growing these buffers by
+                    // doubling puts every thread in the allocator on a
+                    // fill-heavy sweep, and measurably costs scaling: 1.46x ->
+                    // 1.70x on four cores just from this.
+                    let cols = args.groups.range(start).start..args.groups.range(end - 1).end;
+                    let mut sink = S::with_capacity(args.fill_bound(cols));
                     // Per buffer, so ids are thread-independent; the merge
                     // re-bases them. A shared counter here would make the
                     // numbering depend on interleaving.
@@ -687,7 +689,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     for result in results {
         parts.push(result?);
     }
-    Ok(S::merge(&parts))
+    Ok(S::merge(parts))
 }
 
 #[cfg(test)]

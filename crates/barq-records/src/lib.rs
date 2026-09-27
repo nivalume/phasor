@@ -80,8 +80,9 @@ pub trait SinkBuffer: RecordSink + logs::LogSink + Send + Sized {
     ///
     /// Not necessarily a plain concatenation: a sink holding logs has to
     /// re-base their `order_id`s onto the merged fills. That is exactly why
-    /// merging is the sink's business rather than the loop's.
-    fn merge(parts: &[Self]) -> Self;
+    /// merging is the sink's business rather than the loop's. Takes the
+    /// buffers by value so a single one is returned as it is.
+    fn merge(parts: Vec<Self>) -> Self;
 }
 
 impl SinkBuffer for OrderRecords {
@@ -89,8 +90,11 @@ impl SinkBuffer for OrderRecords {
         Self::with_capacity(capacity)
     }
 
-    fn merge(parts: &[Self]) -> Self {
-        Self::concat(parts)
+    fn merge(mut parts: Vec<Self>) -> Self {
+        if parts.len() == 1 {
+            return parts.pop().expect("one part");
+        }
+        Self::concat(&parts)
     }
 }
 
@@ -108,8 +112,11 @@ impl SinkBuffer for logs::Journal {
         }
     }
 
-    fn merge(parts: &[Self]) -> Self {
-        Self::concat(parts)
+    fn merge(mut parts: Vec<Self>) -> Self {
+        if parts.len() == 1 {
+            return parts.pop().expect("one part");
+        }
+        Self::concat(&parts)
     }
 }
 
@@ -192,15 +199,65 @@ impl OrderRecords {
     }
 
     /// Merges buffers that are already in column order.
+    ///
+    /// A dense parallel run produces millions of fills per thread, and copying
+    /// them all on the one thread that joined the workers was a visible share
+    /// of its wall clock. Past [`Self::PARALLEL_CONCAT`] fills the parts are
+    /// copied concurrently, each into its own disjoint span of the output.
     #[must_use]
     pub fn concat(parts: &[Self]) -> Self {
-        let total = parts.iter().map(Self::len).sum();
-        let mut out = Self::with_capacity(total);
-        for part in parts {
-            out.extend(part);
+        let total: usize = parts.iter().map(Self::len).sum();
+        if total < Self::PARALLEL_CONCAT || parts.len() < 2 {
+            let mut out = Self::with_capacity(total);
+            for part in parts {
+                out.extend(part);
+            }
+            return out;
         }
+        // Zeroed allocations are lazy, so the pages are first touched by the
+        // thread that copies into them.
+        let mut out = Self {
+            col: vec![0; total],
+            idx: vec![0; total],
+            size: vec![0.0; total],
+            price: vec![0.0; total],
+            fees: vec![0.0; total],
+            side: vec![0; total],
+        };
+        std::thread::scope(|scope| {
+            let (mut col, mut idx) = (out.col.as_mut_slice(), out.idx.as_mut_slice());
+            let (mut size, mut price) = (out.size.as_mut_slice(), out.price.as_mut_slice());
+            let (mut fees, mut side) = (out.fees.as_mut_slice(), out.side.as_mut_slice());
+            for part in parts {
+                let n = part.len();
+                let (c, rest) = col.split_at_mut(n);
+                col = rest;
+                let (i, rest) = idx.split_at_mut(n);
+                idx = rest;
+                let (s, rest) = size.split_at_mut(n);
+                size = rest;
+                let (p, rest) = price.split_at_mut(n);
+                price = rest;
+                let (f, rest) = fees.split_at_mut(n);
+                fees = rest;
+                let (d, rest) = side.split_at_mut(n);
+                side = rest;
+                scope.spawn(move || {
+                    c.copy_from_slice(&part.col);
+                    i.copy_from_slice(&part.idx);
+                    s.copy_from_slice(&part.size);
+                    p.copy_from_slice(&part.price);
+                    f.copy_from_slice(&part.fees);
+                    d.copy_from_slice(&part.side);
+                });
+            }
+        });
         out
     }
+
+    /// Fill count above which [`Self::concat`] copies the parts in parallel.
+    /// Below it a thread costs more than the copy it would do.
+    pub const PARALLEL_CONCAT: usize = 1 << 16;
 }
 
 impl RecordSink for OrderRecords {
@@ -225,6 +282,25 @@ impl RecordSink for OrderRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_large_concat_copies_in_parallel_and_matches_a_serial_one() {
+        let make = |offset: i64, n: usize| {
+            let mut r = OrderRecords::with_capacity(n);
+            for k in 0..n {
+                r.push_order(k, (offset as usize) % 7, k as f64, 1.5, 0.1, OrderSide::Buy);
+                r.col[k] += offset;
+            }
+            r
+        };
+        let parts = [make(0, 40_000), make(1, 0), make(2, 50_000), make(3, 1)];
+        let mut serial = OrderRecords::new();
+        for part in &parts {
+            serial.extend(part);
+        }
+        assert!(serial.len() >= OrderRecords::PARALLEL_CONCAT);
+        assert_eq!(OrderRecords::concat(&parts), serial);
+    }
 
     #[test]
     fn push_appends_to_every_column() {
