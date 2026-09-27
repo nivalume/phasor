@@ -104,9 +104,13 @@ impl FromOrders<'_> {
     /// When none does, the column loop checks them once instead of once per
     /// bar. Deliberately excludes `size`, `price`, `size_type` and
     /// `direction`, which the parameter checks do not cover and which
-    /// [`ValidatedOrder::set_bar`] rewrites every bar anyway.
+    /// [`ValidatedOrder::set_bar`] rewrites every bar anyway. `log` is not a
+    /// parameter the kernel checks, but it is read off the built request, so
+    /// a per-row `log` (the "one row across a sweep" shape) needs the rebuild
+    /// too.
     fn params_vary_by_row(&self) -> bool {
-        self.fees.varies_by_row()
+        self.log.varies_by_row()
+            || self.fees.varies_by_row()
             || self.fixed_fees.varies_by_row()
             || self.slippage.varies_by_row()
             || self.min_size.varies_by_row()
@@ -894,6 +898,37 @@ mod tests {
         };
         let journal = simulate_from_orders_logged(&loud).unwrap();
         assert_eq!(journal.orders, quiet);
+    }
+
+    #[test]
+    fn a_per_row_log_flag_logs_only_those_rows() {
+        // The "one row across a sweep" shape: log bar 2 of every column and
+        // nothing else. The flag lives on the built request, which is only
+        // rebuilt per bar when something varies by row — so `log` has to
+        // count as varying, or the flag from bar 0 is used everywhere.
+        let close: Vec<f64> = [close(), close()].concat();
+        let flags: Vec<bool> = (0..10).map(|k| k % 5 == 2).collect();
+        let args = FromOrders {
+            n_rows: 5,
+            n_cols: 2,
+            groups: Groups::ungrouped(2),
+            init_cash: FlexArray::Scalar(100.0),
+            close: FlexArray::full(&close, 5, 2).unwrap(),
+            size: FlexArray::Scalar(1.0),
+            log: FlexArray::full(&flags, 5, 2).unwrap(),
+            ..Default::default()
+        };
+        let journal = simulate_from_orders_logged(&args).unwrap();
+        assert_eq!(journal.logs.col, [0, 1]);
+        assert_eq!(journal.logs.idx, [2, 2]);
+
+        let per_row = [false, false, true, false, false];
+        let by_row = FromOrders {
+            log: FlexArray::per_row(&per_row, 5).unwrap(),
+            ..args
+        };
+        let journal = simulate_from_orders_logged(&by_row).unwrap();
+        assert_eq!(journal.logs.idx, [2, 2]);
     }
 
     /// Three columns, one order each on a different bar, all logged.

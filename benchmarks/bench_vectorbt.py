@@ -20,9 +20,8 @@ Two tiers are measured, and keeping them apart matters more than it looks:
 
 The gap between them is large — the wrapper costs 2-3x — so comparing our raw
 Rust against their wrapped call would flatter us by exactly that factor and
-say nothing about the loops. Our engine has no Python layer yet; when it gets
-one it will pay its own version of that cost, and the `api` tier is where that
-will show up.
+say nothing about the loops. Our Python layer pays its own version of that
+cost; `bench_python.py` times it on its own rather than beside these rows.
 
 Neither engine is threaded: vectorbt's loop is single-threaded, which is why
 our results are reported per thread count and the parallel rows have no

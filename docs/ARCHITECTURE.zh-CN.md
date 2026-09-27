@@ -729,8 +729,10 @@ python benchmarks/compare.py [--check-baseline]
 
 | 命令 | 测量内容 |
 |---|---|
+| `cargo run --release --example bench -p barq-sim` | `from_orders` 与 `from_signals` 负载，供回归门禁 |
+| `uv run python benchmarks/bench_python.py` | Python 层：信号构造、sweep 包装、`Portfolio` 读取 |
 | `cargo run --release --example scaling -p barq-sim` | 线程扩展性（§11.2） |
-| `cargo run --release --example scale -p barq-expr -- <rows> <cols>` | 各算子和 Alpha158 的耗时 |
+| `cargo run --release --example scale -p barq-expr -- <rows> <cols> [ops\|sets]` | 各算子、Alpha158 与 Alpha360 的耗时及峰值 RSS |
 | `cargo bench -p barq-expr --features polars` | 原生对 Polars（§5.6） |
 
 ### 15.3 因子引擎的演进
@@ -816,8 +818,6 @@ python docs/img/generate.py               # 重新生成本文的图
 
 | 问题 | 位置 |
 |---|---|
-| bench 把自己的行标为 `vbt`，`compare.py` / `baseline.tsv` 期望 `barq`，门禁匹配不上 | `crates/barq-sim/examples/bench.rs` |
-| 基准文档仍说 barq 没有 Python 层 | `benchmarks/README.md`、`bench_vectorbt.py` |
 | 两个循环都没接上 `reject_prob` | §7.6 |
 | `CallSeq::Explicit` 未公开给 Python | §12.3 |
 | 模拟期间持有 GIL | §12.5 |

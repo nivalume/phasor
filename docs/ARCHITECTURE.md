@@ -862,8 +862,10 @@ Ranges, because the Numba loop loses more to a busy machine than barq does.
 
 | Command | Measures |
 |---|---|
+| `cargo run --release --example bench -p barq-sim` | `from_orders` and `from_signals` workloads for the regression gate |
+| `uv run python benchmarks/bench_python.py` | the Python layer: signals, sweep wrapper, `Portfolio` reads |
 | `cargo run --release --example scaling -p barq-sim` | thread scaling (§11.2) |
-| `cargo run --release --example scale -p barq-expr -- <rows> <cols>` | per-operator and Alpha158 wall-clock |
+| `cargo run --release --example scale -p barq-expr -- <rows> <cols> [ops\|sets]` | per-operator, Alpha158 and Alpha360 wall-clock with peak RSS |
 | `cargo bench -p barq-expr --features polars` | native vs Polars (§5.6) |
 
 ### 15.3 Factor engine history
@@ -950,8 +952,6 @@ None affects correctness of results.
 
 | Issue | Where |
 |---|---|
-| bench labels its rows `vbt`; `compare.py` / `baseline.tsv` expect `barq`, so the gate cannot match | `crates/barq-sim/examples/bench.rs` |
-| benchmark docs say barq has no Python layer | `benchmarks/README.md`, `bench_vectorbt.py` |
 | `reject_prob` not wired in either loop | §7.6 |
 | `CallSeq::Explicit` not exposed to Python | §12.3 |
 | simulation holds the GIL | §12.5 |

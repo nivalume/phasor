@@ -43,11 +43,16 @@ measures two tiers:
 | `api` | Through the engine-neutral dispatch wrapper — what a Python caller pays today. |
 
 **The kernel tier is the comparison that means something**: loop against loop,
-with nobody's language bindings in the measurement. Our engine has no Python
-layer yet, so comparing our raw Rust against their wrapped call would flatter
-us by exactly the wrapper's cost and say nothing about the loops. When we grow
-a Python shell it will pay its own version of that cost and belong in the `api`
-tier.
+with nobody's language bindings in the measurement. Comparing our raw Rust
+against their wrapped call would flatter us by exactly the wrapper's cost and
+say nothing about the loops. Our own Python layer (`barq-py`) is timed
+separately by `bench_python.py`, which covers what a caller pays around the
+loop — signal construction, the sweep wrapper, `Portfolio` reads — rather than
+the loop itself.
+
+`from_signals` has its own workloads in `workloads_signals.tsv`. They have no
+vectorbt counterpart and exist for the regression gate: that loop is what the
+Python layer calls most, and it went unmeasured until then.
 
 This distinction was not obvious up front. The first version of this harness
 compared our kernel against their API and reported a 5.3x median, which was
