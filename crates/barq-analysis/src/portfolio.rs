@@ -31,6 +31,8 @@
 //! Positions and trades remain per symbol. Cash, value and return metrics
 //! follow cash-sharing groups, with initial capital counted once per group.
 
+use std::borrow::Cow;
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use barq_core::error::{Error, Result};
@@ -86,8 +88,14 @@ impl Default for Scoring {
 }
 
 /// Everything derived from a run, computed once and kept.
+///
+/// Normally owned by the [`Portfolio`] that fills it. A caller that has to
+/// rebuild a borrowing `Portfolio` per call — the Python layer, whose
+/// object owns the prices the engine only borrows — keeps one of these
+/// alongside and lends it through [`Portfolio::from_borrowed`], so a value
+/// curve computed for one call is still there for the next.
 #[derive(Debug, Default)]
-struct Cache {
+pub struct Cache {
     assets: OnceLock<Matrix>,
     cash: OnceLock<Matrix>,
     free_cash: OnceLock<Matrix>,
@@ -102,6 +110,32 @@ struct Cache {
     drawdowns: OnceLock<DrawdownRecords>,
 }
 
+impl Cache {
+    /// Drops every cached derivation, releasing the matrices it held.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// The cache a portfolio reads: its own, or one lent by whoever owns the run.
+#[derive(Debug)]
+enum CacheRef<'a> {
+    /// Boxed so the enum is one pointer either way; a `Cache` is a dozen
+    /// `OnceLock`s.
+    Owned(Box<Cache>),
+    Borrowed(&'a Cache),
+}
+
+impl Deref for CacheRef<'_> {
+    type Target = Cache;
+    fn deref(&self) -> &Cache {
+        match self {
+            Self::Owned(cache) => cache,
+            Self::Borrowed(cache) => cache,
+        }
+    }
+}
+
 /// A completed run.
 ///
 /// Built by [`Portfolio::from_orders`] or [`Portfolio::from_signals`], which
@@ -109,16 +143,16 @@ struct Cache {
 /// from somewhere else — phase 2's event-driven tier, or a file.
 #[derive(Debug)]
 pub struct Portfolio<'a> {
-    orders: OrderRecords,
+    orders: Cow<'a, OrderRecords>,
     close: FlexArray<'a, f64>,
     n_rows: usize,
     n_cols: usize,
     groups: Groups,
     group_init_cash: Vec<f64>,
     /// Benchmark returns per account, if supplied.
-    benchmark: Option<Matrix>,
+    benchmark: Option<Cow<'a, Matrix>>,
     scoring: Scoring,
-    cache: Cache,
+    cache: CacheRef<'a>,
 }
 
 impl<'a> Portfolio<'a> {
@@ -142,28 +176,16 @@ impl<'a> Portfolio<'a> {
         n_cols: usize,
         scoring: Scoring,
     ) -> Result<Self> {
-        // Checked once here rather than in every derivation: a record naming
-        // a column that does not exist would otherwise surface as a panic
-        // deep inside whichever series was asked for first.
-        barq_records::ColMap::build(&orders.col, n_cols)?;
-        for (i, &row) in orders.idx.iter().enumerate() {
-            if row < 0 || row as usize >= n_rows {
-                return Err(Error::Invariant(format!(
-                    "fill {i} is on row {row}, outside 0..{n_rows}"
-                )));
-            }
-        }
-        Ok(Self {
-            orders,
+        Self::build(
+            Cow::Owned(orders),
             close,
+            init_cash,
             n_rows,
             n_cols,
-            groups: Groups::ungrouped(n_cols),
-            group_init_cash: (0..n_cols).map(|col| init_cash.get(0, col)).collect(),
-            benchmark: None,
             scoring,
-            cache: Cache::default(),
-        })
+            Groups::ungrouped(n_cols),
+            CacheRef::Owned(Box::default()),
+        )
     }
 
     /// Wraps group-major simulation fills for account-level analysis.
@@ -183,26 +205,101 @@ impl<'a> Portfolio<'a> {
         scoring: Scoring,
         groups: Groups,
     ) -> Result<Self> {
+        if groups.is_shared() {
+            orders.sort_by_column();
+        }
+        Self::build(
+            Cow::Owned(orders),
+            close,
+            init_cash,
+            n_rows,
+            n_cols,
+            scoring,
+            groups,
+            CacheRef::Owned(Box::default()),
+        )
+    }
+
+    /// Wraps records and a cache that outlive this portfolio.
+    ///
+    /// For an owner that has to rebuild a borrowing `Portfolio` per call: the
+    /// records are not cloned, and whatever this call derives stays in
+    /// `cache` for the next one. `orders` must already be in column-major
+    /// order (see [`OrderRecords::sort_by_column`]); a shared-cash run's
+    /// execution-order records are rejected rather than sorted, because the
+    /// sort would have to be repeated per call.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::from_grouped_records`].
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one argument per input the borrowing constructor cannot own"
+    )]
+    pub fn from_borrowed(
+        orders: &'a OrderRecords,
+        close: FlexArray<'a, f64>,
+        init_cash: FlexArray<'a, f64>,
+        n_rows: usize,
+        n_cols: usize,
+        scoring: Scoring,
+        groups: Groups,
+        cache: &'a Cache,
+    ) -> Result<Self> {
+        Self::build(
+            Cow::Borrowed(orders),
+            close,
+            init_cash,
+            n_rows,
+            n_cols,
+            scoring,
+            groups,
+            CacheRef::Borrowed(cache),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "the constructors' shared body")]
+    fn build(
+        orders: Cow<'a, OrderRecords>,
+        close: FlexArray<'a, f64>,
+        init_cash: FlexArray<'a, f64>,
+        n_rows: usize,
+        n_cols: usize,
+        scoring: Scoring,
+        groups: Groups,
+        cache: CacheRef<'a>,
+    ) -> Result<Self> {
         let covered: usize = (0..groups.len()).map(|g| groups.len_of(g)).sum();
         if covered != n_cols {
             return Err(Error::Invariant(
                 "grouping does not cover the price columns".into(),
             ));
         }
-        if groups.is_shared() {
-            let mut indices: Vec<usize> = (0..orders.len()).collect();
-            indices.sort_by_key(|&i| (orders.col[i], orders.idx[i]));
-            macro_rules! reorder {
-                ($($field:ident),*) => { $(orders.$field = indices.iter().map(|&i| orders.$field[i]).collect();)* };
+        // Checked once here rather than in every derivation: a record naming
+        // a column that does not exist would otherwise surface as a panic
+        // deep inside whichever series was asked for first.
+        barq_records::ColMap::build(&orders.col, n_cols)?;
+        for (i, &row) in orders.idx.iter().enumerate() {
+            if row < 0 || row as usize >= n_rows {
+                return Err(Error::Invariant(format!(
+                    "fill {i} is on row {row}, outside 0..{n_rows}"
+                )));
             }
-            reorder!(col, idx, size, price, fees, side);
         }
-        let mut pf = Self::from_records(orders, close, init_cash, n_rows, n_cols, scoring)?;
-        pf.group_init_cash = (0..groups.len())
+        let group_init_cash = (0..groups.len())
             .map(|g| init_cash.get(0, groups.range(g).start))
             .collect();
-        pf.groups = groups;
-        Ok(pf)
+        Ok(Self {
+            orders,
+            close,
+            n_rows,
+            n_cols,
+            groups,
+            group_init_cash,
+            benchmark: None,
+            scoring,
+            cache,
+        })
     }
 
     /// Number of independent accounts.
@@ -240,7 +337,7 @@ impl<'a> Portfolio<'a> {
             return &self.orders;
         }
         self.cache.account_orders.get_or_init(|| {
-            let mut records = self.orders.clone();
+            let mut records = OrderRecords::clone(&self.orders);
             for col in &mut records.col {
                 *col = self.groups.of_column(*col as usize) as i64;
             }
@@ -281,7 +378,27 @@ impl<'a> Portfolio<'a> {
                 self.n_groups()
             )));
         }
-        self.benchmark = Some(benchmark);
+        self.benchmark = Some(Cow::Owned(benchmark));
+        Ok(self)
+    }
+
+    /// [`Self::with_benchmark`] over a benchmark someone else keeps, so a
+    /// caller rebuilding the portfolio per call does not copy it each time.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::with_benchmark`].
+    pub fn with_benchmark_ref(mut self, benchmark: &'a Matrix) -> Result<Self> {
+        if benchmark.n_rows() != self.n_rows || benchmark.n_cols() != self.n_groups() {
+            return Err(Error::Invariant(format!(
+                "a benchmark of {}x{} against a run of {}x{}",
+                benchmark.n_rows(),
+                benchmark.n_cols(),
+                self.n_rows,
+                self.n_groups()
+            )));
+        }
+        self.benchmark = Some(Cow::Borrowed(benchmark));
         Ok(self)
     }
 
@@ -386,8 +503,14 @@ impl<'a> Portfolio<'a> {
         // Only the trade view changes what is derived; the rest are read at
         // the point a metric is computed, so their caches stay valid.
         if scoring.trades_type != self.scoring.trades_type {
-            self.cache.trades = OnceLock::new();
-            self.cache.account_trades = OnceLock::new();
+            match &mut self.cache {
+                CacheRef::Owned(cache) => {
+                    cache.trades = OnceLock::new();
+                    cache.account_trades = OnceLock::new();
+                }
+                // A lent cache is someone else's to keep; start a private one.
+                CacheRef::Borrowed(_) => self.cache = CacheRef::Owned(Box::default()),
+            }
         }
         self.scoring = scoring;
         self
@@ -683,7 +806,7 @@ impl<'a> Portfolio<'a> {
                 .groups
                 .is_shared()
                 .then(|| self.account_total_return(col)),
-            benchmark: self.benchmark.as_ref().map(|b| b.column(col)),
+            benchmark: self.benchmark.as_deref().map(|b| b.column(col)),
             gross_exposure: self.gross_exposure().ok().map(|e| e.column(col)),
             orders: self.account_orders(),
             trades: self.account_trades()?,

@@ -8,9 +8,12 @@ mod alpha158;
 mod alpha360;
 mod backend;
 mod eval;
+mod graph;
+mod order;
 mod parse;
 #[cfg(feature = "polars")]
 mod polars_backend;
+mod window;
 
 pub use alpha158::alpha158;
 pub use alpha360::alpha360;
@@ -30,6 +33,7 @@ use crate::parse::parse;
 #[derive(Debug, Clone)]
 pub struct FactorSet {
     factors: Vec<(String, Expression)>,
+    graph: graph::Graph,
 }
 
 impl FactorSet {
@@ -37,8 +41,9 @@ impl FactorSet {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty or repeated name, invalid syntax, or an
-    /// unsupported operator.
+    /// Returns an error for an empty or repeated name, invalid syntax, an
+    /// unsupported operator, or an invalid literal parameter (a fractional or
+    /// negative window, a quantile outside `0..=1`, a negative EMA span).
     pub fn compile<N, S, I>(factors: I) -> Result<Self>
     where
         N: Into<String>,
@@ -62,7 +67,12 @@ impl FactorSet {
         if compiled.is_empty() {
             return Err(Error::Invariant("a factor set cannot be empty".into()));
         }
-        Ok(Self { factors: compiled })
+        let graph =
+            graph::Graph::compile(compiled.iter().map(|(name, expr)| (name.as_str(), expr)))?;
+        Ok(Self {
+            factors: compiled,
+            graph,
+        })
     }
 
     /// Names in output order.
@@ -122,6 +132,123 @@ impl FactorSet {
 mod tests {
     use super::*;
     use barq_model::OhlcvPanel;
+
+    #[test]
+    fn literals_and_fields_broadcast_and_shared_nodes_are_reused() {
+        let panel = OhlcvPanel {
+            close: vec![1.0, 2.0, 4.0, 10.0, 20.0, 40.0],
+            n_rows: 3,
+            n_cols: 2,
+            ..OhlcvPanel::default()
+        };
+        let inputs = FactorInputs::from_ohlcv(&panel).unwrap();
+        let factors = FactorSet::compile([
+            ("constant", "1 + 2"),
+            ("field", "+$close"),
+            ("left", "2 * $close"),
+            ("right", "$close - 1"),
+            ("choice", "If($close > 3, 1, -1)"),
+            ("rolling_literal", "Mean(4, 2)"),
+            ("pair_literal", "Cov($close, 5, 2)"),
+            ("shared", "Ref($close, 1) / Ref($close, 1)"),
+            ("repeat", "2 * $close"),
+        ])
+        .unwrap();
+        let values = factors.evaluate(&inputs).unwrap();
+        let column = |name: &str, col: usize| values.get(name).unwrap().column(col).to_vec();
+
+        assert_eq!(column("constant", 1), [3.0; 3]);
+        assert_eq!(column("field", 1), [10.0, 20.0, 40.0]);
+        assert_eq!(column("left", 0), [2.0, 4.0, 8.0]);
+        assert_eq!(column("right", 1), [9.0, 19.0, 39.0]);
+        assert_eq!(column("choice", 0), [-1.0, -1.0, 1.0]);
+        assert_eq!(column("rolling_literal", 1), [4.0; 3]);
+        assert!(column("pair_literal", 0)[0].is_nan());
+        assert_eq!(column("pair_literal", 0)[1..], [0.0, 0.0]);
+        assert!(column("shared", 0)[0].is_nan());
+        assert_eq!(column("shared", 1)[1..], [1.0, 1.0]);
+        assert_eq!(column("repeat", 1), column("left", 1));
+    }
+
+    #[test]
+    fn missing_fields_fail_before_any_work() {
+        let panel = OhlcvPanel {
+            close: vec![1.0, 2.0],
+            n_rows: 2,
+            n_cols: 1,
+            ..OhlcvPanel::default()
+        };
+        let inputs = FactorInputs::from_ohlcv(&panel).unwrap();
+        let factors = FactorSet::compile([("f", "$vwap / $close")]).unwrap();
+        let error = factors.evaluate(&inputs).unwrap_err().to_string();
+        assert!(error.contains("$vwap"), "{error}");
+    }
+
+    #[test]
+    fn each_symbol_evaluates_exactly_as_it_would_alone() {
+        let (n_rows, n_cols) = (90, 3);
+        let series = |base: f64| {
+            (0..n_cols)
+                .flat_map(|col| {
+                    (0..n_rows).map(move |row| {
+                        if (row + col) % 17 == 0 {
+                            f64::NAN
+                        } else {
+                            base + col as f64 * 3.0 + ((row * 7 + col) % 11) as f64
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let panel = OhlcvPanel {
+            open: series(10.0),
+            high: series(12.0),
+            low: series(8.0),
+            close: series(10.5),
+            volume: series(1000.0),
+            n_rows,
+            n_cols,
+        };
+        let vwap = series(10.2);
+        let factors = alpha158().unwrap();
+        let all = factors
+            .evaluate(
+                &FactorInputs::from_ohlcv(&panel)
+                    .unwrap()
+                    .with_field("vwap", &vwap)
+                    .unwrap(),
+            )
+            .unwrap();
+        for col in 0..n_cols {
+            let one = |values: &[f64]| values[col * n_rows..(col + 1) * n_rows].to_vec();
+            let single = OhlcvPanel {
+                open: one(&panel.open),
+                high: one(&panel.high),
+                low: one(&panel.low),
+                close: one(&panel.close),
+                volume: one(&panel.volume),
+                n_rows,
+                n_cols: 1,
+            };
+            let single_vwap = one(&vwap);
+            let alone = factors
+                .evaluate(
+                    &FactorInputs::from_ohlcv(&single)
+                        .unwrap()
+                        .with_field("vwap", &single_vwap)
+                        .unwrap(),
+                )
+                .unwrap();
+            for ((name, matrix), (_, expected)) in all.iter().zip(alone.iter()) {
+                let same = matrix
+                    .column(col)
+                    .iter()
+                    .zip(expected.column(0))
+                    .all(|(a, b)| a.to_bits() == b.to_bits());
+                assert!(same, "{name} column {col}");
+            }
+        }
+    }
 
     #[test]
     fn expressions_feed_column_major_factor_matrices() {

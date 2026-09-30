@@ -1,5 +1,4 @@
 import pytest
-
 from barq_lab.protocol import cards, policy
 from barq_lab.types.factor_ts import spec as fs
 

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import barq
 import numpy as np
 import pyarrow as pa
-
-import barq
 
 FIELDS = ("open", "high", "low", "close", "volume", "vwap")
 HOUR_NS = 3_600_000_000_000
@@ -35,7 +34,7 @@ def load(catalog: str, symbols: list[str], venue: str, interval: str, start: str
     arrow_schema = pa.schema([("event_time", pa.uint64()), ("available_time", pa.uint64()), *fields])
     schema = barq.data.DataSchema(name="bars", input=arrow_schema, output=arrow_schema, decode=_identity)
     keys = tuple(bar_key(symbol, venue, interval) for symbol in symbols)
-    source = barq.data.Catalog(Path(catalog).expanduser(), schemas=[schema]).source("bars", keys=keys)
+    source = barq.data.Catalog(str(Path(catalog).expanduser()), schemas=[schema]).source("bars", keys=keys)
     dataset = source.load(start=time_ns(start), end=time_ns(end))
     panel = dataset.prepare()
     quote_volume = dataset.asof(panel, field="quote_volume")
@@ -57,7 +56,7 @@ def load(catalog: str, symbols: list[str], venue: str, interval: str, start: str
     )
     if not complete.any():
         raise ValueError(f"no complete bars for {symbols} in [{start}, {end})")
-    out = {name: np.asfortranarray(value[complete], dtype=np.float64) for name, value in raw.items()}
+    out: dict = {name: np.asfortranarray(value[complete], dtype=np.float64) for name, value in raw.items()}
     out["time"] = np.asarray(panel.time, dtype=np.int64)[complete]
     out["symbols"] = list(symbols)
     out["dropped_bars"] = int((~complete).sum())

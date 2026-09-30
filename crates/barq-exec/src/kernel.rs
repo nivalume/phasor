@@ -2,7 +2,7 @@
 //!
 //! A faithful port of the reference vectorized engine's semantics. Where the
 //! two could differ, this file follows the reference, because bit-identical
-//! fills against it are the acceptance criterion (see `docs/08-verification.md`).
+//! fills against it are the acceptance criterion (see `docs/ARCHITECTURE.md §14`).
 //! Places where that produces un-idiomatic Rust are commented rather than
 //! tidied up.
 
@@ -605,7 +605,7 @@ pub fn execute_validated(
     }
 
     // The size cascade. Order matters: each stage rewrites the size type, and
-    // only `Amount` reaches the buy/sell dispatch. See docs/04-execution-model.md.
+    // only `Amount` reaches the buy/sell dispatch. See docs/ARCHITECTURE.md §7.3.
     let mut order_size = order.size;
     let mut size_type = order.size_type;
 

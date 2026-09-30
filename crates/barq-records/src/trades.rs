@@ -6,7 +6,7 @@
 //! layout and differing only in what one record *means*. Mixing them up
 //! produces plausible statistics that answer a different question than the
 //! one asked, which is why this is the most commonly mis-ported part of the
-//! design. See `docs/05-records.md`.
+//! design. See `docs/ARCHITECTURE.md §9.5`.
 //!
 //! | View | One record is | Exit attribution |
 //! |---|---|---|

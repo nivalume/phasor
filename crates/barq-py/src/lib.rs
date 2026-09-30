@@ -50,9 +50,12 @@ pub mod expr;
 pub mod params;
 pub mod parse;
 
+use std::sync::OnceLock;
+
 use barq_analysis::stats::{Select, Value};
-use barq_analysis::{Portfolio as CorePortfolio, Scoring};
+use barq_analysis::{Cache, Portfolio as CorePortfolio, Scoring};
 use barq_core::flex::FlexArray;
+use barq_core::matrix::Matrix;
 use barq_model::TradesType;
 use barq_records::{LogRecords, OrderRecords};
 use barq_sim::from_orders::FromOrders;
@@ -80,12 +83,22 @@ use params::Shared;
 /// close prices and starting cash are copied once, here, and the borrow is
 /// rebuilt per call from the copy.
 ///
-/// The copy is one array, once. What is *not* copied is the rebuild chain: the
-/// value curve, returns, trades and drawdowns are still derived on demand.
+/// The copy is one array, once. The rebuild chain — the value curve, returns,
+/// trades and drawdowns — is derived on demand into [`Self::cache`], which
+/// outlives the per-call engine view, so a curve computed for one call is
+/// still there for the next. [`Self::clear_cache`] gives the memory back.
 #[pyclass(name = "Portfolio", module = "barq")]
 #[derive(Debug)]
 pub struct PyPortfolio {
     orders: OrderRecords,
+    /// The fills in column-major order when the run shared cash and emitted
+    /// them in execution order; `None` when `orders` already is. Sorted once
+    /// here rather than on every rebuild.
+    sorted_orders: Option<OrderRecords>,
+    /// Derivations kept across calls; the engine view borrows it.
+    cache: Cache,
+    /// Buy-and-hold returns, the default benchmark for `stats`, computed once.
+    benchmark: OnceLock<Matrix>,
     /// Empty unless the run asked for logs. Not part of the derivation chain:
     /// nothing computed from a portfolio reads a log, which is the point —
     /// logs explain the run rather than contributing to it.
@@ -108,16 +121,9 @@ impl PyPortfolio {
     /// Rebuilds the engine's portfolio over this object's own buffers.
     ///
     /// Called per method rather than held, because the engine's type borrows
-    /// and a `#[pyclass]` cannot hold a borrow of itself.
-    ///
-    /// # What that costs, exactly
-    ///
-    /// Two things per call: the record arrays are cloned, and the `OnceLock`
-    /// cache starts empty, so whatever the method asks for is derived again.
-    /// The derivation dominates — it is `O(n_rows × n_cols)` against the
-    /// clone's `O(n_fills)` — which is why [`Self::metrics`] and [`Self::stats`]
-    /// exist as bulk calls. Six scalars pulled one at a time is six rebuilds
-    /// for the answer one would have given.
+    /// and a `#[pyclass]` cannot hold a borrow of itself. The records and the
+    /// cache are lent rather than cloned, so the rebuild itself is free and
+    /// whatever one call derives, the next one finds.
     fn core(&self) -> PyResult<CorePortfolio<'_>> {
         let close = market_array(
             &self.close,
@@ -126,8 +132,8 @@ impl PyPortfolio {
             self.column_map.as_deref(),
         )?;
         let cash = FlexArray::per_column(&self.init_cash, self.n_cols).map_err(to_py_err)?;
-        CorePortfolio::from_grouped_records(
-            self.orders.clone(),
+        CorePortfolio::from_borrowed(
+            self.sorted_orders.as_ref().unwrap_or(&self.orders),
             close,
             cash,
             self.n_rows,
@@ -139,8 +145,54 @@ impl PyPortfolio {
                 incl_open: self.incl_open,
             },
             self.groups.clone(),
+            &self.cache,
         )
         .map_err(to_py_err)
+    }
+
+    /// Assembles the result of a run into a portfolio, sorting the records
+    /// once if a shared account emitted them in execution order.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one argument per thing a run leaves behind"
+    )]
+    fn assemble(
+        orders: OrderRecords,
+        logs: LogRecords,
+        close: Vec<f64>,
+        source_cols: usize,
+        column_map: Option<Vec<usize>>,
+        init_cash: Vec<f64>,
+        groups: Groups,
+        cash_sharing: bool,
+        n_rows: usize,
+        n_cols: usize,
+        scoring: Scoring,
+    ) -> Self {
+        let sorted_orders = groups.is_shared().then(|| {
+            let mut sorted = orders.clone();
+            sorted.sort_by_column();
+            sorted
+        });
+        Self {
+            orders,
+            sorted_orders,
+            cache: Cache::default(),
+            benchmark: OnceLock::new(),
+            logs,
+            close,
+            source_cols,
+            column_map,
+            init_cash,
+            groups,
+            cash_sharing,
+            n_rows,
+            n_cols,
+            ann_factor: scoring.ann_factor,
+            risk_free: scoring.risk_free,
+            incl_open: scoring.incl_open,
+            trades_type: scoring.trades_type,
+        }
     }
 }
 
@@ -202,14 +254,16 @@ impl PyPortfolio {
         group: Option<usize>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let col = self.account_index(col, group)?;
-        let pf = self.core()?;
-        let pf = if self.cash_sharing {
-            pf
-        } else {
-            let benchmark = pf.buy_and_hold();
-            pf.with_benchmark(benchmark).map_err(to_py_err)?
-        };
-        let table = pf.stats(col, &Select::all()).map_err(to_py_err)?;
+        let table = py.detach(|| -> PyResult<_> {
+            let pf = self.core()?;
+            let pf = if self.cash_sharing {
+                pf
+            } else {
+                let benchmark = self.benchmark.get_or_init(|| pf.buy_and_hold());
+                pf.with_benchmark_ref(benchmark).map_err(to_py_err)?
+            };
+            pf.stats(col, &Select::all()).map_err(to_py_err)
+        })?;
         let out = PyDict::new(py);
         for (title, value) in table {
             match value {
@@ -230,26 +284,30 @@ impl PyPortfolio {
     /// accessor rebuilds the chain; asking for six of them separately does six
     /// times the work for the same answer.
     fn metrics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let pf = self.core()?;
+        let (columns, counts) = py.detach(|| -> PyResult<_> {
+            let pf = self.core()?;
+            let columns = [
+                ("total_return", pf.total_return()),
+                ("annualized_return", pf.annualized_return()),
+                ("max_drawdown", pf.max_drawdown()),
+                ("sharpe_ratio", pf.sharpe_ratio()),
+                ("sortino_ratio", pf.sortino_ratio()),
+                ("calmar_ratio", pf.calmar_ratio()),
+            ];
+            // An integer array, matching `trade_count()`. A float count would
+            // round-trip fine and then read as a measurement rather than a tally.
+            let counts: Vec<i64> = pf
+                .trade_counts()
+                .map_err(to_py_err)?
+                .into_iter()
+                .map(|n| n as i64)
+                .collect();
+            Ok((columns, counts))
+        })?;
         let out = PyDict::new(py);
-        let put = |name: &str, v: Vec<f64>| -> PyResult<()> {
-            out.set_item(name, v.into_pyarray(py))?;
-            Ok(())
-        };
-        put("total_return", pf.total_return())?;
-        put("annualized_return", pf.annualized_return())?;
-        put("max_drawdown", pf.max_drawdown())?;
-        put("sharpe_ratio", pf.sharpe_ratio())?;
-        put("sortino_ratio", pf.sortino_ratio())?;
-        put("calmar_ratio", pf.calmar_ratio())?;
-        // An integer array, matching `trade_count()`. A float count would
-        // round-trip fine and then read as a measurement rather than a tally.
-        let counts: Vec<i64> = pf
-            .trade_counts()
-            .map_err(to_py_err)?
-            .into_iter()
-            .map(|n| n as i64)
-            .collect();
+        for (name, values) in columns {
+            out.set_item(name, values.into_pyarray(py))?;
+        }
         out.set_item("trade_count", counts.into_pyarray(py))?;
         Ok(out)
     }
@@ -260,25 +318,29 @@ impl PyPortfolio {
     /// sorts as the best column in a sweep. [`Self::traded_only`] is how a
     /// ranking says what it is ranking.
     fn sharpe_ratio<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        Ok(self.core()?.sharpe_ratio().into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.sharpe_ratio()))?
+            .into_pyarray(py))
     }
 
     /// Total return per account.
     fn total_return<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        Ok(self.core()?.total_return().into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.total_return()))?
+            .into_pyarray(py))
     }
 
     /// Worst drawdown per column, as a negative fraction.
     fn max_drawdown<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        Ok(self.core()?.max_drawdown().into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.max_drawdown()))?
+            .into_pyarray(py))
     }
 
     /// Number of trades per account.
     fn trade_count<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<i64>>> {
-        let counts: Vec<i64> = self
-            .core()?
-            .trade_counts()
-            .map_err(to_py_err)?
+        let counts: Vec<i64> = py
+            .detach(|| self.core()?.trade_counts().map_err(to_py_err))?
             .into_iter()
             .map(|n| n as i64)
             .collect();
@@ -299,7 +361,7 @@ impl PyPortfolio {
         let slice = values
             .as_slice()
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let masked = self.core()?.traded_only(slice).map_err(to_py_err)?;
+        let masked = py.detach(|| self.core()?.traded_only(slice).map_err(to_py_err))?;
         Ok(masked.into_pyarray(py))
     }
 
@@ -312,7 +374,9 @@ impl PyPortfolio {
         group: Option<usize>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let index = self.account_index(col, group)?;
-        Ok(self.core()?.value().column(index).to_vec().into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.value().column(index).to_vec()))?
+            .into_pyarray(py))
     }
 
     /// Per-bar account returns.
@@ -324,11 +388,8 @@ impl PyPortfolio {
         group: Option<usize>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let index = self.account_index(col, group)?;
-        Ok(self
-            .core()?
-            .returns()
-            .column(index)
-            .to_vec()
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.returns().column(index).to_vec()))?
             .into_pyarray(py))
     }
 
@@ -341,7 +402,9 @@ impl PyPortfolio {
         group: Option<usize>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let index = self.account_index(col, group)?;
-        Ok(self.core()?.cash().column(index).to_vec().into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.cash().column(index).to_vec()))?
+            .into_pyarray(py))
     }
 
     /// Position quantity of one symbol column.
@@ -479,7 +542,8 @@ impl PyPortfolio {
     /// The trades, in whichever view this portfolio is scored with.
     fn trades<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let pf = self.core()?;
-        let t = pf.trades().map_err(to_py_err)?;
+        // Derived (and cached) without the GIL; the arrays are built with it.
+        let t = py.detach(|| pf.trades().map_err(to_py_err))?;
         let out = PyDict::new(py);
         out.set_item("col", t.col.clone().into_pyarray(py))?;
         out.set_item("size", t.size.clone().into_pyarray(py))?;
@@ -493,7 +557,7 @@ impl PyPortfolio {
         out.set_item("ret", t.ret.clone().into_pyarray(py))?;
         // Derived rather than stored, and not `exit_idx - entry_idx`: a closed
         // trade is measured exclusively and an open one inclusively. See
-        // `docs/05-records.md`.
+        // `docs/ARCHITECTURE.md §9.6`.
         out.set_item("duration", t.duration().into_pyarray(py))?;
         let direction: Vec<i64> = t.direction.iter().map(|d| i64::from(*d)).collect();
         out.set_item("direction", direction.into_pyarray(py))?;
@@ -501,6 +565,17 @@ impl PyPortfolio {
         out.set_item("status", status.into_pyarray(py))?;
         out.set_item("parent_id", t.parent_id.clone().into_pyarray(py))?;
         Ok(out)
+    }
+
+    /// Drops every derived series this portfolio has cached.
+    ///
+    /// The value curve, returns, trades and drawdowns are kept between calls
+    /// so that reading six metrics costs one derivation, not six. Each is a
+    /// `bars × accounts` matrix; on a large sweep that is memory worth giving
+    /// back once the numbers are in hand. The next call derives again.
+    fn clear_cache(&mut self) {
+        self.cache.clear();
+        self.benchmark = OnceLock::new();
     }
 
     fn __repr__(&self) -> String {
@@ -540,7 +615,7 @@ impl PyPortfolio {
         &self,
         py: Python<'py>,
         col: usize,
-        pick: impl Fn(&CorePortfolio<'_>, usize) -> Vec<f64>,
+        pick: impl Fn(&CorePortfolio<'_>, usize) -> Vec<f64> + Send + Sync,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         if col >= self.n_cols {
             return Err(pyo3::exceptions::PyIndexError::new_err(format!(
@@ -548,8 +623,9 @@ impl PyPortfolio {
                 self.n_cols
             )));
         }
-        let pf = self.core()?;
-        Ok(pick(&pf, col).into_pyarray(py))
+        Ok(py
+            .detach(|| self.core().map(|pf| pick(&pf, col)))?
+            .into_pyarray(py))
     }
 }
 
@@ -646,6 +722,7 @@ fn account_inputs(
     reason = "one argument per simulation parameter, which is the API"
 )]
 fn from_signals(
+    py: Python<'_>,
     close: &Bound<'_, PyAny>,
     entries: &Bound<'_, PyAny>,
     exits: &Bound<'_, PyAny>,
@@ -809,22 +886,30 @@ fn from_signals(
     };
 
     // Two entry points rather than always taking the logged one: a run that is
-    // not investigating anything should not allocate a journal.
+    // not investigating anything should not allocate a journal. The GIL is
+    // released for the run: every input is a borrowed slice the guards above
+    // keep alive, and nothing in the loop touches Python.
     let (orders, logs) = if p.wants_logs() {
-        let journal = if threads > 1 {
-            barq_sim::simulate_from_signals_logged_parallel(&args, threads)
-        } else {
-            barq_sim::simulate_from_signals_logged(&args)
-        }
-        .map_err(to_py_err)?;
+        let journal = py
+            .detach(|| {
+                if threads > 1 {
+                    barq_sim::simulate_from_signals_logged_parallel(&args, threads)
+                } else {
+                    barq_sim::simulate_from_signals_logged(&args)
+                }
+            })
+            .map_err(to_py_err)?;
         (journal.orders, journal.logs)
     } else {
-        let orders = if threads > 1 {
-            barq_sim::simulate_from_signals_parallel(&args, threads)
-        } else {
-            barq_sim::simulate_from_signals(&args)
-        }
-        .map_err(to_py_err)?;
+        let orders = py
+            .detach(|| {
+                if threads > 1 {
+                    barq_sim::simulate_from_signals_parallel(&args, threads)
+                } else {
+                    barq_sim::simulate_from_signals(&args)
+                }
+            })
+            .map_err(to_py_err)?;
         (orders, LogRecords::new())
     };
 
@@ -832,22 +917,24 @@ fn from_signals(
     // rebuilt without keeping Python's array alive.
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
 
-    Ok(PyPortfolio {
+    Ok(PyPortfolio::assemble(
         orders,
         logs,
-        close: close_flat.to_vec(),
+        close_flat.to_vec(),
         source_cols,
         column_map,
-        init_cash: init_cash_owned,
+        init_cash_owned,
         groups,
         cash_sharing,
         n_rows,
         n_cols,
-        ann_factor,
-        risk_free,
-        incl_open,
-        trades_type,
-    })
+        Scoring {
+            ann_factor,
+            risk_free,
+            trades_type,
+            incl_open,
+        },
+    ))
 }
 
 /// Runs a backtest from one order request per element.
@@ -901,6 +988,7 @@ fn from_signals(
     reason = "one argument per simulation parameter, which is the API"
 )]
 fn from_orders(
+    py: Python<'_>,
     close: &Bound<'_, PyAny>,
     size: Option<&Bound<'_, PyAny>>,
     size_type: &str,
@@ -1011,41 +1099,49 @@ fn from_orders(
     };
 
     let (orders, logs) = if p.wants_logs() {
-        let journal = if threads > 1 {
-            barq_sim::simulate_from_orders_logged_parallel(&args, threads)
-        } else {
-            barq_sim::simulate_from_orders_logged(&args)
-        }
-        .map_err(to_py_err)?;
+        let journal = py
+            .detach(|| {
+                if threads > 1 {
+                    barq_sim::simulate_from_orders_logged_parallel(&args, threads)
+                } else {
+                    barq_sim::simulate_from_orders_logged(&args)
+                }
+            })
+            .map_err(to_py_err)?;
         (journal.orders, journal.logs)
     } else {
-        let orders = if threads > 1 {
-            barq_sim::simulate_from_orders_parallel(&args, threads)
-        } else {
-            barq_sim::simulate_from_orders(&args)
-        }
-        .map_err(to_py_err)?;
+        let orders = py
+            .detach(|| {
+                if threads > 1 {
+                    barq_sim::simulate_from_orders_parallel(&args, threads)
+                } else {
+                    barq_sim::simulate_from_orders(&args)
+                }
+            })
+            .map_err(to_py_err)?;
         (orders, LogRecords::new())
     };
 
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
 
-    Ok(PyPortfolio {
+    Ok(PyPortfolio::assemble(
         orders,
         logs,
-        close: close_flat.to_vec(),
+        close_flat.to_vec(),
         source_cols,
         column_map,
-        init_cash: init_cash_owned,
+        init_cash_owned,
         groups,
         cash_sharing,
         n_rows,
         n_cols,
-        ann_factor,
-        risk_free,
-        incl_open,
-        trades_type,
-    })
+        Scoring {
+            ann_factor,
+            risk_free,
+            trades_type,
+            incl_open,
+        },
+    ))
 }
 
 fn market_array<'a>(

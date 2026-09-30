@@ -372,6 +372,40 @@ struct ColumnState {
 }
 
 impl FromSignals<'_> {
+    /// An upper bound on the fills columns `cols` can produce.
+    ///
+    /// Every fill needs a signal or an armed stop, a stop only fires once per
+    /// position, and a position needs an entry signal, so fills never exceed
+    /// twice the signal cells that are set. The record buffers are
+    /// preallocated to that rather than to one fill per cell, which is what
+    /// `from_orders` measured as worth +6% to +19% over growing by doubling.
+    fn fill_bound(&self, cols: std::ops::Range<usize>) -> usize {
+        let set = |array| crate::count_where(array, self.n_rows, cols.clone(), |on| on);
+        let signals = set(&self.entries)
+            + set(&self.exits)
+            + set(&self.long_entries)
+            + set(&self.long_exits)
+            + set(&self.short_entries)
+            + set(&self.short_exits);
+        signals.saturating_mul(2).min(self.n_rows * cols.len())
+    }
+
+    /// Whether any parameter [`ValidatedOrder`] covers changes down a column;
+    /// if none does, each column's request is built once rather than per bar.
+    /// `log` is read off the built request, so it counts too.
+    fn params_vary_by_row(&self) -> bool {
+        self.log.varies_by_row()
+            || self.fees.varies_by_row()
+            || self.fixed_fees.varies_by_row()
+            || self.slippage.varies_by_row()
+            || self.min_size.varies_by_row()
+            || self.max_size.varies_by_row()
+            || self.size_granularity.varies_by_row()
+            || self.lock_cash.varies_by_row()
+            || self.allow_partial.varies_by_row()
+            || self.raise_reject.varies_by_row()
+    }
+
     /// Resolves the default grouping and validates its width.
     ///
     /// # Errors
@@ -392,7 +426,50 @@ impl FromSignals<'_> {
     }
 }
 
+/// What [`prepare_order`] decided for one column on one bar: the four fields
+/// [`ValidatedOrder::set_bar`] takes, and whether the fill is a stop resting
+/// at its level, which pays no slippage.
+#[derive(Debug, Clone, Copy)]
+struct Pending {
+    size: f64,
+    price: f64,
+    size_type: SizeType,
+    direction: Direction,
+    stop_limit: bool,
+}
+
+/// Builds the request for row `i` of column `col`, with the parameter checks
+/// done once. `stop_limit` builds the variant a resting stop fills through,
+/// which differs only in paying no slippage.
+fn build_order(args: &FromSignals<'_>, i: usize, col: usize, stop_limit: bool) -> ValidatedOrder {
+    ValidatedOrder::new(Order {
+        size: f64::NAN,
+        price: f64::NAN,
+        size_type: SizeType::Amount,
+        direction: Direction::Both,
+        fees: args.fees.get(i, col),
+        fixed_fees: args.fixed_fees.get(i, col),
+        slippage: if stop_limit {
+            0.0
+        } else {
+            args.slippage.get(i, col)
+        },
+        min_size: args.min_size.get(i, col),
+        max_size: args.max_size.get(i, col),
+        size_granularity: args.size_granularity.get(i, col),
+        reject_prob: 0.0,
+        lock_cash: args.lock_cash.get(i, col),
+        allow_partial: args.allow_partial.get(i, col),
+        raise_reject: args.raise_reject.get(i, col),
+        log: args.log.get(i, col),
+    })
+}
+
 /// Resolves prices, stops, conflicts and size before any group order fills.
+///
+/// `sizes_checked` says the size and size type were validated once for the
+/// column, so a bar with neither a signal nor a stop can be skipped without
+/// changing where an invalid size is reported.
 #[allow(
     clippy::too_many_lines,
     reason = "keep the ordered signal pipeline together"
@@ -402,7 +479,8 @@ fn prepare_order(
     i: usize,
     col: usize,
     state: &mut ColumnState,
-) -> Result<Option<ValidatedOrder>> {
+    sizes_checked: bool,
+) -> Result<Option<Pending>> {
     let position = state.position;
     let mut stops = state.stops;
     let mut last_val_price = state.last_val_price;
@@ -443,7 +521,7 @@ fn prepare_order(
     let val_price_now = last_val_price;
 
     // --- stops --------------------------------------------------------
-    let mut slippage = args.slippage.get(i, col);
+    let mut stop_limit = false;
     let mut triggered = f64::NAN;
     if args.use_stops && stops.armed() {
         // A missing open, high or low is reconstructed from what is
@@ -509,7 +587,7 @@ fn prepare_order(
             StopExitPrice::StopMarket => price = triggered,
             StopExitPrice::StopLimit => {
                 price = triggered;
-                slippage = 0.0;
+                stop_limit = true;
             }
             StopExitPrice::Close => price = args.close.get(i, col),
             StopExitPrice::Price => {}
@@ -517,6 +595,13 @@ fn prepare_order(
         s
     } else {
         let mut s = read_signals(args, i, col);
+        if sizes_checked && !s.any() {
+            // A quiet bar: nothing to size, and the size parameters were
+            // already checked, so the sizing step has nothing to report.
+            state.stops = stops;
+            state.last_val_price = last_val_price;
+            return Ok(None);
+        }
         // Conflicts are only worth resolving when an entry is involved.
         // Two exits cannot conflict: they act on different sides.
         if s.long_entry || s.short_entry {
@@ -584,25 +669,13 @@ fn prepare_order(
         sized.size
     };
 
-    let order = ValidatedOrder::new(Order {
+    Ok(Some(Pending {
         size,
         price,
         size_type: sized.size_type,
         direction: sized.direction,
-        fees: args.fees.get(i, col),
-        fixed_fees: args.fixed_fees.get(i, col),
-        slippage,
-        min_size: args.min_size.get(i, col),
-        max_size: args.max_size.get(i, col),
-        size_granularity: args.size_granularity.get(i, col),
-        reject_prob: 0.0,
-        lock_cash: args.lock_cash.get(i, col),
-        allow_partial: args.allow_partial.get(i, col),
-        raise_reject: args.raise_reject.get(i, col),
-        log: args.log.get(i, col),
-    });
-
-    Ok(Some(order))
+        stop_limit,
+    }))
 }
 
 /// Executes a group sequentially within each bar; groups are independent.
@@ -619,6 +692,7 @@ fn simulate_group<S: RecordSink + LogSink>(
 ) -> Result<()> {
     let cols = groups.range(group);
     let len = cols.len();
+    let shared = len > 1;
     let mut cash = args.init_cash.get(0, cols.start);
     let mut free_cash = cash;
     let mut states = vec![
@@ -630,13 +704,57 @@ fn simulate_group<S: RecordSink + LogSink>(
         };
         len
     ];
-    let mut orders = Vec::with_capacity(len);
+    // The request per column, and the variant a resting stop fills through,
+    // built once unless a parameter varies down the column. This hoists the
+    // nine parameter reads and seven checks that `from_orders` measured at
+    // +30% on sparse workloads.
+    let params_vary = args.params_vary_by_row();
+    let mut orders: Vec<ValidatedOrder> = cols
+        .clone()
+        .map(|c| build_order(args, 0, c, false))
+        .collect();
+    let mut stop_orders: Vec<ValidatedOrder> = cols
+        .clone()
+        .map(|c| build_order(args, 0, c, true))
+        .collect();
+    // The size checks the sizing step makes are column-constant when the size
+    // is; doing them here lets a quiet bar skip that step. They are made at
+    // the same point they would otherwise first be made: before bar 0.
+    let sizes_checked = !args.size.varies_by_row() && !args.size_type.varies_by_row();
+    if sizes_checked {
+        for col in cols.clone() {
+            signals_to_size(
+                0.0,
+                Signals {
+                    long_entry: false,
+                    long_exit: false,
+                    short_entry: false,
+                    short_exit: false,
+                },
+                args.size.get(0, col),
+                args.size_type.get(0, col),
+                args.accumulate.get(0, col),
+                f64::NAN,
+            )?;
+        }
+    }
+    let mut pending: Vec<Option<Pending>> = vec![None; len];
     let mut order_values = vec![0.0; len];
     let mut seq: Vec<usize> = (0..len).collect();
     for i in 0..args.n_rows {
-        orders.clear();
+        if params_vary {
+            for (k, col) in cols.clone().enumerate() {
+                orders[k] = build_order(args, i, col, false);
+                stop_orders[k] = build_order(args, i, col, true);
+            }
+        }
+        let mut any = false;
         for (k, col) in cols.clone().enumerate() {
-            orders.push(prepare_order(args, i, col, &mut states[k])?);
+            pending[k] = prepare_order(args, i, col, &mut states[k], sizes_checked)?;
+            any |= pending[k].is_some();
+        }
+        if !any {
+            continue;
         }
         let mut group_value = cash;
         for st in &states {
@@ -644,29 +762,37 @@ fn simulate_group<S: RecordSink + LogSink>(
                 group_value += st.position * st.last_val_price;
             }
         }
-        if args.call_seq == CallSeq::Auto {
-            for (k, pending) in orders.iter().enumerate() {
-                order_values[k] = pending.as_ref().map_or(0.0, |p| {
-                    let o = p.order();
-                    approx_order_value(
-                        o.size,
-                        o.size_type,
-                        o.direction,
-                        cash,
-                        states[k].position,
-                        free_cash,
-                        states[k].last_val_price,
-                        group_value,
-                    )
-                });
+        // A group of one has one order and nothing to sequence.
+        if shared {
+            if args.call_seq == CallSeq::Auto {
+                for (k, p) in pending.iter().enumerate() {
+                    order_values[k] = p.as_ref().map_or(0.0, |p| {
+                        approx_order_value(
+                            p.size,
+                            p.size_type,
+                            p.direction,
+                            cash,
+                            states[k].position,
+                            free_cash,
+                            states[k].last_val_price,
+                            group_value,
+                        )
+                    });
+                }
             }
+            args.call_seq
+                .resolve(cols.clone(), i, args.n_rows, &mut order_values, &mut seq)?;
         }
-        args.call_seq
-            .resolve(cols.clone(), i, args.n_rows, &mut order_values, &mut seq)?;
         for &k in &seq {
-            let Some(order) = &orders[k] else {
+            let Some(p) = pending[k] else {
                 continue;
             };
+            let order = if p.stop_limit {
+                &mut stop_orders[k]
+            } else {
+                &mut orders[k]
+            };
+            order.set_bar(p.size, p.price, p.size_type, p.direction);
             let col = cols.start + k;
             let mut position = states[k].position;
             let debt = states[k].debt;
@@ -803,7 +929,7 @@ fn simulate_group<S: RecordSink + LogSink>(
 
 fn simulate_into<S: SinkBuffer>(args: &FromSignals<'_>) -> Result<S> {
     let groups = args.resolved_groups()?;
-    let mut sink = S::with_capacity(0);
+    let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     let mut fills = 0_i64;
     for group in 0..groups.len() {
         simulate_group(args, &groups, group, &mut sink, &mut fills)?;
@@ -842,11 +968,8 @@ pub fn simulate_from_signals_logged(args: &FromSignals<'_>) -> Result<Journal> {
 ///
 /// # Errors
 ///
-/// As [`simulate_from_signals`].
-///
-/// # Panics
-///
-/// Panics if a worker thread panics.
+/// As [`simulate_from_signals`]. If several threads error, the one from the
+/// lowest column chunk is returned, so the failure does not depend on timing.
 pub fn simulate_from_signals_parallel(
     args: &FromSignals<'_>,
     n_threads: usize,
@@ -862,11 +985,7 @@ pub fn simulate_from_signals_parallel(
 ///
 /// # Errors
 ///
-/// As [`simulate_from_signals`].
-///
-/// # Panics
-///
-/// Panics if a worker thread panics.
+/// As [`simulate_from_signals_parallel`].
 pub fn simulate_from_signals_logged_parallel(
     args: &FromSignals<'_>,
     n_threads: usize,
@@ -878,11 +997,7 @@ pub fn simulate_from_signals_logged_parallel(
 ///
 /// # Errors
 ///
-/// As [`simulate_from_signals`].
-///
-/// # Panics
-///
-/// Panics if a worker thread panics.
+/// As [`simulate_from_signals_parallel`].
 fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usize) -> Result<S> {
     let groups = args.resolved_groups()?;
     let n_groups = groups.len();
@@ -891,17 +1006,15 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
         return simulate_into(args);
     }
 
-    let chunk = n_groups.div_ceil(n_threads);
-    let mut parts: Vec<Result<S>> = Vec::new();
-
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..n_groups)
-            .step_by(chunk)
-            .map(|start| {
-                let end = (start + chunk).min(n_groups);
+    let ranges = groups.chunks(n_threads);
+    let results: Vec<Result<S>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = ranges
+            .iter()
+            .map(|&(start, end)| {
                 let groups = &groups;
                 scope.spawn(move || {
-                    let mut sink = S::with_capacity(0);
+                    let cols = groups.range(start).start..groups.range(end - 1).end;
+                    let mut sink = S::with_capacity(args.fill_bound(cols));
                     // Per buffer, so ids do not depend on interleaving.
                     let mut fills = 0_i64;
                     for group in start..end {
@@ -911,17 +1024,21 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
                 })
             })
             .collect();
-        parts = handles
+        handles
             .into_iter()
-            .map(|h| h.join().expect("worker thread panicked"))
-            .collect();
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err(Error::Invariant("simulation thread panicked".into())))
+            })
+            .collect()
     });
 
-    let mut merged: Vec<S> = Vec::with_capacity(parts.len());
-    for part in parts {
-        merged.push(part?);
+    // Report the lowest-numbered failure so errors are deterministic.
+    let mut parts = Vec::with_capacity(results.len());
+    for result in results {
+        parts.push(result?);
     }
-    Ok(S::merge(&merged))
+    Ok(S::merge(parts))
 }
 
 #[cfg(test)]

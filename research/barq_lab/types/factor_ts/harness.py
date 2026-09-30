@@ -12,9 +12,9 @@ import math
 import warnings
 from pathlib import Path
 
+import barq
 import numpy as np
 
-import barq
 from barq_lab import data as bars
 from barq_lab.types.factor_ts import spec as specs
 

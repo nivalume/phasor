@@ -7,7 +7,7 @@
 //! vectorized result can be trusted enough to be validated by an
 //! event-driven replay**, so the signature stays callable for a single bar in
 //! isolation, with no dependence on the rest of the column being known. See
-//! `docs/04-execution-model.md`.
+//! `docs/ARCHITECTURE.md §7`.
 //!
 //! # Two kinds of failure
 //!
@@ -41,7 +41,7 @@
 //! at coverage. The tolerance-boundary cases exist because replacing the
 //! tolerant affordability check with a plain `<=` originally passed
 //! everything; the sequence amplifiers exist because the zero-snapping
-//! machinery was otherwise unverified. See `docs/08-verification.md`.
+//! machinery was otherwise unverified. See `docs/ARCHITECTURE.md §14.4`.
 
 mod kernel;
 mod types;

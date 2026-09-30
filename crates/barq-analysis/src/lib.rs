@@ -40,7 +40,7 @@ pub mod trade_stats;
 
 pub use aggregate::{Reduce, argmax, argmin, best_column, group_by};
 pub use percentile::percentile;
-pub use portfolio::{Portfolio, Scoring};
+pub use portfolio::{Cache, Portfolio, Scoring};
 pub use series::returns_from_orders;
 pub use stats::{Metric, Select, StatsInput, Tag, Value, stats};
 pub use trade_stats::TradeStats;

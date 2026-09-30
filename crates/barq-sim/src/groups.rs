@@ -25,7 +25,7 @@
 //!
 //! The last case is the honest limit and it is inherent, not an artefact: a
 //! shared cash balance is a sequential dependency across the whole group.
-//! `docs/02-parallelism.md` carries the measured figures.
+//! `docs/ARCHITECTURE.md §11.2` carries the measured figures.
 //!
 //! # Call order
 //!
@@ -142,6 +142,36 @@ impl Groups {
     #[must_use]
     pub fn max_len(&self) -> usize {
         self.lens.iter().copied().max().unwrap_or(0)
+    }
+
+    /// Splits the groups into at most `n_threads` contiguous runs of about
+    /// equal column count, as `(first group, one past the last)` pairs.
+    ///
+    /// Contiguous so each thread's records are already in group order and the
+    /// merge is an append. Balanced by columns rather than groups, because a
+    /// group's work is its columns; and cut at fractions of the total rather
+    /// than into `ceil(n / threads)` runs, which for 5 groups on 4 threads
+    /// gives runs of 2, 2, 1 and leaves a thread idle.
+    #[must_use]
+    pub fn chunks(&self, n_threads: usize) -> Vec<(usize, usize)> {
+        let n_threads = n_threads.max(1);
+        let total: usize = self.lens.iter().sum();
+        let mut out = Vec::with_capacity(n_threads);
+        let (mut start, mut seen) = (0, 0);
+        for t in 1..=n_threads {
+            // Groups whose first column lies before this thread's share ends.
+            let target = total * t / n_threads;
+            let mut end = start;
+            while end < self.lens.len() && (seen < target || t == n_threads) {
+                seen += self.lens[end];
+                end += 1;
+            }
+            if end > start {
+                out.push((start, end));
+                start = end;
+            }
+        }
+        out
     }
 }
 
@@ -314,6 +344,30 @@ mod tests {
         assert_eq!(g.of_column(0), 0);
         assert_eq!(g.of_column(4), 1);
         assert_eq!(g.max_len(), 3);
+    }
+
+    #[test]
+    fn chunks_use_every_thread_and_balance_by_columns() {
+        // Five groups on four threads: the ceil-division split gave 2, 2, 1
+        // and an idle thread; fractions of the total give one run each.
+        let g = Groups::ungrouped(5);
+        assert_eq!(g.chunks(4), [(0, 1), (1, 2), (2, 3), (3, 5)]);
+        // Fewer groups than threads: one group per run, no empty runs.
+        assert_eq!(Groups::ungrouped(2).chunks(4), [(0, 1), (1, 2)]);
+        // One wide group and many narrow ones: the wide one is its own run.
+        let g = Groups::from_lens(&[6, 1, 1, 1, 1, 1, 1], 12).unwrap();
+        let chunks = g.chunks(2);
+        assert_eq!(chunks, [(0, 1), (1, 7)]);
+        // Runs are contiguous and cover every group exactly once.
+        for (threads, n) in [(1, 7), (3, 7), (7, 7), (16, 7)] {
+            let chunks = Groups::ungrouped(n).chunks(threads);
+            assert!(chunks.len() <= threads);
+            assert_eq!(chunks[0].0, 0);
+            assert_eq!(chunks.last().unwrap().1, n);
+            for pair in chunks.windows(2) {
+                assert_eq!(pair[0].1, pair[1].0);
+            }
+        }
     }
 
     #[test]

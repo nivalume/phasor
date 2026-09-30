@@ -1,10 +1,14 @@
-//! Benchmark runner for `from_orders`.
+//! Benchmark runner for `from_orders` and `from_signals`.
 //!
 //! Reads `benchmarks/workloads.tsv`, runs each workload, and writes results in
 //! the format `benchmarks/compare.py` expects. The same workloads are run
 //! against vectorbt by `benchmarks/bench_vectorbt.py`, so the numbers are
 //! comparable — and every runner reports a checksum of the arrays it generated
 //! so that claim can be checked rather than assumed.
+//!
+//! `benchmarks/workloads_signals.tsv` drives `from_signals` the same way. Those
+//! rows have no vectorbt counterpart yet; they exist for the regression gate,
+//! because `from_signals` is the loop the Python layer calls most.
 //!
 //! ```text
 //! cargo run --release --example bench -p barq-sim -- benchmarks/results/barq.tsv
@@ -20,7 +24,10 @@ use std::time::Instant;
 use barq_core::flex::FlexArray;
 use barq_model::{Direction, SizeType};
 use barq_sim::groups::Groups;
-use barq_sim::{FromOrders, simulate_from_orders, simulate_from_orders_parallel};
+use barq_sim::{
+    FromOrders, FromSignals, simulate_from_orders, simulate_from_orders_parallel,
+    simulate_from_signals, simulate_from_signals_parallel,
+};
 
 /// One row of `workloads.tsv`.
 struct Workload {
@@ -131,6 +138,134 @@ fn parse_workloads(path: &Path) -> Vec<Workload> {
         .collect()
 }
 
+/// One row of `workloads_signals.tsv`.
+struct SignalWorkload {
+    name: String,
+    n_rows: usize,
+    n_cols: usize,
+    entry_every: usize,
+    hold: usize,
+    direction: Direction,
+    sl_stop: f64,
+    tp_stop: f64,
+    fees: f64,
+}
+
+/// Generates close/high/low and an entry/exit pattern for `from_signals`.
+///
+/// Prices follow the `from_orders` formula so the two loops see the same
+/// series. An entry fires every `entry_every` bars (offset by column) and
+/// its exit `hold` bars later; with stops on, the stop engine usually gets
+/// there first, which is the point of that workload.
+#[allow(clippy::type_complexity)]
+fn generate_signals(w: &SignalWorkload) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<bool>, Vec<bool>) {
+    let n = w.n_rows * w.n_cols;
+    let mut close = Vec::with_capacity(n);
+    let mut high = Vec::with_capacity(n);
+    let mut low = Vec::with_capacity(n);
+    let mut entries = vec![false; n];
+    let mut exits = vec![false; n];
+    for col in 0..w.n_cols {
+        let mut price = 10.0 + (col % 37) as f64;
+        for i in 0..w.n_rows {
+            let wiggle = ((i * 2_654_435_761 + col * 40_503) % 1000) as f64 / 1000.0 - 0.5;
+            price = (price * (1.0 + wiggle * 0.02)).max(0.5);
+            close.push(price);
+            high.push(price * 1.01);
+            low.push(price * 0.99);
+            let k = col * w.n_rows + i;
+            if (i + col) % w.entry_every == 0 {
+                entries[k] = true;
+            }
+            if (i + col) % w.entry_every == w.hold % w.entry_every && i >= w.hold {
+                exits[k] = true;
+            }
+        }
+    }
+    (close, high, low, entries, exits)
+}
+
+fn parse_signal_workloads(path: &Path) -> Vec<SignalWorkload> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let mut lines = text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty());
+    let header: Vec<&str> = lines.next().expect("no header").split('\t').collect();
+    let col = |name: &str| {
+        header
+            .iter()
+            .position(|h| *h == name)
+            .unwrap_or_else(|| panic!("workloads_signals.tsv has no column {name:?}"))
+    };
+    let (c_name, c_rows, c_cols) = (col("name"), col("n_rows"), col("n_cols"));
+    let (c_every, c_hold, c_dir) = (col("entry_every"), col("hold"), col("direction"));
+    let (c_sl, c_tp, c_fees) = (col("sl_stop"), col("tp_stop"), col("fees"));
+    lines
+        .map(|line| {
+            let f: Vec<&str> = line.split('\t').collect();
+            SignalWorkload {
+                name: f[c_name].to_owned(),
+                n_rows: f[c_rows].parse().unwrap(),
+                n_cols: f[c_cols].parse().unwrap(),
+                entry_every: f[c_every].parse().unwrap(),
+                hold: f[c_hold].parse().unwrap(),
+                direction: match f[c_dir] {
+                    "Both" => Direction::Both,
+                    "LongOnly" => Direction::LongOnly,
+                    "ShortOnly" => Direction::ShortOnly,
+                    other => panic!("unsupported direction {other:?}"),
+                },
+                sl_stop: f[c_sl].parse().unwrap(),
+                tp_stop: f[c_tp].parse().unwrap(),
+                fees: f[c_fees].parse().unwrap(),
+            }
+        })
+        .collect()
+}
+
+/// Best of seven at each thread count, appended to `out` in the results format.
+///
+/// The shortest run is the least contaminated estimate on a shared machine,
+/// and more samples tighten it: at three, repeated runs of identical code
+/// moved by up to 10%, which is wider than several of the optimizations worth
+/// measuring. Costs about a minute for the whole suite.
+fn time_workload(
+    out: &mut String,
+    name: &str,
+    n_rows: usize,
+    n_cols: usize,
+    sum: u64,
+    cores: usize,
+    run: impl Fn(usize) -> usize,
+) {
+    let elems = (n_rows * n_cols) as f64;
+    let fills = run(1);
+    // Serial first, so the numbers line up with the single-threaded
+    // reference, then the thread counts this machine can actually use.
+    let mut thread_counts = vec![1usize];
+    thread_counts.extend((2..=cores).filter(|t| *t == 2 || *t == cores));
+    for threads in thread_counts {
+        let mut best = f64::INFINITY;
+        for _ in 0..7 {
+            let start = Instant::now();
+            let got = run(threads);
+            best = best.min(start.elapsed().as_secs_f64());
+            assert_eq!(got, fills, "thread count changed the result");
+        }
+        writeln!(
+            out,
+            "{name}\tbarq\t{threads}\t{n_rows}\t{n_cols}\t{fills}\t{sum}\t{best:.6}\t{:.0}",
+            elems / best
+        )
+        .unwrap();
+        println!(
+            "{name:<22} {threads:>2}t  {best:>8.4}s  {:>12.0} elem/s  ({fills} fills)",
+            elems / best
+        );
+    }
+}
+
 fn main() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out_path = std::env::args().nth(1).map_or_else(
@@ -174,49 +309,65 @@ fn main() {
             slippage: FlexArray::Scalar(w.slippage),
             ..Default::default()
         };
-
-        let elems = (w.n_rows * w.n_cols) as f64;
-        let warm = simulate_from_orders(&args).expect("simulation failed");
-        let fills = warm.len();
-
-        // Serial first, so the numbers line up with the single-threaded
-        // reference, then the thread counts this machine can actually use.
-        let mut thread_counts = vec![1usize];
-        thread_counts.extend((2..=cores).filter(|t| *t == 2 || *t == cores));
-
-        for threads in thread_counts {
-            // Best of seven. The shortest run is the least contaminated
-            // estimate on a shared machine, and more samples tighten it:
-            // at three, repeated runs of identical code moved by up to 10%,
-            // which is wider than several of the optimizations worth
-            // measuring. Costs about a minute for the whole suite.
-            let mut best = f64::INFINITY;
-            for _ in 0..7 {
-                let start = Instant::now();
-                let records = if threads == 1 {
+        time_workload(
+            &mut out,
+            &w.name,
+            w.n_rows,
+            w.n_cols,
+            sum,
+            cores,
+            |threads| {
+                if threads == 1 {
                     simulate_from_orders(&args)
                 } else {
                     simulate_from_orders_parallel(&args, threads)
                 }
-                .expect("simulation failed");
-                best = best.min(start.elapsed().as_secs_f64());
-                assert_eq!(records.len(), fills, "thread count changed the result");
-            }
-            writeln!(
-                out,
-                "{}\tvbt\t{threads}\t{}\t{}\t{fills}\t{sum}\t{best:.6}\t{:.0}",
-                w.name,
-                w.n_rows,
-                w.n_cols,
-                elems / best
-            )
-            .unwrap();
-            println!(
-                "{:<22} {threads:>2}t  {best:>8.4}s  {:>12.0} elem/s  ({fills} fills)",
-                w.name,
-                elems / best
-            );
-        }
+                .expect("simulation failed")
+                .len()
+            },
+        );
+    }
+
+    let signal_workloads =
+        parse_signal_workloads(&repo_root.join("benchmarks/workloads_signals.tsv"));
+    for w in &signal_workloads {
+        let (close, high, low, entries, exits) = generate_signals(w);
+        let sum = checksum(&close)
+            .wrapping_add(entries.iter().filter(|e| **e).count() as u64)
+            .wrapping_add(exits.iter().filter(|e| **e).count() as u64);
+        let args = FromSignals {
+            n_rows: w.n_rows,
+            n_cols: w.n_cols,
+            init_cash: FlexArray::Scalar(100_000.0),
+            close: FlexArray::full(&close, w.n_rows, w.n_cols).unwrap(),
+            high: FlexArray::full(&high, w.n_rows, w.n_cols).unwrap(),
+            low: FlexArray::full(&low, w.n_rows, w.n_cols).unwrap(),
+            entries: FlexArray::full(&entries, w.n_rows, w.n_cols).unwrap(),
+            exits: FlexArray::full(&exits, w.n_rows, w.n_cols).unwrap(),
+            direction: FlexArray::Scalar(w.direction),
+            sl_stop: FlexArray::Scalar(w.sl_stop),
+            tp_stop: FlexArray::Scalar(w.tp_stop),
+            use_stops: !(w.sl_stop.is_nan() && w.tp_stop.is_nan()),
+            fees: FlexArray::Scalar(w.fees),
+            ..Default::default()
+        };
+        time_workload(
+            &mut out,
+            &w.name,
+            w.n_rows,
+            w.n_cols,
+            sum,
+            cores,
+            |threads| {
+                if threads == 1 {
+                    simulate_from_signals(&args)
+                } else {
+                    simulate_from_signals_parallel(&args, threads)
+                }
+                .expect("simulation failed")
+                .len()
+            },
+        );
     }
 
     if let Some(parent) = out_path.parent() {

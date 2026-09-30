@@ -33,7 +33,7 @@
 //!
 //! What a null model actually needs is a *matched* one — the same number of
 //! signals, in the same runs, reshuffled — and that is a design question
-//! rather than a port. See `docs/08-verification.md`.
+//! rather than a port. See `docs/ARCHITECTURE.md §14`.
 
 pub mod clean;
 pub mod generate;

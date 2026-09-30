@@ -119,6 +119,12 @@ impl Matrix {
         &self.data
     }
 
+    /// The column-major buffer, without copying it.
+    #[must_use]
+    pub fn into_vec(self) -> Vec<f64> {
+        self.data
+    }
+
     /// Applies `f` to each column, collecting one value per column.
     #[must_use]
     pub fn map_columns(&self, f: impl Fn(&[f64]) -> f64) -> Vec<f64> {

@@ -17,7 +17,7 @@
 //! combination's columns are contiguous. Writing it down here rather than
 //! leaving it implicit is what lets [`crate::Indicator`] hand its output
 //! straight to the simulator with no reshuffling. See
-//! `docs/03-column-layout.md`.
+//! `docs/ARCHITECTURE.md §3.1`.
 //!
 //! # Zipped or crossed is the caller's decision
 //!

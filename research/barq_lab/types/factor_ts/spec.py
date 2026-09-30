@@ -101,10 +101,14 @@ def _lex(source: str) -> list[tuple[str, str]]:
             i += len(match.group(0))
         elif c.isdigit() or c == ".":
             match = re.match(r"(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", source[i:])
+            if match is None:
+                raise SpecError(f"invalid number at byte {i}")
             tokens.append(("num", match.group(0)))
             i += len(match.group(0))
         elif c.isalpha() or c == "_":
             match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", source[i:])
+            if match is None:
+                raise SpecError(f"invalid name at byte {i}")
             tokens.append(("name", match.group(0)))
             i += len(match.group(0))
         else:

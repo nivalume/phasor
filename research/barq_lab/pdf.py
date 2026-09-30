@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 
 def chunks(path: str | Path, pages: tuple[int, int] | None = None, max_chars: int = 40_000) -> list[dict]:
@@ -11,10 +12,11 @@ def chunks(path: str | Path, pages: tuple[int, int] | None = None, max_chars: in
 
     out, text, first = [], [], pages[0] if pages else 1
     with pymupdf.open(Path(path).expanduser()) as document:
-        for number, page in enumerate(document, 1):
+        for number in range(1, document.page_count + 1):
+            page = document.load_page(number - 1)
             if pages and not pages[0] <= number <= pages[1]:
                 continue
-            body = page.get_text().strip()
+            body = cast(str, page.get_text("text")).strip()
             if not body:
                 continue
             if text and sum(len(t) for t in text) + len(body) > max_chars:

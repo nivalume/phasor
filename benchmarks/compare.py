@@ -159,10 +159,10 @@ def head_to_head(rows: list[dict[str, str]]) -> None:
             "  has no counterpart there rather than a slower one."
         )
 
-    # The API tier is what a Python caller pays today. Reported separately
-    # because our engine has no Python layer yet, so there is nothing of ours
-    # to put beside it — and comparing our raw Rust against their wrapped call
-    # would flatter us by the wrapper's cost and say nothing about the loops.
+    # The API tier is what a vectorbt caller pays. Reported separately
+    # because comparing our raw Rust against their wrapped call would flatter
+    # us by the wrapper's cost and say nothing about the loops; our own Python
+    # layer is timed by bench_python.py instead.
     api_rows = [r for r in rows if r["impl"].endswith("-api")]
     if api_rows:
         print("\nAPI — through vectorbt's dispatch wrapper, for reference\n")

@@ -2,7 +2,6 @@ import json
 import subprocess
 
 import pytest
-
 from barq_lab.protocol.ledger import Ledger, LedgerError
 
 

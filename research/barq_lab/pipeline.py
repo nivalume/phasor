@@ -12,7 +12,8 @@ import numpy as np
 import yaml
 
 from barq_lab.protocol import cards as card_rules
-from barq_lab.protocol import experiment_type, policy as policies, report
+from barq_lab.protocol import experiment_type, report
+from barq_lab.protocol import policy as policies
 from barq_lab.protocol.ledger import Ledger
 from barq_lab.protocol.versions import pipeline_version
 
@@ -101,11 +102,14 @@ class Lab:
         """Freezes a (possibly hand-edited) pending card+spec into the registry."""
         path = self.root / "pending" / f"{item_id}.yaml"
         item = yaml.safe_load(path.read_text())
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} must contain a mapping")
         card, kind = item["card"], experiment_type.get(item["card"].get("experiment_type", "factor_ts"))
         problems = card_rules.regulate(card, self.policy["card"]["forbidden_terms"])
         spec, spec_problems = kind.regulate(item["spec"], card, self.tried(), self.policy) if not problems else (None, [])
         problems += spec_problems
         if not problems:
+            assert spec is not None
             error = kind.contract_check(spec, card, self.policy)
             if error:
                 problems.append(f"contract check: {error} (run `barq-lab repair {item_id}`)")
@@ -113,6 +117,7 @@ class Lab:
             item["problems"] = problems
             path.write_text(_dump(item))
             raise ValueError(f"{item_id} cannot be registered:\n- " + "\n- ".join(problems))
+        assert spec is not None
         sid = spec_id(card, spec)
         if sid in self.ledger.registered():
             raise ValueError(f"{item_id} is identical to registered spec {sid}")
@@ -130,9 +135,15 @@ class Lab:
 
         path = self.root / "pending" / f"{item_id}.yaml"
         item = yaml.safe_load(path.read_text())
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} must contain a mapping")
         kind = experiment_type.get(item["card"].get("experiment_type", "factor_ts"))
         spec, problems = kind.regulate(item["spec"], item["card"], self.tried(), self.policy)
-        error = "; ".join(problems) if problems else kind.contract_check(spec, item["card"], self.policy)
+        if problems:
+            error = "; ".join(problems)
+        else:
+            assert spec is not None
+            error = kind.contract_check(spec, item["card"], self.policy)
         if not error:
             return item
         item = propose.repair(llm, item, error)
