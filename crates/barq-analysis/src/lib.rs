@@ -30,6 +30,7 @@
 
 pub mod aggregate;
 pub mod benchmark;
+pub mod events;
 pub mod metrics;
 pub mod percentile;
 pub mod portfolio;
