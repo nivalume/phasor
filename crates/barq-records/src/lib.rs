@@ -29,11 +29,13 @@
 //! mapped-array reduction layer and log records are implemented.
 
 pub mod drawdowns;
+pub mod excursions;
 pub mod logs;
 pub mod mapped;
 mod trades;
 
 pub use drawdowns::{DrawdownRecords, DrawdownStatus, find_drawdowns};
+pub use excursions::{Excursions, edge_ratio, excursions};
 pub use logs::{Journal, LogEntry, LogRecords, LogSink};
 
 /// Re-exported so a caller can turn a stored discriminant back into a reason.
