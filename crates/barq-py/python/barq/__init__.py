@@ -38,7 +38,7 @@ from typing import Any
 
 import numpy as np
 
-from . import _barq, data
+from . import _barq, data, validation
 from ._barq import InstrumentId, BarType
 from ._barq import Portfolio
 
@@ -49,6 +49,7 @@ __all__ = [
     "alpha158",
     "alpha360",
     "data",
+    "validation",
     "InstrumentId",
     "BarType",
     "from_orders",
