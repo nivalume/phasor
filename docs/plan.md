@@ -31,7 +31,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | B | 现金流、杠杆、合约 | 5 | 0 | 5 |
 | C | 保证金、强平、资金费（PRO 没有） | 0 | 0 | 5 |
 | D | 订单与止损 | 0 | 0 | 9 |
-| E | 回调与自定义模拟 | 0 | 0 | 5 |
+| E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
 | H | 指标、信号、标签 | 0 | 2 | 5 |
@@ -40,7 +40,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **7** | **8** | **64** |
+| **合计** | | **7** | **9** | **63** |
 
 ### 下一步（按优先级）
 
@@ -86,12 +86,14 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - [ ] 事件研究：`forward_paths`、`mean_path`、`median_path`、`hit_rate`（I6）。
     - [ ] 稳健性：`probabilistic_sharpe`、`deflated_sharpe`、`pbo_cscv`（J3）。
     - [ ] 标签和随机信号（H6、H7），合成价格（G5）。
+    - [ ] `from_signals` 已有但 Python 不能设的止损参数：`upon_stop_exit`（含 `Reverse`）、`stop_entry_price`（含 `FillPrice`）、`stop_exit_price`、`upon_stop_update`。
 
 - [ ] **P3 合并三份 SplitMix64 随机数实现**（S）
-  - 为什么：`barq-sim/src/random.rs`、`barq-signals/src/random.rs`、`barq-generic/src/synthetic.rs` 各有一份，公式相同。并行开发时各自写了一份，以后改一处容易漏另外两处。
+  - 为什么：`barq-sim/src/random.rs`、`barq-signals/src/random.rs`、`barq-generic/src/synthetic.rs` 各有一份。并行开发时各自写的，以后改一处容易漏另外两处。
+  - 现状：三处的 SplitMix64 混合步骤相同；sim 和 signals 从 `(seed, row, col)` 映射到 `[0, 1)` 的方式也相同；synthetic 多一个 salt 参数，并且映射到开区间 `(0, 1)`（加 0.5），两种结果不同。
   - 要做：
-    - [ ] 移到 `barq-core`，三处改为调用它。
-    - [ ] 加一个测试，固定几组 `(seed, row, col)` 的输出，防止以后改动悄悄改变已有结果。
+    - [ ] `barq-core` 提供混合步骤和带 salt 的链式哈希，两种均匀映射各自保留，三处改为调用它。
+    - [ ] 先加测试固定三处现在的输出（覆盖 `(seed, row, col, salt)` 和两种区间），保证合并不改变任何已有结果。
 
 ### A. 账户模型地基
 
@@ -110,15 +112,17 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 做什么：
     - [x] 开盘：入金/出金、分红入账，早于下单量的计算。
     - [x] 收盘：`cash_earnings` 入账，在所有订单之后，没有信号的 K 线也入账。
-    - [ ] 开盘：以开盘价成交的订单、跳空触发的止损和限价单（随 D2、D4、D5 做）。
-    - [ ] 盘中：用 high/low 判断止损和限价单是否触发，多个价位同时触及时的规则写清楚（随 D2、D5 做）。
+    - [x] 现有止损 `sl_stop`/`tp_stop`：跳空时按开盘价成交，盘中按 high/low 触发，同一根 K 线上止损先于止盈；`price=-inf` 按开盘价成交。这部分原本就有，和 vectorbt 1.1.0 对照过（`from_signals.rs` 的 `stop_price` 和止损检查）。
+    - [ ] 限价单和新止损类型（`td_stop`、`stop_ladder` 等）在开盘、盘中阶段的处理（随 D2、D5 做）。
+    - [ ] 止损成交和开盘现金流之间的先后顺序写进文档。
     - [ ] 收盘：资金费、借贷利息入账，强平检查（随 C2–C4 做）。
-  - 位置：`crates/barq-sim/src/cash.rs`。
+  - 位置：入账函数在 `crates/barq-sim/src/cash.rs`；先后顺序由 `crates/barq-sim/src/from_orders.rs`、`from_signals.rs` 的 K 线循环决定。
 
 - [ ] **A3 显式的模拟状态结构**（S，推迟到 D1）
-  - 为什么：每列的状态（持仓、负债、止损、估值价）现在是循环里的局部变量。D 要加挂单，F 要保存和恢复状态，都需要一个可以复制和序列化的结构。
+  - 为什么：D 要加挂单，F 要保存和恢复状态，都需要一个公开的、可以序列化的状态结构。
+  - 现状：两个循环各有一个私有的 `ColumnState`（`from_orders.rs` 里是持仓、负债、估值价；`from_signals.rs` 里另加止损），字段不同，都不能序列化；账户组的现金和可用现金仍是局部变量。
   - 为什么推迟：现在没有使用方，先定义结构是空转。D1 加挂单时一起做，那时挂单是第一个使用方。
-  - 做什么：`ColumnState`、`GroupState`，纯数据，可 `Clone`、可序列化。只重构，不改行为，用现有 fixture 验证。
+  - 做什么：把两份 `ColumnState` 合并成一个公开、可序列化的结构，新增 `GroupState` 存放现金和可用现金。只重构，不改行为，用现有 fixture 验证。
 
 - [ ] **A4 内核状态加 `locked_cash`**（S，并入 B4）
   - 为什么：杠杆需要记录被占用的自有资金。
@@ -161,10 +165,10 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 验收：`multiplier = k` 和数量乘以 k 的结果相同（不触发整数粒度时）。
 
 - [ ] **B7 负价格**（M）
-  - 为什么：2020 年 4 月 WTI 原油期货跌到负价，现在的校验会直接拒绝。
+  - 为什么：2020 年 4 月 WTI 原油期货跌到负价。现在有两处会拒绝非正价格：撮合内核（`kernel.rs` 的价格校验），以及生成交易记录时（`trades.rs`，`pf.trades()` 和 `stats()` 会因此报错）。
   - 做什么：
     - [ ] 先写文档：负价格下 `percent`/`value` 仓位怎么换算数量，收益率分母为负怎么处理（待决定事项 6）。
-    - [ ] `allow_negative_price` 开关，默认关闭。
+    - [ ] `allow_negative_price` 开关，默认关闭；打开时内核、交易记录、收益率和统计一起放开，并加测试。
 
 - [ ] **B8 初始持仓 `init_position` / `init_price`，`init_cash="auto"`**（M）
   - 为什么：接着已有持仓继续回测；`auto` 用来回答"这个策略至少要多少本金"。
@@ -179,7 +183,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 - [x] **B10 敞口指标**（S）
   - 为什么：看仓位占比、多空敞口、净敞口，是检查组合风险的基本工具。
-  - 做了什么：`Portfolio` 的 `allocations`、`long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`、`position_coverage`，分母是账户总净值（已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变）。Python 未接，见 P2。
+  - 做了什么：`Portfolio` 上的方法。`allocations`（按列）和 `long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`（按账户）的分母是账户总净值，已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变；`position_coverage` 是每列持有非零仓位的 K 线占比。Python 未接，见 P2。
   - 位置：`crates/barq-analysis/src/portfolio.rs`，测试 `crates/barq-analysis/tests/exposure.rs`。
 
 ### C. 保证金、强平、资金费（PRO 没有）
@@ -226,7 +230,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 
 - [ ] **D1 挂单状态**（M）
   - 为什么：限价单、突破单要跨 K 线存在，需要按列保存挂单。
-  - 做什么：`ColumnState` 加挂单槽（类型、方向、价格、数量、创建行、到期行），每列最多一张。和 A3 一起做。
+  - 做什么：在 A3 合并后的 `ColumnState` 里加挂单槽（类型、方向、价格、数量、创建行、到期行），每列最多一张。和 A3 一起做。
 
 - [ ] **D2 限价单与突破单**（L）
   - 为什么：只有市价单时，挂单入场、突破入场这类策略没法回测。
@@ -242,7 +246,8 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 
 - [ ] **D5 止损扩展**（L）
   - 为什么：时间止损、分批止盈、移动止盈都是常用的出场方式。
-  - 做什么：`tsl_stop`、`tsl_th`、`td_stop`、`dt_stop`、`stop_ladder`、`stop_exit_type="reverse"`、`stop_order_type="limit"` 和 `stop_limit_delta`、`stop_entry_price="fillprice"`。
+  - 现状：止损后反手和按成交价锚定止损已有，名字沿用 vectorbt 1.x：`upon_stop_exit=Reverse/ReverseReduce`（PRO 叫 `stop_exit_type`）、`stop_entry_price=FillPrice`。只在 Rust 里能设，Python 见 P2。
+  - 做什么：`tsl_stop`、`tsl_th`、`td_stop`、`dt_stop`、`stop_ladder`、`stop_order_type="limit"` 和 `stop_limit_delta`；可选：PRO 同名的参数别名。
 
 - [ ] **D6 不经模拟生成止损信号**（S）
   - 为什么：研究阶段想先看止损信号的分布，不必跑完整模拟。
@@ -276,9 +281,13 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 为什么：保留信号数组的便利，只在少数地方插入自定义逻辑（例如按风险算仓位）。
   - 做什么：`signal_func`、`adjust_func`、`post_order_func`、`post_segment_func`。
 
-- [ ] **E4 自定义模拟循环**（M）
+- [ ] **E4 自定义模拟循环**（M，部分完成）
   - 为什么：内置循环满足不了时，让用户自己写循环，但仍然输出同样的记录、用同一套分析。
-  - 做什么：公开内核、状态结构、挂单和止损判定函数、记录写入接口。
+  - 做什么：
+    - [x] 已公开：撮合内核和内核状态（`execute_order`、`execute_validated`、`ValidatedOrder`、`ExecuteOrderState`、`ProcessOrderState`），止损判定（`stop_price`、`from_stop`），记录写入（`RecordSink`、`LogSink`），从记录构造 `Portfolio`（`Portfolio::from_records`）。
+    - [ ] 现金流入账函数（`barq-sim` 的 `cash` 模块，目前私有）。
+    - [ ] 按 `(seed, row, col)` 取随机数的函数（目前私有，和 P3 一起做）。
+    - [ ] 列和账户组状态（A3）、挂单判定（D1、D2）。
 
 - [ ] **E5 Python 回调**（L，方案待定）
   - 为什么：大多数用户写 Python。但每列每根 K 线调用一次 Python 函数，要拿 GIL，会慢几个数量级。
@@ -365,7 +374,8 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 做什么：
     - [x] 带种子的随机信号：`random_by_prob`、`random_n`、`random_entries_exits`。
     - [ ] 按日历生成的信号（每月第一个交易日等）。
-    - [ ] 信号统计：间隔、连续长度。
+    - [x] 信号间隔和连续长度：原本就有，`ranges.rs` 的 `partition_ranges`、`between_ranges`、`between_partition_ranges`，加上 `duration`、`mean_closed_duration`（Python 未接，见 H1）。
+    - [ ] 一张信号汇总统计表（次数、间隔和长度的均值与分位数）。
     - [ ] 匹配型随机基线：信号数量和分布与原策略相同，只打乱位置。
   - 位置：`crates/barq-signals/src/random.rs`。Python 未接，见 P2。
 
@@ -392,6 +402,8 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 
 - [ ] **I3 外部收益序列分析**（S）
   - 为什么：别处来的收益或净值序列，也想用同一套指标评估。
+  - 现状：Rust 里 `metrics.rs`、`benchmark.rs` 的函数都直接接收收益数组，已经可以评估任意序列。
+  - 要做：Python 入口（接收收益或净值数组）；一张不需要订单和交易记录的收益序列统计表（现在的统计表需要这些记录）。
 
 - [ ] **I4 组合切片、拼接、重采样**（L）
   - 为什么：只看某段时间、某几列的结果，或把分钟级结果汇总成日级。
@@ -401,7 +413,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 
 - [x] **I6 事件研究**（M）
   - 为什么：财报、新闻、信号等事件之后价格一般怎么走，是判断事件有没有信息量的直接方法。
-  - 做了什么：`forward_paths`（每个事件前后的价格路径，靠近边界的保留并用 NaN 补齐）、`mean_path`、`median_path`、`hit_rate`。读取未来数据，只用于分析。Python 未接，见 P2。
+  - 做了什么：`forward_paths`（每个事件前后相对事件当根收盘价的收益路径 `close[t+k]/close[t] − 1`，范围 `−before..=after`；靠近边界的事件保留并用 NaN 补齐）、`mean_path`、`median_path`、`hit_rate`。读取未来数据，只用于分析。Python 未接，见 P2。
   - 位置：`crates/barq-analysis/src/events.rs`。
 
 - [ ] **I7 图表**（M）
@@ -420,9 +432,9 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 为什么：只在一段数据上选参数，会把噪声当成规律。要在训练段选、在测试段检验。
   - 做什么：
     - [x] `rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`、`walk_forward`（在训练集上选参，报告所选参数的测试集得分）。纯 NumPy。
-    - [ ] 按日历切分（每月、每季度）。
-    - [ ] 自定义切分。
-    - [ ] `research/barq_lab` 的 walk-forward 改用这个模块。
+    - [x] 自定义切分：手工构造 `Split(train, test)` 传给 `walk_forward`，会检查范围和重叠。
+    - [ ] 从日期区间或布尔掩码生成切分，包括按日历切分（每月、每季度）。
+    - [ ] `research/barq_lab` 的 walk-forward 改用这个模块。这不是直接替换，要先处理三点：最后一段不完整的窗口（`rolling` 现在丢弃，研究模块保留），零波动和 NaN 的选取规则，以及重跑子区间还是切片全程收益。验收：研究模块的输出逐位不变，或者变化有明确记录。
   - 位置：`crates/barq-py/python/barq/validation.py`，用 `barq.validation` 调用。
 
 - [ ] **J3 稳健性检验**（M，部分完成）
@@ -431,7 +443,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] `probabilistic_sharpe`、`deflated_sharpe`、`expected_max_sharpe`、`pbo_cscv`（Bailey 与 López de Prado）。
     - [ ] 置换检验。
     - [ ] 邻近参数比较（最优参数附近是否也好）。
-    - [ ] 延迟信号检验（信号推迟一根 K 线后收益是否消失）。
+    - [ ] 延迟信号检验：延迟机制已经有（`barq.strategy` 的 `signal_delay`），缺把 delay=k 和 k+1 的结果并排比较、给出结论的函数。
     - [ ] 在打乱的价格上重跑（依赖 G5 的 `randomize`）。
   - 位置：`crates/barq-analysis/src/robust.rs`。Python 未接，见 P2。
 
@@ -508,7 +520,7 @@ A–F 改的是模拟内核，要按顺序做；G、H、I、J、K 基本不碰�
 | M3 合约账户 | C1–C5 | 未开始 | 资金费套利、永续 CTA 的准确回测，包括强平 |
 | M4 订单与止损 | D1–D9 | 未开始 | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
 | M5 数据 | G0–G5 | G5 部分完成 | 不再依赖示例脚本下载数据 |
-| M6 回调 | E1–E5 | 未开始 | 和账户状态相关的策略逻辑 |
+| M6 回调 | E1–E5 | E4 部分完成（内核、止损判定、记录接口已公开） | 和账户状态相关的策略逻辑 |
 | M7 增量与持久化 | F1–F6、L2 | 未开始 | 回测接新数据，长历史分批 |
 | M8 指标与分析 | H1–H7、I1–I8 | H6、H7、I1 部分完成，I6 完成 | 补齐研究工具 |
 | M9 优化与验证 | J1–J4、K1–K4 | J2、J3、K4 部分完成 | 参数搜索和稳健性检验 |
@@ -563,7 +575,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `from_orders` | 有 | — |
 | `from_signals` | 有 | D7、E3 扩展 |
 | `from_order_func` / `from_def_order_func` | 无 | E2 |
-| 自定义模拟循环 | 无 | E4 |
+| 自定义模拟循环 | 部分（内核、止损判定、记录写入接口已公开） | E4 |
 | `signal_func_nb`、`adjust_func_nb`、`post_order_func_nb`、`post_segment_func_nb`、`pre_*` 钩子 | 无 | E1、E3 |
 | `in_outputs` | 无 | E1 |
 | 限价单、突破单（`order_type`、`limit_delta`、`limit_reverse`、`limit_order_price`、`limit_delay`） | 无 | D2 |
@@ -576,7 +588,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `tsl_stop`、`tsl_th` | 无（有 `sl_trail`） | D5 |
 | `td_stop`、`dt_stop` | 无 | D5 |
 | `stop_ladder` | 无 | D5 |
-| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | 部分 | D5 |
+| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | 部分（反手、按成交价锚定、`stop_exit_price`、`upon_stop_update` 在 Rust 里有，名字沿用 vectorbt 1.x；Python 不能设） | D5、P2 |
 | `generate_ohlc_stop_exits` | 无 | D6 |
 | 全部仓位类型、`*100` 变体、`valuepercent` | 部分 | B5、D7 |
 | `order_mode=True` | 无 | D7 |
