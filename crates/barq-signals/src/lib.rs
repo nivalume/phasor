@@ -37,11 +37,13 @@
 
 pub mod clean;
 pub mod generate;
+pub mod random;
 pub mod ranges;
 pub mod rank;
 
 pub use clean::{FirstSignal, clean_enex, clean_enex_1d};
 pub use generate::{ExitWindow, exit_after, exit_on, generate_alternating, generate_exits};
+pub use random::{random_by_prob, random_entries_exits, random_n};
 pub use ranges::{
     RangeRecords, RangeStatus, between_partition_ranges, between_ranges, partition_ranges,
 };
