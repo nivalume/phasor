@@ -408,7 +408,7 @@ ready `FromSignals`. Example: `crates/barq/examples/factor_sweep.rs`.
 
 Column-major `&[bool]` utilities: `clean_enex` (strict alternation), `generate_exits`,
 `exit_after`, `exit_on`, `generate_alternating`, ranks (`signal_rank`,
-`partition_rank`, …), ranges → `RangeRecords`. No random generators.
+`partition_rank`, …), ranges → `RangeRecords`; seeded random signals (`random_by_prob`, `random_n`, `random_entries_exits`), each draw a function of `(seed, row, col)`.
 
 ### 6.3 Python function strategies
 

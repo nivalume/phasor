@@ -22,18 +22,19 @@
 //!   does this rule stay on" has an answer in the same record shape the
 //!   order and trade layers use.
 //!
-//! # Randomized signals are deliberately not here
+//! # Randomized signals: seeded, not ported
 //!
-//! The reference generates random entries and exits for null-model
-//! comparison, and it would be easy to add. It is left out because it could
-//! not be verified the way everything else here is: the answer depends on a
-//! random stream, and NumPy's stream is not reproducible from Rust. A
-//! differential fixture would compare two different random draws and pass for
-//! the wrong reason.
+//! [`random`] generates random entries and exits for null-model comparison.
+//! It does not reproduce the reference's generators: their answer depends on
+//! NumPy's random stream, which cannot be reproduced from Rust, so a
+//! differential fixture would compare two different draws and pass for the
+//! wrong reason. Each draw here is a function of `(seed, row, col)` alone,
+//! so a run is reproducible and a column does not change when others are
+//! added beside it. They are tested by their properties — exact counts,
+//! strict alternation, the rate a probability asks for — instead.
 //!
-//! What a null model actually needs is a *matched* one — the same number of
-//! signals, in the same runs, reshuffled — and that is a design question
-//! rather than a port. See `docs/ARCHITECTURE.md §14`.
+//! What a careful null model needs is a *matched* one — the same number of
+//! signals, in the same runs, reshuffled — which is still a design question.
 
 pub mod clean;
 pub mod generate;

@@ -353,7 +353,7 @@ Alpha158 → 357 个节点、17 个槽位、148 个直接写输出；Alpha360 �
 
 ### 6.2 barq-signals
 
-列主序 `&[bool]` 工具：`clean_enex`（严格交替）、`generate_exits`、`exit_after`、`exit_on`、`generate_alternating`、排名（`signal_rank`、`partition_rank` 等）、区间 → `RangeRecords`。刻意不提供随机信号生成。
+列主序 `&[bool]` 工具：`clean_enex`（严格交替）、`generate_exits`、`exit_after`、`exit_on`、`generate_alternating`、排名（`signal_rank`、`partition_rank` 等）、区间 → `RangeRecords`；带种子的随机信号（`random_by_prob`、`random_n`、`random_entries_exits`），每个随机数只由 `(seed, row, col)` 决定。
 
 ### 6.3 Python 函数式策略
 
