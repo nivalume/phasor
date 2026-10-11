@@ -5,6 +5,7 @@
 //! | Input | Booked | Read at | Recorded as |
 //! |---|---|---|---|
 //! | `cash_deposits` | at the bar's open, before any order is sized | the group's first column | [`CashFlowKind::Deposit`] |
+//! | `cash_dividends` | at the bar's open, after the deposit | each column, times the position held | [`CashFlowKind::Dividend`] |
 //! | `cash_earnings` | at the bar's close, after every order | each column | [`CashFlowKind::Earning`] |
 //!
 //! A deposit lands before the bar is valued, so a target-sized order on the
@@ -90,11 +91,80 @@ pub(crate) fn deposit<S: RecordSink>(
     Ok(())
 }
 
+/// Books every column's dividend for bar `row`, in layout order.
+///
+/// `dividends` is per share; `position(k)` is the `k`-th column's position at
+/// the bar's open, before any of the bar's orders. That is the holding a
+/// dividend on its ex-date is owed to: buying on the bar does not earn it and
+/// selling on the bar does not forfeit it. Booked at the open, so the bar's
+/// own rebalance can reinvest it.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for an infinite amount.
+pub(crate) fn pay_dividends<S: RecordSink>(
+    dividends: &FlexArray<'_, f64>,
+    row: usize,
+    cols: std::ops::Range<usize>,
+    position: impl Fn(usize) -> f64,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    sink: &mut S,
+) -> Result<()> {
+    for (k, col) in cols.enumerate() {
+        let per_share = read(dividends, "cash_dividends", row, col)?;
+        let held = position(k);
+        if per_share == 0.0 || held == 0.0 {
+            continue;
+        }
+        let applied = apply(held * per_share, cash, free_cash);
+        if applied != 0.0 {
+            sink.push_cash(row, col, applied, CashFlowKind::Dividend);
+        }
+    }
+    Ok(())
+}
+
+/// Everything booked at a bar's open: the deposit, then the dividends.
+///
+/// One call behind one flag, and never inlined, so a run without either
+/// input pays a single predictable branch per bar: each flag tested in the
+/// bar loop itself cost about three instructions a bar, the loop having more
+/// live values than registers.
+///
+/// # Errors
+///
+/// As [`deposit`] and [`pay_dividends`].
+#[inline(never)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the two inputs, the bar, and the balances they move"
+)]
+pub(crate) fn at_open<S: RecordSink>(
+    deposits: &FlexArray<'_, f64>,
+    dividends: &FlexArray<'_, f64>,
+    row: usize,
+    cols: std::ops::Range<usize>,
+    position: impl Fn(usize) -> f64,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    sink: &mut S,
+) -> Result<()> {
+    if !is_off(deposits) {
+        deposit(deposits, row, cols.start, cash, free_cash, sink)?;
+    }
+    if !is_off(dividends) {
+        pay_dividends(dividends, row, cols, position, cash, free_cash, sink)?;
+    }
+    Ok(())
+}
+
 /// Books every column's earning for bar `row`, in layout order.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] for an infinite amount.
+#[inline(never)]
 pub(crate) fn earn<S: RecordSink>(
     earnings: &FlexArray<'_, f64>,
     row: usize,

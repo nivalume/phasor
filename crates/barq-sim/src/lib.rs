@@ -44,6 +44,7 @@ mod cash;
 pub mod from_orders;
 pub mod from_signals;
 pub mod groups;
+mod random;
 pub mod signals;
 
 /// How many cells of `array` over `cols` satisfy `pred`, without expanding it.

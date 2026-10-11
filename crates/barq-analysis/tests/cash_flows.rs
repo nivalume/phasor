@@ -21,6 +21,7 @@ use barq_sim::groups::{CallSeq, Groups};
 
 const DEPOSIT: i8 = CashFlowKind::Deposit as i8;
 const EARNING: i8 = CashFlowKind::Earning as i8;
+const DIVIDEND: i8 = CashFlowKind::Dividend as i8;
 
 #[test]
 fn a_deposit_is_not_a_return_and_a_withdrawal_is_capped() {
@@ -159,13 +160,14 @@ impl Lcg {
 }
 
 /// A run that trades both ways on every bar, with deposits, withdrawals,
-/// earnings and charges large enough to hit the cap.
+/// dividends, earnings and charges large enough to hit the cap.
 struct Workload {
     n_rows: usize,
     n_cols: usize,
     close: Vec<f64>,
     size: Vec<f64>,
     deposits: Vec<f64>,
+    dividends: Vec<f64>,
     earnings: Vec<f64>,
 }
 
@@ -195,12 +197,17 @@ impl Workload {
         };
         let deposits = (0..n).map(|_| flow(&mut rng, 40.0)).collect();
         let earnings = (0..n).map(|_| flow(&mut rng, 5.0)).collect();
+        // Per share, on about one bar in ten; shorts pay them.
+        let dividends = (0..n)
+            .map(|_| if rng.next() < 0.1 { rng.next() } else { 0.0 })
+            .collect();
         Self {
             n_rows,
             n_cols,
             close,
             size,
             deposits,
+            dividends,
             earnings,
         }
     }
@@ -214,6 +221,7 @@ impl Workload {
             direction: FlexArray::scalar(Direction::Both),
             fees: FlexArray::scalar(0.002),
             cash_deposits: FlexArray::full(&self.deposits, self.n_rows, self.n_cols).unwrap(),
+            cash_dividends: FlexArray::full(&self.dividends, self.n_rows, self.n_cols).unwrap(),
             cash_earnings: FlexArray::full(&self.earnings, self.n_rows, self.n_cols).unwrap(),
             log: FlexArray::scalar(true),
             groups,
@@ -226,9 +234,10 @@ impl Workload {
 /// Checks every logged order against the rebuilt balances.
 ///
 /// The first order an account executes on a bar saw the cash the account
-/// closed the previous bar with, plus the bar's deposit. The rebuilt cash at
-/// the previous bar's close already includes that bar's earnings, so this
-/// checks both kinds of flow and both balance series in one comparison.
+/// closed the previous bar with, plus what the bar's open booked: its deposit
+/// and its dividends. The rebuilt cash at the previous bar's close already
+/// includes that bar's earnings, so this checks every kind of flow and both
+/// balance series in one comparison.
 fn check_against_logs(work: &Workload, groups: &Groups) {
     let args = work.args(groups.clone());
     let journal = barq_sim::simulate_from_orders_logged(&args).unwrap();
@@ -244,9 +253,15 @@ fn check_against_logs(work: &Workload, groups: &Groups) {
     .unwrap();
 
     let records = pf.cash_records();
+    for kind in [DEPOSIT, DIVIDEND, EARNING] {
+        assert!(
+            records.kind.contains(&kind),
+            "the workload books no kind {kind}"
+        );
+    }
     assert!(
-        records.kind.contains(&DEPOSIT) && records.kind.contains(&EARNING),
-        "the workload should book both kinds"
+        (0..records.len()).any(|i| records.kind[i] == DIVIDEND && records.amount[i] < 0.0),
+        "the workload should have a short pay a dividend"
     );
     assert!(
         (0..records.len()).any(|i| records.amount[i] < 0.0),
@@ -255,7 +270,14 @@ fn check_against_logs(work: &Workload, groups: &Groups) {
 
     let cash = pf.cash();
     let free_cash = pf.free_cash().unwrap();
-    let deposits = pf.deposits().clone().expect("the workload deposits");
+    // What each account's bar opened with, besides the previous close.
+    let mut at_open = vec![0.0; work.n_rows * groups.len()];
+    for i in 0..records.len() {
+        if records.kind[i] != EARNING {
+            let group = groups.of_column(records.col[i] as usize);
+            at_open[group * work.n_rows + records.idx[i] as usize] += records.amount[i];
+        }
+    }
     let logs = &journal.logs;
     let mut checked = 0;
     for r in 0..logs.len() {
@@ -266,7 +288,7 @@ fn check_against_logs(work: &Workload, groups: &Groups) {
         if col != groups.range(group).start {
             continue;
         }
-        let deposit = deposits.get(row, group);
+        let deposit = at_open[group * work.n_rows + row];
         let (expected_cash, expected_free) = if row == 0 {
             let init = args.init_cash.get(0, col);
             (init + deposit, init + deposit)
@@ -355,4 +377,52 @@ fn signal_runs_book_the_same_flows_on_every_thread_count() {
     // records at or above zero on every bar.
     let pf = Portfolio::from_signals(&args, 1).unwrap();
     assert!(pf.cash().as_slice().iter().all(|c| *c >= -1e-9));
+}
+
+#[test]
+fn a_dividend_is_owed_to_the_position_held_at_the_open() {
+    // Bar 0: buy 10 at 10.                         cash   0.
+    // Bar 1: dividend 1 on the 10 held.            cash  10, return 10 %.
+    // Bar 2: dividend 1, then sell all 10 at 10.   cash 120: the sale on the
+    //        ex-date does not forfeit the dividend.
+    // Bar 3: dividend 1, nothing held.             cash 120.
+    // Bar 4: buy 10 at 10 on a dividend bar: the buyer is not owed it.
+    let close = [10.0; 5];
+    let size = [10., f64::NAN, -10., f64::NAN, 10.];
+    let dividends = [0., 1., 1., 1., 1.];
+    let args = FromOrders {
+        n_rows: 5,
+        n_cols: 1,
+        close: FlexArray::full(&close, 5, 1).unwrap(),
+        size: FlexArray::full(&size, 5, 1).unwrap(),
+        cash_dividends: FlexArray::full(&dividends, 5, 1).unwrap(),
+        groups: Groups::ungrouped(1),
+        ..FromOrders::default()
+    };
+    let pf = Portfolio::from_orders(&args, 1).unwrap();
+    assert_eq!(pf.cash().column(0), [0., 10., 120., 120., 20.]);
+    assert_eq!(pf.cash_records().idx, [1, 2]);
+    assert_eq!(pf.cash_records().kind, [DIVIDEND, DIVIDEND]);
+    assert_eq!(pf.returns().get(1, 0), 0.1, "a dividend is a return");
+    assert!(pf.deposits().is_none(), "and not a deposit");
+}
+
+#[test]
+fn a_short_pays_the_dividend() {
+    let close = [10.0; 2];
+    let size = [-5., f64::NAN];
+    let dividends = [0., 2.];
+    let args = FromOrders {
+        n_rows: 2,
+        n_cols: 1,
+        close: FlexArray::full(&close, 2, 1).unwrap(),
+        size: FlexArray::full(&size, 2, 1).unwrap(),
+        cash_dividends: FlexArray::full(&dividends, 2, 1).unwrap(),
+        groups: Groups::ungrouped(1),
+        ..FromOrders::default()
+    };
+    let pf = Portfolio::from_orders(&args, 1).unwrap();
+    assert_eq!(pf.cash_records().amount, [-10.0]);
+    assert_eq!(pf.cash().column(0), [150., 140.]);
+    assert_eq!(pf.value().column(0), [100., 90.]);
 }

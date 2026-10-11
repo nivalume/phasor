@@ -445,7 +445,7 @@ executes one order against one account at one bar. Both loops call it, and phase
 |---|---|
 | `ExecuteOrderState` | `cash, position (signed), debt, free_cash` |
 | `ProcessOrderState` | + `val_price, value`, record counters |
-| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
+| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
 | `OrderResult` | `size, price, fees, side, status, status_info` |
 
 `debt` = short proceeds at entry price; opening a short moves `free_cash` by
@@ -456,7 +456,7 @@ executes one order against one account at one bar. Both loops call it, and phase
 1. Zero-snap state values that are `is_close` to 0.
 2. NaN size / NaN price → `Ignored` (before validation).
 3. `validate_bar`: finite non-negative cash and debt, finite position, price > 0, direction consistent with position.
-4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `reject_prob ∈ [0,1]`.
+4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `reject_prob ∈ [0,1]`, `cash_limit ≥ 0`.
 
 Violations are `Err(Invariant)`. `ValidatedOrder` caches step 4 per column and
 swaps only per-bar fields (`set_bar`): +30% sparse / +22% dense in `benchmarks/README.md`.
@@ -491,7 +491,11 @@ fixtures built with `math.nextafter` now catch it (§14.4).
 ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition
 MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`.
 `raise_reject` turns a rejection into an error. `reject_prob` takes a
-caller-supplied draw (deterministic in parallel); no loop wires it yet (§17.4).
+caller-supplied draw. Both loops compute it from `(seed, row, col)` with
+SplitMix64 (`crates/barq-sim/src/random.rs`), only when the probability is
+non-zero, so it does not depend on the thread count or the grouping.
+`cash_limit` (not in the reference, not in the log schema) caps the cash a buy
+may spend, applied before `percent`; sells and shorts are unaffected.
 
 ---
 
@@ -538,13 +542,14 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 
 ### 8.5 Cash flows outside fills
 
-Both loops take `cash_deposits` and `cash_earnings` (`crates/barq-sim/src/cash.rs`).
+Both loops take `cash_deposits`, `cash_dividends` and `cash_earnings` (`crates/barq-sim/src/cash.rs`).
 The defaults are a scalar zero, detected once per group, so a run without them
 does no extra work per bar.
 
 | Input | Booked | Read at | Record kind |
 |---|---|---|---|
 | `cash_deposits` | bar open, before prices are resolved and orders sized | the group's first column, like `init_cash` | `Deposit` |
+| `cash_dividends` | bar open, after the deposit; per share × the position held before the bar's orders (a short pays) | each column; source-shaped through `column_map` in Python | `Dividend` |
 | `cash_earnings` | bar close, after every order, including bars with no signal | each column, in layout order | `Earning` |
 
 - A deposit is in the bar's valuation, so a target-sized order on the same bar invests it.
@@ -984,7 +989,6 @@ None affects correctness of results.
 
 | Issue | Where |
 |---|---|
-| `reject_prob` not wired in either loop | §7.6 |
 | `CallSeq::Explicit` not exposed to Python | §12.3 |
 | `Symbol` / `Venue` not interned despite a module comment | §3.6 |
 | stale comments: barq-analysis says no cash sharing; `from_orders.rs` justifies scoped threads by a missing mirror | crate docs |

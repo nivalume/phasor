@@ -159,6 +159,8 @@ impl Row<'_> {
             min_size: self.f64("min_size"),
             max_size: self.f64("max_size"),
             size_granularity: self.f64("size_granularity"),
+            // Not in the reference.
+            cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: self.bool("lock_cash"),
             allow_partial: self.bool("allow_partial"),

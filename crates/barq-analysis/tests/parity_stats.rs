@@ -147,6 +147,11 @@ fn matches_the_reference_stats_table() {
             // The reference has no cash flows outside fills.
             cash_deposits: FlexArray::scalar(0.0),
             cash_earnings: FlexArray::scalar(0.0),
+            cash_dividends: FlexArray::scalar(0.0),
+            // Neither is in the reference.
+            cash_limit: FlexArray::scalar(f64::INFINITY),
+            reject_prob: FlexArray::scalar(0.0),
+            seed: 0,
             ffill_val_price: true,
             update_value: false,
             groups: Groups::ungrouped(n_cols),

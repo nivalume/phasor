@@ -222,6 +222,11 @@ fn matches_the_reference_loop() {
             // The reference has no cash flows outside fills.
             cash_deposits: FlexArray::Scalar(0.0),
             cash_earnings: FlexArray::Scalar(0.0),
+            cash_dividends: FlexArray::Scalar(0.0),
+            // Neither is in the reference.
+            cash_limit: FlexArray::Scalar(f64::INFINITY),
+            reject_prob: FlexArray::Scalar(0.0),
+            seed: 0,
             ffill_val_price: parse_bool(g("ffill_val_price")),
             update_value: parse_bool(g("update_value")),
             groups: Groups::ungrouped(n_cols),

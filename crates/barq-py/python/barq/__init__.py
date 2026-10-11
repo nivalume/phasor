@@ -185,6 +185,16 @@ def _signals(value: Any, name: str) -> np.ndarray:
     return np.asfortranarray(array)
 
 
+def _market(value: Any, name: str) -> Any:
+    """Market data beside the prices: ``None``, a number, or a matrix shaped like ``close``.
+
+    A 1-D array is one column, as for ``close`` itself, not one value per column.
+    """
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _matrix(value, name)
+
+
 def _param(value: Any, name: str) -> Any:
     """A parameter, in whichever of the engine's four broadcast shapes it is.
 
@@ -282,6 +292,9 @@ def from_signals(
     min_size=None,
     max_size=None,
     size_granularity=None,
+    cash_limit=None,
+    reject_prob=None,
+    seed=0,
     lock_cash=None,
     allow_partial=None,
     raise_reject=None,
@@ -292,6 +305,7 @@ def from_signals(
     tp_stop=None,
     val_price=None,
     cash_deposits=None,
+    cash_dividends=None,
     cash_earnings=None,
     ffill_val_price=True,
     update_value=False,
@@ -369,6 +383,17 @@ def from_signals(
         with ``cash_sharing``. A withdrawal is capped at the free cash.
         Deposits are taken out of returns: each bar's return is measured from
         the previous value plus that bar's deposit.
+    cash_limit
+        The most cash one buy may spend, fees included. Applied before
+        ``percent`` takes its share. Sells and shorts are not affected.
+    reject_prob, seed
+        Probability that an order is rejected at random, for testing how a
+        strategy degrades when fills fail. Each draw depends only on ``seed``,
+        the bar and the column, so a run is reproducible on any thread count.
+    cash_dividends
+        Dividend per share, shaped like ``close`` (``column_map`` applies). Paid
+        at each bar's open on the position held before that bar's orders; a
+        short position pays it. Part of the return.
     cash_earnings
         Cash credited (positive) or charged (negative) at each bar's close, per
         column: interest, fees, a funding payment computed in advance. A
@@ -399,6 +424,9 @@ def from_signals(
         min_size=_param(min_size, "min_size"),
         max_size=_param(max_size, "max_size"),
         size_granularity=_param(size_granularity, "size_granularity"),
+        cash_limit=_param(cash_limit, "cash_limit"),
+        reject_prob=_param(reject_prob, "reject_prob"),
+        seed=seed,
         lock_cash=_flag(lock_cash, "lock_cash"),
         allow_partial=_flag(allow_partial, "allow_partial"),
         raise_reject=_flag(raise_reject, "raise_reject"),
@@ -409,6 +437,7 @@ def from_signals(
         tp_stop=_param(tp_stop, "tp_stop"),
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
+        cash_dividends=_market(cash_dividends, "cash_dividends"),
         cash_earnings=_param(cash_earnings, "cash_earnings"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
@@ -438,12 +467,16 @@ def from_orders(
     min_size=None,
     max_size=None,
     size_granularity=None,
+    cash_limit=None,
+    reject_prob=None,
+    seed=0,
     lock_cash=None,
     allow_partial=None,
     raise_reject=None,
     log=None,
     val_price=None,
     cash_deposits=None,
+    cash_dividends=None,
     cash_earnings=None,
     ffill_val_price=True,
     update_value=False,
@@ -516,6 +549,17 @@ def from_orders(
         with ``cash_sharing``. A withdrawal is capped at the free cash.
         Deposits are taken out of returns: each bar's return is measured from
         the previous value plus that bar's deposit.
+    cash_limit
+        The most cash one buy may spend, fees included. Applied before
+        ``percent`` takes its share. Sells and shorts are not affected.
+    reject_prob, seed
+        Probability that an order is rejected at random, for testing how a
+        strategy degrades when fills fail. Each draw depends only on ``seed``,
+        the bar and the column, so a run is reproducible on any thread count.
+    cash_dividends
+        Dividend per share, shaped like ``close`` (``column_map`` applies). Paid
+        at each bar's open on the position held before that bar's orders; a
+        short position pays it. Part of the return.
     cash_earnings
         Cash credited (positive) or charged (negative) at each bar's close, per
         column: interest, fees, a funding payment computed in advance. A
@@ -541,12 +585,16 @@ def from_orders(
         min_size=_param(min_size, "min_size"),
         max_size=_param(max_size, "max_size"),
         size_granularity=_param(size_granularity, "size_granularity"),
+        cash_limit=_param(cash_limit, "cash_limit"),
+        reject_prob=_param(reject_prob, "reject_prob"),
+        seed=seed,
         lock_cash=_flag(lock_cash, "lock_cash"),
         allow_partial=_flag(allow_partial, "allow_partial"),
         raise_reject=_flag(raise_reject, "raise_reject"),
         log=_flag(log, "log"),
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
+        cash_dividends=_market(cash_dividends, "cash_dividends"),
         cash_earnings=_param(cash_earnings, "cash_earnings"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,

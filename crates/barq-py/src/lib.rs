@@ -432,8 +432,8 @@ impl PyPortfolio {
     ///
     /// `amount` is what was applied, after any cap — a withdrawal or a charge
     /// larger than the free cash is applied in part — so it can differ from
-    /// what was passed in. `kind` is 0 for a deposit or withdrawal and 1 for
-    /// an earning. Rows are in column order, then bar order.
+    /// what was passed in. `kind` is 0 for a deposit or withdrawal, 1 for an
+    /// earning and 2 for a dividend. Rows are in column order, then bar order.
     fn cash_records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let cash = &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash;
         let out = PyDict::new(py);
@@ -749,6 +749,9 @@ fn deposits_view<'a>(
     min_size = None,
     max_size = None,
     size_granularity = None,
+    cash_limit = None,
+    reject_prob = None,
+    seed = 0,
     lock_cash = None,
     allow_partial = None,
     raise_reject = None,
@@ -759,6 +762,7 @@ fn deposits_view<'a>(
     tp_stop = None,
     val_price = None,
     cash_deposits = None,
+    cash_dividends = None,
     cash_earnings = None,
     ffill_val_price = true,
     update_value = false,
@@ -795,6 +799,9 @@ fn from_signals(
     min_size: Option<&Bound<'_, PyAny>>,
     max_size: Option<&Bound<'_, PyAny>>,
     size_granularity: Option<&Bound<'_, PyAny>>,
+    cash_limit: Option<&Bound<'_, PyAny>>,
+    reject_prob: Option<&Bound<'_, PyAny>>,
+    seed: u64,
     lock_cash: Option<&Bound<'_, PyAny>>,
     allow_partial: Option<&Bound<'_, PyAny>>,
     raise_reject: Option<&Bound<'_, PyAny>>,
@@ -805,6 +812,7 @@ fn from_signals(
     tp_stop: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
+    cash_dividends: Option<&Bound<'_, PyAny>>,
     cash_earnings: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
@@ -851,6 +859,7 @@ fn from_signals(
     let val_price_b = borrow_opt_f64(val_price, "val_price")?;
     let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
     let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
+    let dividends_b = borrow_opt_f64(cash_dividends, "cash_dividends")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
@@ -863,6 +872,8 @@ fn from_signals(
         min_size,
         max_size,
         size_granularity,
+        cash_limit,
+        reject_prob,
         lock_cash,
         allow_partial,
         raise_reject,
@@ -904,6 +915,14 @@ fn from_signals(
     let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
     let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
+    // Per share, so it is market data: source-shaped, through `column_map`.
+    let dividends = market_optional(
+        &dividends_b,
+        n_rows,
+        source_cols,
+        column_map.as_deref(),
+        d.cash_dividends,
+    )?;
 
     let args = FromSignals {
         groups: Some(groups.clone()),
@@ -945,7 +964,11 @@ fn from_signals(
         sl_trail: flex_or_bool(&sl_trail_b, n_rows, n_cols, d.sl_trail)?,
         tp_stop: flex_or_f64(&tp_stop_b, n_rows, n_cols, per_col, d.tp_stop)?,
         cash_deposits: deposits,
+        cash_dividends: dividends,
         cash_earnings: earnings,
+        cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
+        reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
+        seed,
         ..FromSignals::default()
     };
 
@@ -1030,12 +1053,16 @@ fn from_signals(
     min_size = None,
     max_size = None,
     size_granularity = None,
+    cash_limit = None,
+    reject_prob = None,
+    seed = 0,
     lock_cash = None,
     allow_partial = None,
     raise_reject = None,
     log = None,
     val_price = None,
     cash_deposits = None,
+    cash_dividends = None,
     cash_earnings = None,
     ffill_val_price = true,
     update_value = false,
@@ -1067,12 +1094,16 @@ fn from_orders(
     min_size: Option<&Bound<'_, PyAny>>,
     max_size: Option<&Bound<'_, PyAny>>,
     size_granularity: Option<&Bound<'_, PyAny>>,
+    cash_limit: Option<&Bound<'_, PyAny>>,
+    reject_prob: Option<&Bound<'_, PyAny>>,
+    seed: u64,
     lock_cash: Option<&Bound<'_, PyAny>>,
     allow_partial: Option<&Bound<'_, PyAny>>,
     raise_reject: Option<&Bound<'_, PyAny>>,
     log: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
+    cash_dividends: Option<&Bound<'_, PyAny>>,
     cash_earnings: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
@@ -1100,6 +1131,7 @@ fn from_orders(
     let val_price_b = borrow_opt_f64(val_price, "val_price")?;
     let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
     let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
+    let dividends_b = borrow_opt_f64(cash_dividends, "cash_dividends")?;
     let p = Shared::borrow(
         size,
         price,
@@ -1109,6 +1141,8 @@ fn from_orders(
         min_size,
         max_size,
         size_granularity,
+        cash_limit,
+        reject_prob,
         lock_cash,
         allow_partial,
         raise_reject,
@@ -1138,6 +1172,14 @@ fn from_orders(
     let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
     let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
+    // Per share, so it is market data: source-shaped, through `column_map`.
+    let dividends = market_optional(
+        &dividends_b,
+        n_rows,
+        source_cols,
+        column_map.as_deref(),
+        d.cash_dividends,
+    )?;
 
     let args = FromOrders {
         n_rows,
@@ -1168,7 +1210,11 @@ fn from_orders(
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
         log: flex_or_bool(&p.log, n_rows, n_cols, d.log)?,
         cash_deposits: deposits,
+        cash_dividends: dividends,
         cash_earnings: earnings,
+        cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
+        reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
+        seed,
         ffill_val_price,
         update_value,
     };

@@ -317,6 +317,9 @@ pub enum CashFlowKind {
     Deposit = 0,
     /// Interest, fees or any other income or cost, credited at the bar's close.
     Earning = 1,
+    /// A per-share dividend times the position held at the bar's open. A short
+    /// position pays it.
+    Dividend = 2,
 }
 
 #[cfg(test)]
@@ -334,6 +337,7 @@ mod tests {
         assert_eq!(TradesType::Positions as i8, 2);
         assert_eq!(CashFlowKind::Deposit as i8, 0);
         assert_eq!(CashFlowKind::Earning as i8, 1);
+        assert_eq!(CashFlowKind::Dividend as i8, 2);
     }
 
     #[test]

@@ -103,3 +103,17 @@ def test_signal_runs_earn_on_quiet_bars_and_match_across_threads():
 def test_an_infinite_amount_is_refused():
     with pytest.raises(ValueError, match="infinite"):
         barq.from_orders(np.full(3, 10.0), cash_earnings=np.inf)
+
+
+def test_dividends_are_market_data_shared_through_column_map():
+    # Two symbols, two parameter sets: dividends stay (T, 2) like close.
+    close = np.full((3, 2), 10.0, order="F")
+    dividends = np.asfortranarray([[0.0, 0.0], [1.0, 0.5], [0.0, 0.0]])
+    # Buy on bar 0 only: 2 and 4 units in set 0, 1 and 1 in set 1.
+    size = np.zeros((3, 4), order="F")
+    size[0] = [2.0, 4.0, 1.0, 1.0]
+    pf = barq.from_orders(close, size=size, column_map=[0, 1, 0, 1], cash_dividends=dividends)
+    records = pf.cash_records()
+    np.testing.assert_array_equal(records["col"], [0, 1, 2, 3])
+    np.testing.assert_array_equal(records["amount"], [2.0, 2.0, 1.0, 0.5])
+    assert set(records["kind"]) == {2}

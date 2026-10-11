@@ -85,7 +85,7 @@ fn buy(
     } else {
         state.cash
     };
-    cash_limit = cash_limit.min(state.cash);
+    cash_limit = cash_limit.min(state.cash).min(order.cash_limit);
     if !percent.is_nan() {
         cash_limit = cash_limit.min(percent * cash_limit);
     }
@@ -447,6 +447,9 @@ fn param_violation(order: &Order) -> Option<&'static str> {
     if !order.reject_prob.is_finite() || !(0.0..=1.0).contains(&order.reject_prob) {
         return Some("order.reject_prob must be between 0 and 1");
     }
+    if order.cash_limit.is_nan() || order.cash_limit < 0.0 {
+        return Some("order.cash_limit must be 0 or greater");
+    }
     None
 }
 
@@ -673,16 +676,14 @@ pub fn execute_validated(
         order_size = sign(order_size) * f64::INFINITY;
     }
 
-    // Note zero and NaN both take the sell branch, as in the reference.
-    let (new_state, result) = if order_size > 0.0 {
-        buy(exec_state, order_size, order.price, order, percent)?
-    } else {
-        sell(exec_state, -order_size, order.price, order, percent)?
-    };
-
-    // Random rejection discards the fill and restores the original state.
-    if order.reject_prob > 0.0 {
-        let draw = reject_draw.unwrap_or(f64::NAN);
+    // Random rejection replaces whatever buying or selling would have
+    // produced and leaves the state as it was, so it is decided before either
+    // runs rather than after. The outcome is the reference's — it, too,
+    // overrides every result that reaches this point — except that an order
+    // the draw rejects no longer reaches the two invariant errors below,
+    // which only an infinite request can raise. Deciding first also means
+    // nothing has to be kept alive across the dispatch for a rollback.
+    if let Some(draw) = reject_draw {
         if draw < order.reject_prob {
             return Ok((
                 exec_state,
@@ -691,7 +692,12 @@ pub fn execute_validated(
         }
     }
 
-    Ok((new_state, result))
+    // Note zero and NaN both take the sell branch, as in the reference.
+    if order_size > 0.0 {
+        buy(exec_state, order_size, order.price, order, percent)
+    } else {
+        sell(exec_state, -order_size, order.price, order, percent)
+    }
 }
 
 #[cfg(test)]

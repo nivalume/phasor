@@ -528,6 +528,7 @@ mod tests {
             min_size: 0.0,
             max_size: f64::INFINITY,
             size_granularity: f64::NAN,
+            cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,
             allow_partial: true,

@@ -69,8 +69,8 @@ is added.
 
 ## Deposits and earnings
 
-Both loops accept `cash_deposits` and `cash_earnings`: cash that moves without
-a fill.
+Both loops accept `cash_deposits`, `cash_dividends` and `cash_earnings`: cash
+that moves without a fill.
 
 - `cash_deposits` is booked at each bar's open, before orders are sized, so a
   `targetpercent` rebalance on the same bar invests it. Positive adds, negative
@@ -78,10 +78,13 @@ a fill.
   account.
 - `cash_earnings` is booked at each bar's close, per column, including bars with
   no signal: interest, fees, or a funding payment computed in advance.
+- `cash_dividends` is per share and shaped like `close` (`column_map` applies).
+  It is paid at each bar's open on the position held before that bar's orders,
+  so buying on the ex-date does not earn it; a short position pays it.
 - A 1-D array is one value per bar (a schedule), not one value per column.
 - A withdrawal or a charge larger than the free cash is applied in part.
   `pf.cash_records()` returns what was applied (`col`, `idx`, `amount`, and
-  `kind`: 0 deposit, 1 earning).
+  `kind`: 0 deposit, 1 earning, 2 dividend).
 - Deposits are not returns: each bar's return is measured from the previous
   value plus that bar's deposit, total return compounds the bars, and
   drawdowns ignore money moved in or out.
@@ -92,6 +95,15 @@ deposits = np.where(month_start, 1_000.0, 0.0)
 pf = barq.from_orders(close, weights, size_type="targetpercent",
                       cash_sharing=True, cash_deposits=deposits)
 ```
+
+## Order controls
+
+`cash_limit` caps the cash one buy may spend, fees included; it applies before
+`percent` takes its share and does not affect sells or shorts. `reject_prob`
+rejects orders at random with that probability (status `RandomEvent` in the
+logs), for testing how a strategy degrades when fills fail. Each draw depends
+only on `seed`, the bar and the column, so a run is reproducible on any thread
+count and under any grouping.
 
 ## Factor expressions
 

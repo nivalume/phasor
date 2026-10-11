@@ -120,6 +120,13 @@ pub struct FromSignals<'a> {
     pub max_size: FlexArray<'a, f64>,
     /// Round sizes down to a multiple of this.
     pub size_granularity: FlexArray<'a, f64>,
+    /// The most cash one buy may spend, fees included. `inf` is no cap.
+    pub cash_limit: FlexArray<'a, f64>,
+    /// Probability that an order is rejected at random, in `[0, 1]`.
+    pub reject_prob: FlexArray<'a, f64>,
+    /// Seed for the `reject_prob` draws. Each draw depends on the seed, the
+    /// bar and the column only, so a run is reproducible on any thread count.
+    pub seed: u64,
     /// Whether to reserve cash to cover an existing short.
     pub lock_cash: FlexArray<'a, bool>,
     /// Whether a partial fill is acceptable.
@@ -174,6 +181,9 @@ pub struct FromSignals<'a> {
     /// Cash added (positive) or withdrawn (negative) at each bar's open,
     /// read from the group's first column. See [`crate::cash`].
     pub cash_deposits: FlexArray<'a, f64>,
+    /// Dividend per share, paid at each bar's open on the position held
+    /// before the bar's orders. A short position pays it.
+    pub cash_dividends: FlexArray<'a, f64>,
     /// Cash credited (positive) or charged (negative) at each bar's close,
     /// per column. Booked on quiet bars too.
     pub cash_earnings: FlexArray<'a, f64>,
@@ -213,6 +223,9 @@ impl Default for FromSignals<'_> {
             min_size: FlexArray::Scalar(crate::DEFAULT_MIN_SIZE),
             max_size: FlexArray::Scalar(f64::INFINITY),
             size_granularity: FlexArray::Scalar(f64::NAN),
+            cash_limit: FlexArray::Scalar(f64::INFINITY),
+            reject_prob: FlexArray::Scalar(0.0),
+            seed: 0,
             lock_cash: FlexArray::Scalar(false),
             allow_partial: FlexArray::Scalar(true),
             raise_reject: FlexArray::Scalar(false),
@@ -232,6 +245,7 @@ impl Default for FromSignals<'_> {
             use_stops: true,
             val_price: FlexArray::Scalar(f64::INFINITY),
             cash_deposits: FlexArray::Scalar(0.0),
+            cash_dividends: FlexArray::Scalar(0.0),
             cash_earnings: FlexArray::Scalar(0.0),
             ffill_val_price: true,
             update_value: false,
@@ -409,6 +423,8 @@ impl FromSignals<'_> {
             || self.min_size.varies_by_row()
             || self.max_size.varies_by_row()
             || self.size_granularity.varies_by_row()
+            || self.cash_limit.varies_by_row()
+            || self.reject_prob.varies_by_row()
             || self.lock_cash.varies_by_row()
             || self.allow_partial.varies_by_row()
             || self.raise_reject.varies_by_row()
@@ -465,7 +481,8 @@ fn build_order(args: &FromSignals<'_>, i: usize, col: usize, stop_limit: bool) -
         min_size: args.min_size.get(i, col),
         max_size: args.max_size.get(i, col),
         size_granularity: args.size_granularity.get(i, col),
-        reject_prob: 0.0,
+        cash_limit: args.cash_limit.get(i, col),
+        reject_prob: args.reject_prob.get(i, col),
         lock_cash: args.lock_cash.get(i, col),
         allow_partial: args.allow_partial.get(i, col),
         raise_reject: args.raise_reject.get(i, col),
@@ -749,14 +766,17 @@ fn simulate_group<S: RecordSink + LogSink>(
     let mut pending: Vec<Option<Pending>> = vec![None; len];
     let mut order_values = vec![0.0; len];
     let mut seq: Vec<usize> = (0..len).collect();
-    let deposits = !crate::cash::is_off(&args.cash_deposits);
+    let at_open =
+        !crate::cash::is_off(&args.cash_deposits) || !crate::cash::is_off(&args.cash_dividends);
     let earnings = !crate::cash::is_off(&args.cash_earnings);
     for i in 0..args.n_rows {
-        if deposits {
-            crate::cash::deposit(
+        if at_open {
+            crate::cash::at_open(
                 &args.cash_deposits,
+                &args.cash_dividends,
                 i,
-                cols.start,
+                cols.clone(),
+                |k| states[k].position,
                 &mut cash,
                 &mut free_cash,
                 sink,
@@ -841,7 +861,11 @@ fn simulate_group<S: RecordSink + LogSink>(
                 oidx: 0,
                 lidx: 0,
             };
-            let (exec_state, result) = execute_validated(&state, order, None)?;
+            // Drawn only when asked for, so a run without random rejection
+            // never touches the generator.
+            let draw = (order.order().reject_prob > 0.0)
+                .then(|| crate::random::uniform(args.seed, i, col));
+            let (exec_state, result) = execute_validated(&state, order, draw)?;
 
             if result.status == OrderStatus::Rejected && order.order().raise_reject {
                 return Err(Error::Invariant(format!(

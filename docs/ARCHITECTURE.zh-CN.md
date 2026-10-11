@@ -384,7 +384,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 |---|---|
 | `ExecuteOrderState` | `cash, position（有符号）, debt, free_cash` |
 | `ProcessOrderState` | 加上 `val_price, value` 和记录计数器 |
-| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
+| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
 | `OrderResult` | `size, price, fees, side, status, status_info` |
 
 `debt` 是空头按开仓价计的卖出所得；开空使 `free_cash` 变化 `proceeds − 2 × short_value`（保证金）。它依赖路径，无法从现金和持仓推出，所以是显式状态。
@@ -394,7 +394,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 1. 把接近 0 的状态值精确置零。
 2. size 或 price 为 NaN → `Ignored`（在校验之前）。
 3. `validate_bar`：现金和负债有限且非负，持仓有限，价格 > 0，方向与持仓一致。
-4. `param_violation`：费用有限，滑点 ≥ 0，数量上下限为正，`reject_prob ∈ [0,1]`。
+4. `param_violation`：费用有限，滑点 ≥ 0，数量上下限为正，`reject_prob ∈ [0,1]`，`cash_limit ≥ 0`。
 
 违反即 `Err(Invariant)`。`ValidatedOrder` 对每列缓存第 4 步，只替换每根 K 线变化的字段（`set_bar`）：`benchmarks/README.md` 记录稀疏 +30%、稠密 +22%。
 
@@ -420,7 +420,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 7.6 结果与拒单原因
 
-`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数（并行下仍然确定）；两个循环都还没接上（§17.4）。
+`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数。两个循环用 SplitMix64 从 `(seed, row, col)` 算出这个数（`crates/barq-sim/src/random.rs`），只在概率不为 0 时计算，所以结果和线程数、分组都无关。`cash_limit`（参考实现没有，也不在日志格式里）限制一笔买单最多花多少现金，在 `percent` 之前生效；卖单和做空不受影响。
 
 ---
 
@@ -462,11 +462,12 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 8.5 成交之外的现金流
 
-两个循环都接受 `cash_deposits` 和 `cash_earnings`（`crates/barq-sim/src/cash.rs`）。默认值是标量 0，每个账户组只判断一次，不用时每根 K 线没有额外开销。
+两个循环都接受 `cash_deposits`、`cash_dividends` 和 `cash_earnings`（`crates/barq-sim/src/cash.rs`）。默认值是标量 0，每个账户组只判断一次，不用时每根 K 线没有额外开销。
 
 | 输入 | 入账时点 | 读取位置 | 记录类型 |
 |---|---|---|---|
 | `cash_deposits` | K 线开盘，在解析价格和计算下单量之前 | 账户组的第一列，和 `init_cash` 相同 | `Deposit` |
+| `cash_dividends` | K 线开盘，在入金之后；每股金额 × 当根 K 线下单之前的持仓（空头支付） | 每一列；Python 里和价格同形状，经过 `column_map` | `Dividend` |
 | `cash_earnings` | K 线收盘，在所有订单之后；没有信号的 K 线也入账 | 每一列，按布局顺序 | `Earning` |
 
 - 入金计入当根 K 线的估值，所以同一根 K 线上按目标仓位下的单会把它投进去。
@@ -843,7 +844,6 @@ python docs/img/generate.py               # 重新生成本文的图
 
 | 问题 | 位置 |
 |---|---|
-| 两个循环都没接上 `reject_prob` | §7.6 |
 | `CallSeq::Explicit` 未公开给 Python | §12.3 |
 | `Symbol` / `Venue` 未驻留，但模块注释说已驻留 | §3.6 |
 | 过时注释：barq-analysis 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程 | crate 文档 |

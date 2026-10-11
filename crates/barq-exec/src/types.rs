@@ -93,6 +93,13 @@ pub struct Order {
     pub max_size: f64,
     /// Round sizes down to a multiple of this.
     pub size_granularity: f64,
+    /// The most cash one buy may spend, fees included. `inf` is no cap.
+    ///
+    /// Applied to the cash available before `percent` takes its share, so
+    /// `Percent(0.5)` under a cap of 100 spends at most 50. Sells and shorts
+    /// receive cash rather than spending it and are not affected. Not in the
+    /// reference, so not in the log schema either.
+    pub cash_limit: f64,
     /// Probability of a random rejection, in `[0, 1]`.
     ///
     /// When non-zero the caller must supply the random draw; see
@@ -121,6 +128,7 @@ impl Default for Order {
             min_size: 0.0,
             max_size: f64::INFINITY,
             size_granularity: f64::NAN,
+            cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,
             allow_partial: true,
