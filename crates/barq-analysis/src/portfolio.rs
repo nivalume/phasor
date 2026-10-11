@@ -626,6 +626,108 @@ impl<'a> Portfolio<'a> {
         Ok(self.cache.gross_exposure.get().expect("just set"))
     }
 
+    // --- exposure against total account value ------------------------------
+    //
+    // Unlike [`Self::gross_exposure`], which divides by free cash plus the
+    // position, everything in this section divides by the account's total
+    // value ([`Self::value`]). That is the denominator a weight is quoted in:
+    // a 0.5 allocation is half the account, whatever margin a short reserves.
+    // On a long-only run the two families agree; with shorts they differ.
+
+    /// Each symbol column's signed position value as a fraction of its
+    /// account's total value.
+    ///
+    /// The weight a column actually carries, as opposed to the weight it was
+    /// ordered at — drift between rebalances shows up here. Shorts are
+    /// negative. Within an account the columns sum to `(value - cash) / value`.
+    /// NaN wherever the account value is zero or NaN, since a weight of a
+    /// worthless account means nothing.
+    #[must_use]
+    pub fn allocations(&self) -> Matrix {
+        let column_value = self.column_asset_value();
+        let value = self.value();
+        let mut out = Matrix::zeros(self.n_rows, self.n_cols);
+        for col in 0..self.n_cols {
+            let group = self.groups.of_column(col);
+            for row in 0..self.n_rows {
+                out.column_mut(col)[row] = ratio(column_value.get(row, col), value.get(row, group));
+            }
+        }
+        out
+    }
+
+    /// Sums the positive (`long`) or absolute negative position values per
+    /// account and divides by the account's value.
+    fn side_exposure(&self, long: bool) -> Matrix {
+        let column_value = self.column_asset_value();
+        let mut side = Matrix::zeros(self.n_rows, self.n_cols);
+        for col in 0..self.n_cols {
+            for (row, out) in side.column_mut(col).iter_mut().enumerate() {
+                let v = column_value.get(row, col);
+                *out = if long { v.max(0.0) } else { (-v).max(0.0) };
+            }
+        }
+        let mut summed = self.sum_groups(&side);
+        let value = self.value();
+        for group in 0..self.n_groups() {
+            for (row, out) in summed.column_mut(group).iter_mut().enumerate() {
+                *out = ratio(*out, value.get(row, group));
+            }
+        }
+        summed
+    }
+
+    /// Long position value per account as a fraction of its total value.
+    ///
+    /// Only the long legs: a hedged book can be 100% long and 100% short at
+    /// once, and netting would hide both.
+    #[must_use]
+    pub fn long_exposure(&self) -> Matrix {
+        self.side_exposure(true)
+    }
+
+    /// Absolute short position value per account as a fraction of its total
+    /// value. Non-negative; see [`Self::long_exposure`].
+    #[must_use]
+    pub fn short_exposure(&self) -> Matrix {
+        self.side_exposure(false)
+    }
+
+    /// Long minus short exposure per account: the directional bet.
+    ///
+    /// Zero for a dollar-neutral book, however large its legs.
+    #[must_use]
+    pub fn net_exposure(&self) -> Matrix {
+        combine(&self.long_exposure(), &self.short_exposure(), |l, s| l - s)
+    }
+
+    /// Long plus short exposure per account: how much is at work.
+    ///
+    /// Named apart from [`Self::gross_exposure`] because the denominator
+    /// differs: this divides by total account value, that one by free cash
+    /// plus the position. Use this one to compare leverage across books.
+    #[must_use]
+    pub fn gross_long_short(&self) -> Matrix {
+        combine(&self.long_exposure(), &self.short_exposure(), |l, s| l + s)
+    }
+
+    /// Fraction of bars on which each symbol column holds a non-zero
+    /// position.
+    ///
+    /// A low coverage means a column's return is earned on few bars, so its
+    /// per-bar statistics rest on a thin sample. NaN for a run with no bars.
+    #[must_use]
+    pub fn position_coverage(&self) -> Vec<f64> {
+        #[allow(clippy::cast_precision_loss, reason = "bar counts are far below 2^52")]
+        self.assets().map_columns(|column| {
+            if column.is_empty() {
+                return f64::NAN;
+            }
+            let held = column.iter().filter(|&&a| a != 0.0).count();
+            held as f64 / column.len() as f64
+        })
+    }
+
     /// Trades, in the view [`Scoring::trades_type`] names.
     ///
     /// # Errors
@@ -836,6 +938,26 @@ impl<'a> Portfolio<'a> {
             .map(|c| self.stats(c, select))
             .collect()
     }
+}
+
+/// `part / whole`, NaN when the whole is zero or NaN.
+fn ratio(part: f64, whole: f64) -> f64 {
+    if whole == 0.0 || whole.is_nan() {
+        f64::NAN
+    } else {
+        part / whole
+    }
+}
+
+/// Elementwise combination of two same-shaped matrices.
+fn combine(a: &Matrix, b: &Matrix, f: impl Fn(f64, f64) -> f64) -> Matrix {
+    let data = a
+        .as_slice()
+        .iter()
+        .zip(b.as_slice())
+        .map(|(&x, &y)| f(x, y))
+        .collect();
+    Matrix::from_column_major(data, a.n_rows(), a.n_cols()).expect("same shape in, same shape out")
 }
 
 #[cfg(test)]
