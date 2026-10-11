@@ -26,6 +26,7 @@
 
 pub mod elementwise;
 pub mod rolling;
+pub mod synthetic;
 
 pub use elementwise::{
     bfill, bshift, crossed_above, crossed_above_1d, crossed_below_1d, diff, ffill, fillna, fshift,
@@ -36,3 +37,4 @@ pub use rolling::{
     expanding_min_1d, expanding_std_1d, rolling_max, rolling_max_1d, rolling_mean, rolling_mean_1d,
     rolling_min, rolling_min_1d, rolling_std, rolling_std_1d,
 };
+pub use synthetic::{gbm, ohlc_from_close, random_walk};
