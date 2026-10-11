@@ -83,6 +83,10 @@ event-driven replay column by column.
 **Start with [the architecture document](docs/ARCHITECTURE.md)** ([中文](docs/ARCHITECTURE.zh-CN.md)).
 It reads top down; §2 (system overview) and §11 (parallelism) cover the load-bearing decisions.
 
+For a guided path through the source itself (reading order per crate, the core algorithm of each
+module, class and sequence diagrams, exercises and further reading), see the
+[source reading guide](docs/reading-guide/README.md) (中文).
+
 ## Status
 
 Phase 1, under construction. Bar/OHLCV only.
