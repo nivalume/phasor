@@ -34,6 +34,7 @@ pub mod events;
 pub mod metrics;
 pub mod percentile;
 pub mod portfolio;
+pub mod robust;
 pub mod rolling;
 pub mod series;
 pub mod stats;
