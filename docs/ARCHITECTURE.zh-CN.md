@@ -103,7 +103,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 |---|---|
 | `barq-core` | `Matrix`、`FlexArray`、列标签、浮点容差、`Error`（§3）；无外部依赖 |
 | `barq-model` | 撮合枚举、id、`BarType`、`OhlcvPanel`、定点 `Price`/`Quantity`（§3.6） |
-| `barq-generic` | 滚动 / 扩展 / EWM 窗口、平移、填充、交叉 |
+| `barq-generic` | 滚动 / 扩展 / EWM 窗口、平移、填充、交叉；带种子的合成价格（`random_walk`、`gbm`、`ohlc_from_close`） |
 | `barq-signals` | 信号清洗、生成离场、排名、区间（§6.2） |
 | `barq-indicators` | MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV 及参数扫描（§6.4） |
 | `barq-expr` | 表达式解析、图编译、原生与 Polars 后端、Alpha158/360（§5） |
@@ -353,7 +353,7 @@ Alpha158 → 357 个节点、17 个槽位、148 个直接写输出；Alpha360 �
 
 ### 6.2 barq-signals
 
-列主序 `&[bool]` 工具：`clean_enex`（严格交替）、`generate_exits`、`exit_after`、`exit_on`、`generate_alternating`、排名（`signal_rank`、`partition_rank` 等）、区间 → `RangeRecords`；带种子的随机信号（`random_by_prob`、`random_n`、`random_entries_exits`），每个随机数只由 `(seed, row, col)` 决定。
+列主序 `&[bool]` 工具：`clean_enex`（严格交替）、`generate_exits`、`exit_after`、`exit_on`、`generate_alternating`、排名（`signal_rank`、`partition_rank` 等）、区间 → `RangeRecords`；带种子的随机信号（`random_by_prob`、`random_n`、`random_entries_exits`），每个随机数只由 `(seed, row, col)` 决定；`labels` 里是机器学习标签（`fixed_horizon_returns`、`trend_labels`、`triple_barrier`、`pivot_labels`），它们读取未来数据，不能当作信号。
 
 ### 6.3 Python 函数式策略
 
@@ -523,6 +523,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 - `ColMap::build` 是稳定计数排序；记录已按列连续时走零拷贝快路径。
 - `MappedArray`：`count sum mean min max std idxmax idxmin reduce top_n_mask value_counts stack_expand`，与参考实现一样跳过缺失值。
 - `find_drawdowns` → 每段回撤一条记录（`Active` / `Recovered`）。
+- `excursions` → 每笔交易的 MAE/MFE（价格距离和收益率），区间为入场到出场（未平仓到最后一根 K 线），high/low 缺失时用收盘价；`edge_ratio`。
 - **持续时间**：已结束的区间为 `end − start`，未结束的为 `end − start + 1`（两者用同一规则会让平均值最多偏一根 K 线）。
 
 ---
@@ -549,6 +550,9 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 | 基准（`benchmark.rs`） | `information_ratio beta alpha capture up_capture down_capture` |
 | 滚动（`rolling.rs`） | 以上每项的滚动版本 |
 | 成交 | `TradeStats { count winning losing win_rate profit_factor expectancy sqn total_pnl best worst }` |
+| 敞口（`Portfolio`） | 按标的的 `allocations`；按账户的 `long_exposure short_exposure net_exposure gross_long_short`，分母是账户总净值（`gross_exposure` 的分母是可用现金加持仓市值）；`position_coverage` |
+| 稳健性（`robust.rs`） | `norm_cdf norm_ppf probabilistic_sharpe expected_max_sharpe deflated_sharpe pbo_cscv`（Bailey 与 López de Prado；按单期计算 Sharpe；PBO 按样本内平均收益选出最优列，最多 16 段） |
+| 事件（`events.rs`） | 每个事件前后的价格路径 `forward_paths`（靠近边界的事件保留，用 NaN 补齐），`mean_path median_path hit_rate`；读取未来数据，只用于分析 |
 
 ### 10.4 统计注册表
 
@@ -625,7 +629,7 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 12.4 其他绑定
 
-`barq.FactorSet`（`compile`、`evaluate`、`required_fields`、`uses_future`）、`barq.Expression`、`alpha158()`、`alpha360()`（只有原生后端）；`crossed_above`、`factors`、`@barq.strategy`；`barq.data`（解码器通过 Arrow C Data Interface 拿到 `pyarrow.RecordBatch`，即 `arrow.rs`，唯一的 `unsafe`）；`InstrumentId`、`BarType`。
+`barq.FactorSet`（`compile`、`evaluate`、`required_fields`、`uses_future`）、`barq.Expression`、`alpha158()`、`alpha360()`（只有原生后端）；`crossed_above`、`factors`、`@barq.strategy`；`barq.data`（解码器通过 Arrow C Data Interface 拿到 `pyarrow.RecordBatch`，即 `arrow.rs`，唯一的 `unsafe`）；`InstrumentId`、`BarType`；`barq.validation`（纯 NumPy：`rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`，以及在训练集上选参、报告所选参数测试集得分的 `walk_forward`）。
 
 ### 12.5 `barq.Portfolio` 与 GIL
 

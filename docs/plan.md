@@ -9,6 +9,28 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 功能清单来自 2026-10 对 [vectorbt.pro/features](https://vectorbt.pro/features/overview/)
 各页面的整理。PRO 页面没有写明参数名的功能，下文只描述行为。
 
+## 进度
+
+| 项 | 状态 | 位置 |
+|---|---|---|
+| A1 现金流记录 | 已完成 | `barq-records/src/cash.rs` |
+| A2 K 线内阶段 | 部分完成（开盘入金/分红、收盘收支） | `barq-sim/src/cash.rs` |
+| A3 状态结构 | 推迟到阶段 D | — |
+| A4 `locked_cash` | 并入 B4 | — |
+| B1 / B2 / B3 入金、收支、分红 | 已完成 | `barq-sim/src/cash.rs` |
+| B9 `cash_limit`、`reject_prob` | 已完成 | `barq-exec`、`barq-sim/src/random.rs` |
+| B10 敞口指标 | 已完成 | `Portfolio::allocations` 等 |
+| G5 合成数据 | 已完成 | `barq-generic/src/synthetic.rs` |
+| H6 随机信号 | 已完成 | `barq-signals/src/random.rs` |
+| H7 机器学习标签 | 已完成 | `barq-signals/src/labels.rs` |
+| I1 MAE/MFE | 已完成（未接到 `Portfolio` 和 Python） | `barq-records/src/excursions.rs` |
+| I6 事件研究 | 已完成（未接到 Python） | `barq-analysis/src/events.rs` |
+| J2 交叉验证切分 | 已完成 | `barq/validation.py` |
+| J3 稳健性检验 | 已完成（未接到 Python，打乱价格重跑未做） | `barq-analysis/src/robust.rs` |
+| 其余各项 | 未开始 | — |
+
+性能：功能关闭时比 main 慢约 2%（`from_orders` 1.6%，`from_signals` 3.8%，后者超出 §0 的 3% 上限，待处理）。
+
 ---
 
 ## 目录

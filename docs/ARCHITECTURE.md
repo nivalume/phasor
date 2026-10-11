@@ -119,7 +119,7 @@ double as a native `from_order_func`.
 |---|---|
 | `barq-core` | `Matrix`, `FlexArray`, column labels, float tolerances, `Error` (§3); no external deps |
 | `barq-model` | execution enums, ids, `BarType`, `OhlcvPanel`, fixed-point `Price`/`Quantity` (§3.6) |
-| `barq-generic` | rolling / expanding / EWM windows, shifts, fills, crossovers |
+| `barq-generic` | rolling / expanding / EWM windows, shifts, fills, crossovers; seeded synthetic prices (`random_walk`, `gbm`, `ohlc_from_close`) |
 | `barq-signals` | signal cleaning, exit generation, ranks, ranges (§6.2) |
 | `barq-indicators` | MA, MSTD, BBANDS, RSI, STOCH, MACD, ATR, OBV with sweeps (§6.4) |
 | `barq-expr` | expression parser, graph compiler, native + Polars backends, Alpha158/360 (§5) |
@@ -408,7 +408,7 @@ ready `FromSignals`. Example: `crates/barq/examples/factor_sweep.rs`.
 
 Column-major `&[bool]` utilities: `clean_enex` (strict alternation), `generate_exits`,
 `exit_after`, `exit_on`, `generate_alternating`, ranks (`signal_rank`,
-`partition_rank`, …), ranges → `RangeRecords`; seeded random signals (`random_by_prob`, `random_n`, `random_entries_exits`), each draw a function of `(seed, row, col)`.
+`partition_rank`, …), ranges → `RangeRecords`; seeded random signals (`random_by_prob`, `random_n`, `random_entries_exits`), each draw a function of `(seed, row, col)`; ML targets in `labels` (`fixed_horizon_returns`, `trend_labels`, `triple_barrier`, `pivot_labels`), which read the future and must never be signals.
 
 ### 6.3 Python function strategies
 
@@ -618,6 +618,7 @@ at the last close; input must be sorted.
 - `ColMap::build` is a stable counting sort with a zero-copy fast path when records are already contiguous.
 - `MappedArray`: `count sum mean min max std idxmax idxmin reduce top_n_mask value_counts stack_expand`, skipping missing like the reference.
 - `find_drawdowns` → one record per episode (`Active` / `Recovered`).
+- `excursions` → per-trade MAE/MFE (price distance and return) over entry..=exit (open trades to the last bar), high/low falling back to close; `edge_ratio`.
 - **Durations**: closed range `end − start`, open range `end − start + 1` (one rule for both would bias averages by up to a bar).
 
 ---
@@ -648,6 +649,9 @@ groups), `from_orders` / `from_signals` (run the simulation).
 | Benchmark (`benchmark.rs`) | `information_ratio beta alpha capture up_capture down_capture` |
 | Rolling (`rolling.rs`) | rolling version of each |
 | Trades | `TradeStats { count winning losing win_rate profit_factor expectancy sqn total_pnl best worst }` |
+| Exposure (`Portfolio`) | `allocations` per symbol; `long_exposure short_exposure net_exposure gross_long_short` per account, against total account value (unlike `gross_exposure`, which divides by free cash plus the position); `position_coverage` |
+| Robustness (`robust.rs`) | `norm_cdf norm_ppf probabilistic_sharpe expected_max_sharpe deflated_sharpe pbo_cscv` (Bailey & López de Prado; per-period Sharpe; PBO picks the in-sample winner by mean return, at most 16 blocks) |
+| Events (`events.rs`) | `forward_paths` before/after each event (edge events kept, NaN-padded), `mean_path median_path hit_rate`; reads the future, analysis only |
 
 ### 10.4 The stats registry
 
@@ -746,7 +750,7 @@ returns what was applied.
 `barq.Expression`, `alpha158()`, `alpha360()` (native backend only);
 `crossed_above`, `factors`, `@barq.strategy`; `barq.data` (decoders get
 `pyarrow.RecordBatch` via the Arrow C Data Interface — `arrow.rs`, the only
-`unsafe`); `InstrumentId`, `BarType`.
+`unsafe`); `InstrumentId`, `BarType`; `barq.validation` (pure NumPy: `rolling`, `expanding`, `purged_kfold` with purge and embargo, `walk_forward` that selects on train and reports the chosen key's test score).
 
 ### 12.5 `barq.Portfolio` and the GIL
 
