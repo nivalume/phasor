@@ -496,6 +496,10 @@ impl crate::RecordSink for Journal {
     ) {
         self.orders.push_order(row, col, size, price, fees, side);
     }
+
+    fn push_cash(&mut self, row: usize, col: usize, amount: f64, kind: barq_model::CashFlowKind) {
+        crate::RecordSink::push_cash(&mut self.orders, row, col, amount, kind);
+    }
 }
 
 impl LogSink for Journal {

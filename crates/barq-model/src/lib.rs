@@ -23,7 +23,7 @@ pub mod types;
 
 pub use bar::{Bar, BarType, OhlcvPanel};
 pub use enums::{
-    AccumulationMode, ConflictMode, Direction, DirectionConflictMode, OppositeEntryMode, OrderSide,
-    OrderStatus, SizeType, StatusInfo, StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode,
-    TradeDirection, TradeStatus, TradesType,
+    AccumulationMode, CashFlowKind, ConflictMode, Direction, DirectionConflictMode,
+    OppositeEntryMode, OrderSide, OrderStatus, SizeType, StatusInfo, StopEntryPrice, StopExitMode,
+    StopExitPrice, StopUpdateMode, TradeDirection, TradeStatus, TradesType,
 };

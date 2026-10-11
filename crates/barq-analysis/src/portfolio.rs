@@ -105,6 +105,7 @@ pub struct Cache {
     account_trades: OnceLock<TradeRecords>,
     value: OnceLock<Matrix>,
     returns: OnceLock<Matrix>,
+    deposits: OnceLock<Option<Matrix>>,
     gross_exposure: OnceLock<Matrix>,
     trades: OnceLock<TradeRecords>,
     drawdowns: OnceLock<DrawdownRecords>,
@@ -283,6 +284,16 @@ impl<'a> Portfolio<'a> {
             if row < 0 || row as usize >= n_rows {
                 return Err(Error::Invariant(format!(
                     "fill {i} is on row {row}, outside 0..{n_rows}"
+                )));
+            }
+        }
+        let cash = &orders.cash;
+        for i in 0..cash.len() {
+            let (col, row) = (cash.col[i], cash.idx[i]);
+            if col < 0 || col as usize >= n_cols || row < 0 || row as usize >= n_rows {
+                return Err(Error::Invariant(format!(
+                    "cash flow {i} is at row {row}, column {col}, outside the \
+                     {n_rows} x {n_cols} shape"
                 )));
             }
         }
@@ -593,12 +604,36 @@ impl<'a> Portfolio<'a> {
             .get_or_init(|| series::value(self.cash(), self.asset_value()))
     }
 
-    /// Per-bar return of the value curve.
+    /// Per-bar return of the value curve, with deposits taken out.
+    ///
+    /// A deposit raises the value without being earned, so each bar's return
+    /// is measured from the previous value plus that bar's deposit. A run
+    /// without deposits gets the plain chain, bit for bit.
     #[must_use]
     pub fn returns(&self) -> &Matrix {
-        self.cache
-            .returns
-            .get_or_init(|| series::returns(self.value(), &self.account_init_cash()))
+        self.cache.returns.get_or_init(|| {
+            series::returns_with_deposits(
+                self.value(),
+                &self.account_init_cash(),
+                self.deposits().as_ref(),
+            )
+        })
+    }
+
+    /// Deposits and withdrawals per bar and account, or `None` if there were
+    /// none.
+    #[must_use]
+    pub fn deposits(&self) -> &Option<Matrix> {
+        self.cache.deposits.get_or_init(|| {
+            series::deposits(&self.orders, self.n_rows, self.n_cols)
+                .map(|columns| self.sum_groups(&columns))
+        })
+    }
+
+    /// The cash flows that were not fills, in column-major order.
+    #[must_use]
+    pub fn cash_records(&self) -> &barq_records::CashRecords {
+        &self.orders.cash
     }
 
     /// How much of the account is in the position, per bar.
@@ -661,7 +696,16 @@ impl<'a> Portfolio<'a> {
     #[must_use]
     pub fn drawdowns(&self) -> &DrawdownRecords {
         self.cache.drawdowns.get_or_init(|| {
-            find_drawdowns(self.value().as_slice(), self.n_rows, self.n_groups())
+            // Money moved in or out is neither a loss nor a recovery, so with
+            // deposits the episodes are found on the compounded returns.
+            let compounded;
+            let curve = if self.deposits().is_some() {
+                compounded = series::compounded_value(self.returns(), &self.account_init_cash());
+                &compounded
+            } else {
+                self.value()
+            };
+            find_drawdowns(curve.as_slice(), self.n_rows, self.n_groups())
                 .expect("the value curve has the portfolio's shape")
         })
     }
@@ -688,6 +732,10 @@ impl<'a> Portfolio<'a> {
     }
 
     fn account_total_return(&self, group: usize) -> f64 {
+        // With deposits, end over start is not a return: compound the bars.
+        if self.deposits().is_some() {
+            return metrics::total_return(self.returns().column(group));
+        }
         let end = self
             .value()
             .column(group)

@@ -219,6 +219,9 @@ fn matches_the_reference_loop() {
             raise_reject: FlexArray::Scalar(false),
             log: FlexArray::Scalar(false),
             val_price: val_price.as_flex(n_rows, n_cols),
+            // The reference has no cash flows outside fills.
+            cash_deposits: FlexArray::Scalar(0.0),
+            cash_earnings: FlexArray::Scalar(0.0),
             ffill_val_price: parse_bool(g("ffill_val_price")),
             update_value: parse_bool(g("update_value")),
             groups: Groups::ungrouped(n_cols),

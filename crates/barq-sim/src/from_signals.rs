@@ -171,6 +171,12 @@ pub struct FromSignals<'a> {
 
     /// Valuation price. `+inf` is the order price, `-inf` the previous close.
     pub val_price: FlexArray<'a, f64>,
+    /// Cash added (positive) or withdrawn (negative) at each bar's open,
+    /// read from the group's first column. See [`crate::cash`].
+    pub cash_deposits: FlexArray<'a, f64>,
+    /// Cash credited (positive) or charged (negative) at each bar's close,
+    /// per column. Booked on quiet bars too.
+    pub cash_earnings: FlexArray<'a, f64>,
     /// Carry the last non-`NaN` valuation price forward.
     pub ffill_val_price: bool,
     /// Mark to market after each fill rather than only at the bar's start.
@@ -225,6 +231,8 @@ impl Default for FromSignals<'_> {
             upon_stop_update: FlexArray::Scalar(StopUpdateMode::Override),
             use_stops: true,
             val_price: FlexArray::Scalar(f64::INFINITY),
+            cash_deposits: FlexArray::Scalar(0.0),
+            cash_earnings: FlexArray::Scalar(0.0),
             ffill_val_price: true,
             update_value: false,
             groups: None,
@@ -741,7 +749,19 @@ fn simulate_group<S: RecordSink + LogSink>(
     let mut pending: Vec<Option<Pending>> = vec![None; len];
     let mut order_values = vec![0.0; len];
     let mut seq: Vec<usize> = (0..len).collect();
+    let deposits = !crate::cash::is_off(&args.cash_deposits);
+    let earnings = !crate::cash::is_off(&args.cash_earnings);
     for i in 0..args.n_rows {
+        if deposits {
+            crate::cash::deposit(
+                &args.cash_deposits,
+                i,
+                cols.start,
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
+        }
         if params_vary {
             for (k, col) in cols.clone().enumerate() {
                 orders[k] = build_order(args, i, col, false);
@@ -754,6 +774,17 @@ fn simulate_group<S: RecordSink + LogSink>(
             any |= pending[k].is_some();
         }
         if !any {
+            // A quiet bar still earns: interest does not wait for a signal.
+            if earnings {
+                crate::cash::earn(
+                    &args.cash_earnings,
+                    i,
+                    cols.clone(),
+                    &mut cash,
+                    &mut free_cash,
+                    sink,
+                )?;
+            }
             continue;
         }
         let mut group_value = cash;
@@ -922,6 +953,16 @@ fn simulate_group<S: RecordSink + LogSink>(
             }
             states[k].position = position;
             states[k].stops = stops;
+        }
+        if earnings {
+            crate::cash::earn(
+                &args.cash_earnings,
+                i,
+                cols.clone(),
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
         }
     }
     Ok(())

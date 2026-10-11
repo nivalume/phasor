@@ -144,6 +144,9 @@ fn matches_the_reference_stats_table() {
             log: FlexArray::scalar(false),
             // `-inf` resolves to the order price, which is the close here.
             val_price: FlexArray::scalar(f64::NEG_INFINITY),
+            // The reference has no cash flows outside fills.
+            cash_deposits: FlexArray::scalar(0.0),
+            cash_earnings: FlexArray::scalar(0.0),
             ffill_val_price: true,
             update_value: false,
             groups: Groups::ungrouped(n_cols),

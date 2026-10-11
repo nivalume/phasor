@@ -291,6 +291,8 @@ def from_signals(
     sl_trail=None,
     tp_stop=None,
     val_price=None,
+    cash_deposits=None,
+    cash_earnings=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -359,6 +361,20 @@ def from_signals(
         account value before the next order. These do not shift signals.
     threads
         Splits independent account groups; symbols sharing cash execute sequentially.
+    cash_deposits
+        Cash added (positive) or withdrawn (negative) at each bar's open,
+        before orders are sized, so a target-sized order on the same bar
+        invests it. A number, one value per bar (1-D), or a matrix: one column
+        per account — ``(n_bars, n_cols)`` unshared, ``(n_bars, n_groups)``
+        with ``cash_sharing``. A withdrawal is capped at the free cash.
+        Deposits are taken out of returns: each bar's return is measured from
+        the previous value plus that bar's deposit.
+    cash_earnings
+        Cash credited (positive) or charged (negative) at each bar's close, per
+        column: interest, fees, a funding payment computed in advance. A
+        number, one value per bar (1-D), or ``(n_bars, n_cols)``. Part of the
+        return. A charge is capped at the free cash. ``pf.cash_records()``
+        lists what was applied.
 
     Returns
     -------
@@ -392,6 +408,8 @@ def from_signals(
         sl_trail=_flag(sl_trail, "sl_trail"),
         tp_stop=_param(tp_stop, "tp_stop"),
         val_price=_param(val_price, "val_price"),
+        cash_deposits=_param(cash_deposits, "cash_deposits"),
+        cash_earnings=_param(cash_earnings, "cash_earnings"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,
@@ -425,6 +443,8 @@ def from_orders(
     raise_reject=None,
     log=None,
     val_price=None,
+    cash_deposits=None,
+    cash_earnings=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -488,6 +508,20 @@ def from_orders(
         values, selling before buying. Neither mode allocates equal weights.
     threads
         Splits account groups, which are independent.
+    cash_deposits
+        Cash added (positive) or withdrawn (negative) at each bar's open,
+        before orders are sized, so a target-sized order on the same bar
+        invests it. A number, one value per bar (1-D), or a matrix: one column
+        per account — ``(n_bars, n_cols)`` unshared, ``(n_bars, n_groups)``
+        with ``cash_sharing``. A withdrawal is capped at the free cash.
+        Deposits are taken out of returns: each bar's return is measured from
+        the previous value plus that bar's deposit.
+    cash_earnings
+        Cash credited (positive) or charged (negative) at each bar's close, per
+        column: interest, fees, a funding payment computed in advance. A
+        number, one value per bar (1-D), or ``(n_bars, n_cols)``. Part of the
+        return. A charge is capped at the free cash. ``pf.cash_records()``
+        lists what was applied.
 
     Returns
     -------
@@ -512,6 +546,8 @@ def from_orders(
         raise_reject=_flag(raise_reject, "raise_reject"),
         log=_flag(log, "log"),
         val_price=_param(val_price, "val_price"),
+        cash_deposits=_param(cash_deposits, "cash_deposits"),
+        cash_earnings=_param(cash_earnings, "cash_earnings"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,

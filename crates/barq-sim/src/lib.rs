@@ -40,6 +40,7 @@
 //! portfolio there is a single unit of work, which is inherent — a shared cash
 //! balance is a sequential dependency across the whole group.
 
+mod cash;
 pub mod from_orders;
 pub mod from_signals;
 pub mod groups;

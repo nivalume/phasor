@@ -122,7 +122,8 @@ pub fn assets(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Matrix {
     out
 }
 
-/// Cash moved on each bar, per column: `-size * price - fees`.
+/// Cash moved on each bar, per column: `-size * price - fees` for every fill,
+/// plus every cash flow that was not a fill.
 #[must_use]
 pub fn cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Matrix {
     let mut out = Matrix::zeros(n_rows, n_cols);
@@ -133,6 +134,38 @@ pub fn cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Matrix 
         let row = orders.idx[i] as usize;
         let cell = &mut out.column_mut(col)[row];
         *cell = add(*cell, flow);
+    }
+    add_cash_records(&mut out, orders);
+    out
+}
+
+/// Adds the non-fill cash flows to a per-column flow matrix.
+///
+/// They move cash and free cash alike — none of them reserves or releases
+/// margin — so both flow series take them unchanged.
+fn add_cash_records(out: &mut Matrix, orders: &OrderRecords) {
+    let cash = &orders.cash;
+    for i in 0..cash.len() {
+        let cell = &mut out.column_mut(cash.col[i] as usize)[cash.idx[i] as usize];
+        *cell = add(*cell, cash.amount[i]);
+    }
+}
+
+/// Deposits and withdrawals per bar and column, or `None` if there were none.
+///
+/// The one kind of cash flow that is not a return: money brought into the
+/// account changes its value without the account having earned it.
+#[must_use]
+pub fn deposits(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Option<Matrix> {
+    let cash = &orders.cash;
+    let mut out: Option<Matrix> = None;
+    for i in 0..cash.len() {
+        if !cash.is_deposit(i) {
+            continue;
+        }
+        let matrix = out.get_or_insert_with(|| Matrix::zeros(n_rows, n_cols));
+        let cell = &mut matrix.column_mut(cash.col[i] as usize)[cash.idx[i] as usize];
+        *cell = add(*cell, cash.amount[i]);
     }
     out
 }
@@ -204,6 +237,7 @@ pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Re
             position = new_position;
         }
     }
+    add_cash_records(&mut out, orders);
     Ok(out)
 }
 
@@ -309,15 +343,58 @@ pub fn period_return(before: f64, after: f64) -> f64 {
 /// first value — otherwise the first bar's trading would be invisible.
 #[must_use]
 pub fn returns(value: &Matrix, init_cash: &FlexArray<'_, f64>) -> Matrix {
+    returns_with_deposits(value, init_cash, None)
+}
+
+/// [`returns`], with deposits taken out.
+///
+/// A deposit is booked at the bar's open, so it is part of what the bar
+/// started with: the bar's return is measured from the previous value *plus*
+/// the deposit. Without that, a deposit reads as a gain and a withdrawal as a
+/// loss. `deposits` has the value's shape; `None` is the plain chain, bit for
+/// bit.
+#[must_use]
+pub fn returns_with_deposits(
+    value: &Matrix,
+    init_cash: &FlexArray<'_, f64>,
+    deposits: Option<&Matrix>,
+) -> Matrix {
     let (n_rows, n_cols) = (value.n_rows(), value.n_cols());
     let mut out = Matrix::zeros(n_rows, n_cols);
     for col in 0..n_cols {
         let src = value.column(col);
+        let added = deposits.map(|d| d.column(col));
         let dst = out.column_mut(col);
         let mut before = init_cash.get(0, col);
         for row in 0..n_rows {
+            if let Some(added) = added {
+                if added[row] != 0.0 {
+                    before = add(before, added[row]);
+                }
+            }
             dst[row] = period_return(before, src[row]);
             before = src[row];
+        }
+    }
+    out
+}
+
+/// A value curve with deposits taken out: the starting cash compounded by the
+/// returns.
+///
+/// What drawdowns are measured on when money was added or withdrawn, because
+/// a withdrawal is not a drawdown and a deposit is not a recovery.
+#[must_use]
+pub fn compounded_value(returns: &Matrix, init_cash: &FlexArray<'_, f64>) -> Matrix {
+    let (n_rows, n_cols) = (returns.n_rows(), returns.n_cols());
+    let mut out = Matrix::zeros(n_rows, n_cols);
+    for col in 0..n_cols {
+        let src = returns.column(col);
+        let dst = out.column_mut(col);
+        let mut running = init_cash.get(0, col);
+        for row in 0..n_rows {
+            running *= 1.0 + src[row];
+            dst[row] = running;
         }
     }
     out

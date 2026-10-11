@@ -1,0 +1,170 @@
+//! Cash that enters or leaves an account without a fill.
+//!
+//! Two inputs, both shared by the order and signal loops:
+//!
+//! | Input | Booked | Read at | Recorded as |
+//! |---|---|---|---|
+//! | `cash_deposits` | at the bar's open, before any order is sized | the group's first column | [`CashFlowKind::Deposit`] |
+//! | `cash_earnings` | at the bar's close, after every order | each column | [`CashFlowKind::Earning`] |
+//!
+//! A deposit lands before the bar is valued, so a target-sized order on the
+//! same bar already counts it: that is what lets a recurring deposit be
+//! invested by the rebalance it arrives with. An earning lands after the
+//! orders, so it is part of the bar's return and of the next bar's sizing.
+//!
+//! **A negative amount is capped at the free cash available**, never taking
+//! the account below zero: a withdrawal or a cost the account cannot pay is
+//! applied in part. The record holds the amount actually applied, which is
+//! why the cap needs no second source of truth — the analysis layer rebuilds
+//! the balance from what was booked, not from what was asked.
+//!
+//! `NaN` means no flow, as a `NaN` size means no order. An infinite amount is
+//! an error: there is no finite balance it could produce.
+
+use barq_core::error::{Error, Result};
+use barq_core::flex::FlexArray;
+use barq_core::math::add;
+use barq_model::CashFlowKind;
+use barq_records::RecordSink;
+
+/// Whether an input can never move cash, so the loop can skip it entirely.
+///
+/// The defaults are a scalar zero; checking for that once keeps a run that
+/// uses neither input from paying a read per bar.
+pub(crate) fn is_off(array: &FlexArray<'_, f64>) -> bool {
+    matches!(*array, FlexArray::Scalar(v) if v.is_nan() || v == 0.0)
+}
+
+/// Books `amount` to the balance, capping an outflow at the free cash.
+///
+/// Returns what was applied. `free_cash` never exceeds `cash` — it is cash
+/// less twice the open shorts' debt — so an outflow capped at it cannot take
+/// cash below zero, which the execution kernel checks on every order. Free
+/// cash itself can already be negative, after a short was bought back above
+/// its entry; then nothing can be taken out at all.
+fn apply(amount: f64, cash: &mut f64, free_cash: &mut f64) -> f64 {
+    let applied = if amount >= 0.0 {
+        amount
+    } else {
+        -(-amount).min(free_cash.max(0.0))
+    };
+    if applied != 0.0 {
+        *cash = add(*cash, applied);
+        *free_cash = add(*free_cash, applied);
+    }
+    applied
+}
+
+/// Reads one amount and rejects the values no balance can absorb.
+fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usize) -> Result<f64> {
+    let amount = array.get(row, col);
+    if amount.is_infinite() {
+        return Err(Error::Invariant(format!(
+            "{name} is infinite at row {row}, column {col}"
+        )));
+    }
+    Ok(if amount.is_nan() { 0.0 } else { amount })
+}
+
+/// Books the deposit for bar `row` to the group whose first column is `first`.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for an infinite amount.
+pub(crate) fn deposit<S: RecordSink>(
+    deposits: &FlexArray<'_, f64>,
+    row: usize,
+    first: usize,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    sink: &mut S,
+) -> Result<()> {
+    let amount = read(deposits, "cash_deposits", row, first)?;
+    if amount == 0.0 {
+        return Ok(());
+    }
+    let applied = apply(amount, cash, free_cash);
+    if applied != 0.0 {
+        sink.push_cash(row, first, applied, CashFlowKind::Deposit);
+    }
+    Ok(())
+}
+
+/// Books every column's earning for bar `row`, in layout order.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for an infinite amount.
+pub(crate) fn earn<S: RecordSink>(
+    earnings: &FlexArray<'_, f64>,
+    row: usize,
+    cols: std::ops::Range<usize>,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    sink: &mut S,
+) -> Result<()> {
+    for col in cols {
+        let amount = read(earnings, "cash_earnings", row, col)?;
+        if amount == 0.0 {
+            continue;
+        }
+        let applied = apply(amount, cash, free_cash);
+        if applied != 0.0 {
+            sink.push_cash(row, col, applied, CashFlowKind::Earning);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "the balances here are exact sums of small binary fractions"
+)]
+mod tests {
+    use super::*;
+    use barq_records::OrderRecords;
+
+    #[test]
+    fn the_default_inputs_are_off() {
+        assert!(is_off(&FlexArray::Scalar(0.0)));
+        assert!(is_off(&FlexArray::Scalar(-0.0)));
+        assert!(is_off(&FlexArray::Scalar(f64::NAN)));
+        assert!(!is_off(&FlexArray::Scalar(1.0)));
+        assert!(!is_off(&FlexArray::PerColumn(&[0.0])));
+    }
+
+    #[test]
+    fn an_outflow_is_capped_at_free_cash() {
+        let (mut cash, mut free) = (100.0, 40.0);
+        assert_eq!(apply(-50.0, &mut cash, &mut free), -40.0);
+        assert_eq!((cash, free), (60.0, 0.0));
+        // Nothing left to take: nothing is applied and nothing recorded.
+        assert_eq!(apply(-1.0, &mut cash, &mut free), 0.0);
+        assert_eq!((cash, free), (60.0, 0.0));
+        assert_eq!(apply(5.0, &mut cash, &mut free), 5.0);
+        assert_eq!((cash, free), (65.0, 5.0));
+    }
+
+    #[test]
+    fn a_capped_withdrawal_records_what_was_applied() {
+        let mut sink = OrderRecords::new();
+        let (mut cash, mut free) = (10.0, 10.0);
+        let deposits = [f64::NAN, -25.0];
+        let array = FlexArray::per_row(&deposits, 2).unwrap();
+        deposit(&array, 0, 3, &mut cash, &mut free, &mut sink).unwrap();
+        assert!(sink.cash.is_empty(), "NaN is no flow");
+        deposit(&array, 1, 3, &mut cash, &mut free, &mut sink).unwrap();
+        assert_eq!(sink.cash.amount, [-10.0]);
+        assert_eq!(sink.cash.col, [3]);
+        assert_eq!(cash, 0.0);
+    }
+
+    #[test]
+    fn an_infinite_amount_is_an_error() {
+        let mut sink = OrderRecords::new();
+        let (mut cash, mut free) = (10.0, 10.0);
+        let array = FlexArray::Scalar(f64::INFINITY);
+        assert!(earn(&array, 0, 0..1, &mut cash, &mut free, &mut sink).is_err());
+    }
+}

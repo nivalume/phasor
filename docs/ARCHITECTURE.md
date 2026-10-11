@@ -205,7 +205,7 @@ columns while only 100 exist (`column_map` in Python).
 
 | Item | Detail |
 |---|---|
-| Execution enums (`enums.rs`) | `#[repr(i8)]`, discriminants pinned by a test (records store integers): `SizeType`, `Direction`, `OrderSide`, `OrderStatus`, `StatusInfo` (14 reasons), plus signal, stop and record enums with vectorbt semantics |
+| Execution enums (`enums.rs`) | `#[repr(i8)]`, discriminants pinned by a test (records store integers): `SizeType`, `Direction`, `OrderSide`, `OrderStatus`, `StatusInfo` (14 reasons), `CashFlowKind`, plus signal, stop and record enums with vectorbt semantics |
 | Ids (`ids.rs`) | `Symbol`, `Venue` (`Arc<str>`), `InstrumentId` shown as `SYMBOL.VENUE`; not interned yet (§17.4) |
 | `BarType` (`bar.rs`) | `SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE`, parsed with `rsplitn(5, '-')`; the catalog key (§4.1) |
 | Fixed point (`types.rs`) | `Price { raw: i64 }`, `Quantity { raw: u64 }`, 9 decimals, Nautilus shape; for phase 2 (phase 1 is `f64`) |
@@ -536,6 +536,22 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Both loops build each column's `ValidatedOrder` once (a second, slippage-free one for stops resting at their level in `from_signals`) and rebuild per bar only when a parameter varies by row; a bar with no signal and no armed stop skips sizing.
 - Both loops are generic over `SinkBuffer` (§9.3).
 
+### 8.5 Cash flows outside fills
+
+Both loops take `cash_deposits` and `cash_earnings` (`crates/barq-sim/src/cash.rs`).
+The defaults are a scalar zero, detected once per group, so a run without them
+does no extra work per bar.
+
+| Input | Booked | Read at | Record kind |
+|---|---|---|---|
+| `cash_deposits` | bar open, before prices are resolved and orders sized | the group's first column, like `init_cash` | `Deposit` |
+| `cash_earnings` | bar close, after every order, including bars with no signal | each column, in layout order | `Earning` |
+
+- A deposit is in the bar's valuation, so a target-sized order on the same bar invests it.
+- A negative amount is capped at `max(free_cash, 0)`, so cash never goes below zero; the amount actually applied is what is recorded.
+- `NaN` means no flow; `±inf` is an error.
+- vectorbt 1.1.0 has no counterpart, so there is no fixture. `crates/barq-analysis/tests/cash_flows.rs` checks hand-calculated accounts, checks that every logged order's cash and free cash equal the balances rebuilt from records (§10.2), ungrouped and shared, and checks thread invariance.
+
 ---
 
 ## 9. Records: barq-records
@@ -551,6 +567,11 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | barq-signals ranges |
+| `CashRecords` | `col, idx, amount, kind` | one cash flow that was not a fill (§8.5) |
+
+`CashRecords` travel inside `OrderRecords` as its `cash` field, so sinks
+(`RecordSink::push_cash`), merges, sorting and the `Portfolio` constructors
+carry them with no new plumbing; `len()` and `ids()` count fills only.
 
 Ids are implicit (position after merge). Records are grouped by column with
 ascending rows; shared groups are re-sorted by analysis.
@@ -609,6 +630,10 @@ groups), `from_orders` / `from_signals` (run the simulation).
 ### 10.2 The rebuild chain
 
 ![Balances are rebuilt from order records alone: asset_flow → assets per symbol, cash_flow → cash per group, value = cash + assets × close, then returns and metrics](img/en/rebuild.svg)
+
+- `cash_flow` and `free_cash_flow` add the `CashRecords` amounts to the fills' flows.
+- A deposit is not a return: `returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`, the first bar measured from `init_cash + deposit[0]`. Without deposits the chain is unchanged, bit for bit.
+- With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
 
 ### 10.3 Metrics
 
@@ -705,7 +730,10 @@ are never written. 1-D arrays are ambiguous, so each call site states
 mirror the Rust structs: every parameter is scalar, per-column 1-D or `(T, C)`;
 `cash_sharing` / `group_lens`; `call_seq` in `"default" | "auto"`; `column_map`
 (prices `[T, S]`, signals `[T, C]`, `Portfolio.price_nbytes` reports retained
-price memory); stops need `high` and `low`.
+price memory); stops need `high` and `low`. `cash_deposits` and `cash_earnings`
+read a 1-D array as one value per bar; a shared run's `cash_deposits` matrix is
+`(T, n_groups)`, mapped onto columns without copying. `Portfolio.cash_records()`
+returns what was applied.
 
 ### 12.4 Other bindings
 
@@ -1006,8 +1034,8 @@ appears only in the optional `test` extra.
 | expressions | `crates/barq-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | signals, sweeps, indicators | `crates/barq/src/sweep.rs`, `crates/barq-signals/src`, `crates/barq-indicators/src`, `crates/barq-py/python/barq/strategy.py` | §6 |
 | execution kernel | `crates/barq-exec/src/{types,kernel}.rs` | §7 |
-| simulation | `crates/barq-sim/src/{from_orders,from_signals,signals,groups}.rs` | §8 |
-| records | `crates/barq-records/src/{lib,logs,trades,mapped,drawdowns}.rs` | §9 |
+| simulation | `crates/barq-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
+| records | `crates/barq-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | analysis | `crates/barq-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
 | Python bindings | `crates/barq-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/barq-py/python/barq/` | §12 |
 | research protocol | `research/barq_lab/` | §13 |

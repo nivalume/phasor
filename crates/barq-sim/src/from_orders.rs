@@ -80,6 +80,17 @@ pub struct FromOrders<'a> {
     /// across a sweep. See [`barq_records::logs`].
     pub log: FlexArray<'a, bool>,
 
+    /// Cash added (positive) or withdrawn (negative) at each bar's open.
+    ///
+    /// Read from the group's first column, like `init_cash`. Booked before
+    /// the bar is valued, so a target-sized order on the same bar invests it.
+    /// A withdrawal is capped at the free cash. See [`crate::cash`].
+    pub cash_deposits: FlexArray<'a, f64>,
+    /// Cash credited (positive) or charged (negative) at each bar's close,
+    /// per column: interest, fees, or anything else that is not a fill.
+    /// A charge is capped at the free cash.
+    pub cash_earnings: FlexArray<'a, f64>,
+
     /// Carry the last non-`NaN` valuation price forward.
     pub ffill_val_price: bool,
     /// Mark to market after each fill rather than only at the bar's start.
@@ -201,6 +212,8 @@ impl Default for FromOrders<'_> {
             raise_reject: FlexArray::Scalar(false),
             log: FlexArray::Scalar(false),
             val_price: FlexArray::Scalar(f64::INFINITY),
+            cash_deposits: FlexArray::Scalar(0.0),
+            cash_earnings: FlexArray::Scalar(0.0),
             ffill_val_price: true,
             update_value: false,
             groups: Groups::ungrouped(0),
@@ -291,6 +304,10 @@ impl ColumnState {
 /// path writes every group into one buffer. Resetting it per group would point
 /// group 1's logs at group 0's fills — an in-range index naming the wrong
 /// trade, which nothing downstream could flag.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the bar's phases read in order: deposit, resolve, execute, earn"
+)]
 fn simulate_group<S: RecordSink + LogSink>(
     args: &FromOrders<'_>,
     group: usize,
@@ -324,8 +341,20 @@ fn simulate_group<S: RecordSink + LogSink>(
     // does not fill used to pay all fourteen checks and little else.
     let params_vary = args.params_vary_by_row();
     let mut orders: Vec<ValidatedOrder> = cols.clone().map(|c| build_order(args, 0, c)).collect();
+    let deposits = !crate::cash::is_off(&args.cash_deposits);
+    let earnings = !crate::cash::is_off(&args.cash_earnings);
 
     for i in 0..args.n_rows {
+        if deposits {
+            crate::cash::deposit(
+                &args.cash_deposits,
+                i,
+                cols.start,
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
+        }
         if params_vary {
             for (k, col) in cols.clone().enumerate() {
                 orders[k] = build_order(args, i, col);
@@ -520,6 +549,17 @@ fn simulate_group<S: RecordSink + LogSink>(
             // reference models and not what "decide the whole bar at once"
             // means.
             group_value = new_value;
+        }
+
+        if earnings {
+            crate::cash::earn(
+                &args.cash_earnings,
+                i,
+                cols.clone(),
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
         }
     }
 

@@ -183,7 +183,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 | 项 | 说明 |
 |---|---|
-| 撮合枚举（`enums.rs`） | `#[repr(i8)]`，判别值由测试固定（记录里存整数）：`SizeType`、`Direction`、`OrderSide`、`OrderStatus`、`StatusInfo`（14 种原因），以及语义同 vectorbt 的信号、止损、记录枚举 |
+| 撮合枚举（`enums.rs`） | `#[repr(i8)]`，判别值由测试固定（记录里存整数）：`SizeType`、`Direction`、`OrderSide`、`OrderStatus`、`StatusInfo`（14 种原因）、`CashFlowKind`，以及语义同 vectorbt 的信号、止损、记录枚举 |
 | Id（`ids.rs`） | `Symbol`、`Venue`（`Arc<str>`），`InstrumentId` 显示为 `SYMBOL.VENUE`；尚未驻留（§17.4） |
 | `BarType`（`bar.rs`） | `SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE`，用 `rsplitn(5, '-')` 解析；catalog 的键（§4.1） |
 | 定点数（`types.rs`） | `Price { raw: i64 }`、`Quantity { raw: u64 }`，9 位小数，形状同 Nautilus；为阶段 2 准备（阶段 1 全用 `f64`） |
@@ -460,6 +460,20 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - 两个循环都为每列只构建一次 `ValidatedOrder`（`from_signals` 另建一个无滑点的版本给挂在触发价上的止损用），只在参数逐行变化时每根 K 线重建；没有信号也没有布置止损的 K 线跳过数量计算。
 - 两个循环都对 `SinkBuffer` 泛型（§9.3）。
 
+### 8.5 成交之外的现金流
+
+两个循环都接受 `cash_deposits` 和 `cash_earnings`（`crates/barq-sim/src/cash.rs`）。默认值是标量 0，每个账户组只判断一次，不用时每根 K 线没有额外开销。
+
+| 输入 | 入账时点 | 读取位置 | 记录类型 |
+|---|---|---|---|
+| `cash_deposits` | K 线开盘，在解析价格和计算下单量之前 | 账户组的第一列，和 `init_cash` 相同 | `Deposit` |
+| `cash_earnings` | K 线收盘，在所有订单之后；没有信号的 K 线也入账 | 每一列，按布局顺序 | `Earning` |
+
+- 入金计入当根 K 线的估值，所以同一根 K 线上按目标仓位下的单会把它投进去。
+- 负数金额最多扣到 `max(free_cash, 0)`，现金不会变成负数；记录里存的是实际入账的金额。
+- `NaN` 表示没有现金流；`±inf` 报错。
+- vectorbt 1.1.0 没有对应功能，所以没有 fixture。`crates/barq-analysis/tests/cash_flows.rs` 检查手算的账户；检查每一条订单日志里的现金和可用现金，等于从记录重建出来的余额（§10.2），覆盖独立账户和共享账户；并检查线程数不影响结果。
+
 ---
 
 ## 9. 记录 barq-records
@@ -475,6 +489,9 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | 推导得出（§9.5） |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | 推导得出（§9.6） |
 | `RangeRecords` | start / end / status | barq-signals 的区间 |
+| `CashRecords` | `col, idx, amount, kind` | 一笔不是成交的现金流（§8.5） |
+
+`CashRecords` 作为 `OrderRecords` 的 `cash` 字段存放，所以 sink（`RecordSink::push_cash`）、合并、排序和 `Portfolio` 的构造函数不用新增接口就会带上它；`len()` 和 `ids()` 只数成交。
 
 id 是隐式的（合并后的位置）。记录按列分组、行号递增；共享组由分析层重新排序。
 
@@ -518,6 +535,10 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 ### 10.2 重建链
 
 ![余额只由订单记录重建：asset_flow → 按标的的 assets，cash_flow → 按组的 cash，value = cash + assets × close，再得到收益和指标](img/zh/rebuild.svg)
+
+- `cash_flow` 和 `free_cash_flow` 在成交的现金流上加上 `CashRecords` 的金额。
+- 入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`，第一根 K 线从 `init_cash + deposit[0]` 算起。没有入金时重建链不变，逐位一致。
+- 有入金时，账户总收益改为把每根 K 线的收益连乘，不再用 `end / init − 1`；回撤在 `init_cash × Π(1 + r)` 上计算，不在净值曲线上算，所以出金不算回撤。
 
 ### 10.3 指标
 
@@ -599,7 +620,7 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 12.3 模拟入口
 
-`barq.from_signals(close, entries, exits, *, …)` 和 `barq.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。
+`barq.from_signals(close, entries, exits, *, …)` 和 `barq.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。`cash_deposits` 和 `cash_earnings` 的一维数组表示每根 K 线一个值；共享账户的 `cash_deposits` 矩阵是 `(T, n_groups)`，不复制，直接映射到各列。`Portfolio.cash_records()` 返回实际入账的金额。
 
 ### 12.4 其他绑定
 
@@ -868,8 +889,8 @@ barq 采用 Apache-2.0。两个参考实现只作为规格和测试预言机；*
 | 表达式 | `crates/barq-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | 信号、扫描、指标 | `crates/barq/src/sweep.rs`、`crates/barq-signals/src`、`crates/barq-indicators/src`、`crates/barq-py/python/barq/strategy.py` | §6 |
 | 撮合内核 | `crates/barq-exec/src/{types,kernel}.rs` | §7 |
-| 模拟 | `crates/barq-sim/src/{from_orders,from_signals,signals,groups}.rs` | §8 |
-| 记录 | `crates/barq-records/src/{lib,logs,trades,mapped,drawdowns}.rs` | §9 |
+| 模拟 | `crates/barq-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
+| 记录 | `crates/barq-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | 分析 | `crates/barq-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
 | Python 绑定 | `crates/barq-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/barq-py/python/barq/` | §12 |
 | 研究协议 | `research/barq_lab/` | §13 |

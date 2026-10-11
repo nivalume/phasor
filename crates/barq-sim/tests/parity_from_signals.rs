@@ -338,6 +338,9 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         upon_stop_update: upon_stop_update.as_flex(n_rows, n_cols),
         use_stops: boolean(g("use_stops")),
         val_price: val_price.as_flex(n_rows, n_cols),
+        // The reference has no cash flows outside fills.
+        cash_deposits: FlexArray::Scalar(0.0),
+        cash_earnings: FlexArray::Scalar(0.0),
         ffill_val_price: boolean(g("ffill_val_price")),
         update_value: boolean(g("update_value")),
     };

@@ -428,6 +428,23 @@ impl PyPortfolio {
         Ok(out)
     }
 
+    /// Cash that moved without a fill, as a dict of NumPy arrays.
+    ///
+    /// `amount` is what was applied, after any cap — a withdrawal or a charge
+    /// larger than the free cash is applied in part — so it can differ from
+    /// what was passed in. `kind` is 0 for a deposit or withdrawal and 1 for
+    /// an earning. Rows are in column order, then bar order.
+    fn cash_records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let cash = &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash;
+        let out = PyDict::new(py);
+        out.set_item("col", cash.col.clone().into_pyarray(py))?;
+        out.set_item("idx", cash.idx.clone().into_pyarray(py))?;
+        out.set_item("amount", cash.amount.clone().into_pyarray(py))?;
+        let kind: Vec<i64> = cash.kind.iter().map(|k| i64::from(*k)).collect();
+        out.set_item("kind", kind.into_pyarray(py))?;
+        Ok(out)
+    }
+
     /// Number of log rows, which is zero unless the run asked for them.
     #[getter]
     fn n_logs(&self) -> usize {
@@ -665,6 +682,42 @@ fn account_inputs(
     Ok((groups, expanded))
 }
 
+/// `cash_deposits` as the engine reads it: once per account.
+///
+/// The engine books a group's deposit from its first column, as it reads
+/// `init_cash`. A shared run therefore takes a matrix with one column per
+/// group — the same shape rule as a shared `init_cash` — and every column of
+/// a group is pointed at its group's column without copying. A scalar or a
+/// 1-D array (one value per bar) means the same for every account.
+fn deposits_view<'a>(
+    value: &'a Option<Borrowed<'a>>,
+    n_rows: usize,
+    n_cols: usize,
+    groups: &Groups,
+    group_of: &'a [usize],
+) -> PyResult<FlexArray<'a, f64>> {
+    match value {
+        Some(Borrowed::Slice(a)) if groups.is_shared() => {
+            let (flat, rows, cols) = columns_of(a)?;
+            if rows != n_rows || cols != groups.len() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "shared cash_deposits must be (n_rows, n_groups) = ({n_rows}, {}); got \
+                     ({rows}, {cols})",
+                    groups.len()
+                )));
+            }
+            FlexArray::mapped(flat, n_rows, cols, group_of).map_err(to_py_err)
+        }
+        _ => flex_or_f64(
+            value,
+            n_rows,
+            n_cols,
+            OneDim::PerRow,
+            FromOrders::default().cash_deposits,
+        ),
+    }
+}
+
 /// Runs a signal-driven backtest.
 ///
 /// `close`, `entries` and `exits` are `(n_rows, n_cols)` arrays and set the
@@ -705,6 +758,8 @@ fn account_inputs(
     sl_trail = None,
     tp_stop = None,
     val_price = None,
+    cash_deposits = None,
+    cash_earnings = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -749,6 +804,8 @@ fn from_signals(
     sl_trail: Option<&Bound<'_, PyAny>>,
     tp_stop: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
+    cash_deposits: Option<&Bound<'_, PyAny>>,
+    cash_earnings: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -792,6 +849,8 @@ fn from_signals(
     let low_b = borrow_opt_f64(low, "low")?;
     let init_cash_b = borrow_opt_f64(init_cash, "init_cash")?;
     let val_price_b = borrow_opt_f64(val_price, "val_price")?;
+    let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
+    let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
@@ -842,6 +901,9 @@ fn from_signals(
         "auto" => CallSeq::Auto,
         _ => return Err(bad("call_seq must be 'default' or 'auto'".to_owned())),
     };
+    let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
+    let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
+    let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
 
     let args = FromSignals {
         groups: Some(groups.clone()),
@@ -882,6 +944,8 @@ fn from_signals(
         sl_stop: flex_or_f64(&sl_stop_b, n_rows, n_cols, per_col, d.sl_stop)?,
         sl_trail: flex_or_bool(&sl_trail_b, n_rows, n_cols, d.sl_trail)?,
         tp_stop: flex_or_f64(&tp_stop_b, n_rows, n_cols, per_col, d.tp_stop)?,
+        cash_deposits: deposits,
+        cash_earnings: earnings,
         ..FromSignals::default()
     };
 
@@ -971,6 +1035,8 @@ fn from_signals(
     raise_reject = None,
     log = None,
     val_price = None,
+    cash_deposits = None,
+    cash_earnings = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1006,6 +1072,8 @@ fn from_orders(
     raise_reject: Option<&Bound<'_, PyAny>>,
     log: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
+    cash_deposits: Option<&Bound<'_, PyAny>>,
+    cash_earnings: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1030,6 +1098,8 @@ fn from_orders(
 
     let init_cash_b = borrow_opt_f64(init_cash, "init_cash")?;
     let val_price_b = borrow_opt_f64(val_price, "val_price")?;
+    let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
+    let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
     let p = Shared::borrow(
         size,
         price,
@@ -1065,6 +1135,9 @@ fn from_orders(
         "auto" => CallSeq::Auto,
         _ => return Err(bad("call_seq must be 'default' or 'auto'".to_owned())),
     };
+    let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
+    let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
+    let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
 
     let args = FromOrders {
         n_rows,
@@ -1094,6 +1167,8 @@ fn from_orders(
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
         log: flex_or_bool(&p.log, n_rows, n_cols, d.log)?,
+        cash_deposits: deposits,
+        cash_earnings: earnings,
         ffill_val_price,
         update_value,
     };

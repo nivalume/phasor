@@ -28,11 +28,13 @@
 //! Phase 1. Order records, all three trade views, drawdown episodes, the
 //! mapped-array reduction layer and log records are implemented.
 
+pub mod cash;
 pub mod drawdowns;
 pub mod logs;
 pub mod mapped;
 mod trades;
 
+pub use cash::CashRecords;
 pub use drawdowns::{DrawdownRecords, DrawdownStatus, find_drawdowns};
 pub use logs::{Journal, LogEntry, LogRecords, LogSink};
 
@@ -41,7 +43,7 @@ pub use barq_model::StatusInfo as StatusInfoLookup;
 pub use mapped::{ColMap, MappedArray};
 pub use trades::{TradeRecords, entry_trades, exit_trades, positions};
 
-use barq_model::OrderSide;
+use barq_model::{CashFlowKind, OrderSide};
 
 /// Where filled orders are written.
 ///
@@ -59,6 +61,10 @@ pub trait RecordSink {
         fees: f64,
         side: OrderSide,
     );
+
+    /// Records cash that moved without a fill: the amount actually applied,
+    /// after any cap, not the amount asked for.
+    fn push_cash(&mut self, row: usize, col: usize, amount: f64, kind: CashFlowKind);
 }
 
 /// A sink a parallel simulation can allocate per thread and merge afterwards.
@@ -138,6 +144,14 @@ pub struct OrderRecords {
     pub fees: Vec<f64>,
     /// Buy or sell, as the enum's discriminant.
     pub side: Vec<i8>,
+    /// Cash that moved without a fill: deposits, earnings.
+    ///
+    /// Carried here rather than beside the fills so that everything which
+    /// already moves a run's records — sinks, merges, sorting, the
+    /// portfolio's constructors — moves these too. Empty unless the run asked
+    /// for a cash flow. `len`, `ids` and every per-fill accessor count fills
+    /// only.
+    pub cash: CashRecords,
 }
 
 impl OrderRecords {
@@ -151,6 +165,7 @@ impl OrderRecords {
             price: Vec::new(),
             fees: Vec::new(),
             side: Vec::new(),
+            cash: CashRecords::new(),
         }
     }
 
@@ -164,6 +179,7 @@ impl OrderRecords {
             price: Vec::with_capacity(capacity),
             fees: Vec::with_capacity(capacity),
             side: Vec::with_capacity(capacity),
+            cash: CashRecords::new(),
         }
     }
 
@@ -196,6 +212,7 @@ impl OrderRecords {
         self.price.extend_from_slice(&other.price);
         self.fees.extend_from_slice(&other.fees);
         self.side.extend_from_slice(&other.side);
+        self.cash.extend(&other.cash);
     }
 
     /// Puts the records into column-major order: by column, then by row.
@@ -205,6 +222,7 @@ impl OrderRecords {
     /// per-symbol derivations want them grouped by column instead. Stable,
     /// so fills of one column on one bar keep their execution order.
     pub fn sort_by_column(&mut self) {
+        self.cash.sort_by_column();
         if self.col.windows(2).all(|w| w[0] < w[1])
             && self
                 .col
@@ -247,7 +265,12 @@ impl OrderRecords {
             price: vec![0.0; total],
             fees: vec![0.0; total],
             side: vec![0; total],
+            cash: CashRecords::new(),
         };
+        // Cash flows are a handful per bar at most; one serial pass is enough.
+        for part in parts {
+            out.cash.extend(&part.cash);
+        }
         std::thread::scope(|scope| {
             let (mut col, mut idx) = (out.col.as_mut_slice(), out.idx.as_mut_slice());
             let (mut size, mut price) = (out.size.as_mut_slice(), out.price.as_mut_slice());
@@ -300,6 +323,10 @@ impl RecordSink for OrderRecords {
         self.price.push(price);
         self.fees.push(fees);
         self.side.push(side as i8);
+    }
+
+    fn push_cash(&mut self, row: usize, col: usize, amount: f64, kind: CashFlowKind) {
+        self.cash.push(row, col, amount, kind);
     }
 }
 

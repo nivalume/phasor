@@ -304,6 +304,21 @@ pub enum TradesType {
     Positions = 2,
 }
 
+/// Why cash moved without a fill.
+///
+/// Stored in barq-records' `CashRecords` as the discriminant, so the analysis
+/// layer can tell money brought into the account from money the account
+/// earned: a deposit changes the value without being a return, every other
+/// kind is part of the return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum CashFlowKind {
+    /// Cash added to or withdrawn from the account at the bar's open.
+    Deposit = 0,
+    /// Interest, fees or any other income or cost, credited at the bar's close.
+    Earning = 1,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +332,8 @@ mod tests {
         assert_eq!(OrderStatus::Rejected as i8, 2);
         assert_eq!(StatusInfo::PartialFill as i8, 13);
         assert_eq!(TradesType::Positions as i8, 2);
+        assert_eq!(CashFlowKind::Deposit as i8, 0);
+        assert_eq!(CashFlowKind::Earning as i8, 1);
     }
 
     #[test]

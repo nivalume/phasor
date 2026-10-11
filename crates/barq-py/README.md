@@ -67,6 +67,32 @@ allocation and signal parameter sweeps without network access. Signal delays
 and execution prices remain explicit; no risk or automatic allocation layer
 is added.
 
+## Deposits and earnings
+
+Both loops accept `cash_deposits` and `cash_earnings`: cash that moves without
+a fill.
+
+- `cash_deposits` is booked at each bar's open, before orders are sized, so a
+  `targetpercent` rebalance on the same bar invests it. Positive adds, negative
+  withdraws. With `cash_sharing` a matrix is `(n_bars, n_groups)`, one column per
+  account.
+- `cash_earnings` is booked at each bar's close, per column, including bars with
+  no signal: interest, fees, or a funding payment computed in advance.
+- A 1-D array is one value per bar (a schedule), not one value per column.
+- A withdrawal or a charge larger than the free cash is applied in part.
+  `pf.cash_records()` returns what was applied (`col`, `idx`, `amount`, and
+  `kind`: 0 deposit, 1 earning).
+- Deposits are not returns: each bar's return is measured from the previous
+  value plus that bar's deposit, total return compounds the bars, and
+  drawdowns ignore money moved in or out.
+
+```python
+# 1,000 on the first bar of every month, invested by the monthly rebalance.
+deposits = np.where(month_start, 1_000.0, 0.0)
+pf = barq.from_orders(close, weights, size_type="targetpercent",
+                      cash_sharing=True, cash_deposits=deposits)
+```
+
 ## Factor expressions
 
 ### Function strategies
@@ -308,9 +334,10 @@ because `barq._barq` is importable.
 ## What is exposed
 
 Both vectorized loops — `from_signals` and `from_orders` — the `Portfolio` they
-return, its metrics, its statistics table, and its order, trade and log records
-as NumPy arrays. `Expression`, `FactorSet`, `alpha158()`, and `alpha360()`
-expose the Rust factor-expression engine through the same NumPy boundary.
+return, its metrics, its statistics table, and its order, trade, log and cash
+records as NumPy arrays. `Expression`, `FactorSet`, `alpha158()`, and
+`alpha360()` expose the Rust factor-expression engine through the same NumPy
+boundary.
 `barq.data` supplies Binance Spot download, CSV caching and aligned OHLCV arrays
 in Python.
 
