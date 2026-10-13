@@ -23,3 +23,7 @@ venv/
 .DS_Store
 data
 .data
+
+# Wiki front end
+wiki/node_modules/
+wiki/dist/

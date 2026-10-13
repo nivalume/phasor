@@ -11,15 +11,21 @@ suspects.
 | `A --> B : FactorInputs::from_ohlcv` (classDiagram relation label with `::`) | `Expecting 'NEWLINE', 'EOF', got 'COLON'` | `FactorInputs.from_ohlcv` — no colon of any kind inside a relation label |
 | `Pair{corr, window}` inside a class body | `Expecting 'STRUCT_STOP', 'MEMBER', got 'OPEN_IN_STRUCT'` | `Pair(corr, window)` or `Pair corr window` — braces end the class body |
 | `Scalar(T)` as an enum variant in a class body | renders in the *method* compartment | cosmetic; drop the parentheses if it should be an attribute |
+| `class rolling { <<mod>> +a() +b() }` (stereotype inline with members) | no error; the box shows `<>` | put `<<mod>>` on its own line inside the body |
+| `+new()$` or `expanding_*` sharing a line with other members | no error; `$`/`*` apply to the whole line (underlined, or `a() : expanding_`) | one member per line when any member ends in `$` or `*` |
+| `-events(field) BTreeMap~Option~InstrumentId~, Vec~(u64,f64)~~` (nested generics, two parameters, parentheses) | no error; garbled text such as `Vec~(u64,f64) : <>` | write the type with entities: `BTreeMap&lt;Option&lt;InstrumentId&gt;, Vec&lt;#40;u64,f64#41;&gt;&gt;` |
 
 ## Class diagrams
 
-- Generics: `Vec~f64~`, `Option~usize~`, `HashMap~String, &[f64]~`. Never `<`/`>`.
+- Generics: `Vec~f64~`, `Option~usize~`, `HashMap~String, &[f64]~`. Never raw `<`/`>`; the `&lt;`/`&gt;` entities are fine.
 - Lifetimes and `&` are fine inside `~ ~` and in member text: `Option~&'static str~`.
 - A member line is `visibility name` or `visibility name(args) ReturnType`; a
   trailing `$` marks static. Chinese parentheses（…）are ordinary text and safe.
-- Several members on one line: `class X { +a; +b; +c() }`.
-- Stereotype on its own line: `<<enum>>`; or inline `class X { <<trait>> +m() }`.
+- One member per line is the safe form. `class X { +a; +b }` works only when no
+  member ends in `$` (static) or `*` (abstract): those markers style the whole line.
+- Stereotype on its own line inside the body: `<<enum>>`. Inline with members it renders as `<>`.
+- Nested generics with more than one parameter, or tuples in a return type, confuse
+  the `~` parser; spell them with `&lt;` `&gt;` and `#40;` `#41;` instead.
 - Relation syntax: `A <|-- B` (inherit), `A *-- B` (compose), `A o-- B`
   (aggregate), `A --> B` (assoc), `A ..> B` (dependency), `A <|.. B`
   (realize/implement). Label after ` : `, no colons inside, `×4` and `→` are fine.

@@ -5,8 +5,9 @@ Instructions for coding agents (Codex, Grok Build, Claude Code via `CLAUDE.md`, 
 ## What this repository is
 
 barq: a parallel, factor-driven vectorized backtesting engine in Rust with a Python package.
-Read `README.md`, then `docs/ARCHITECTURE.md` (design, bilingual) and `docs/reading-guide/README.md`
-(how to read the code, Chinese) before changing anything non-trivial. `docs/plan.md` is the task list.
+Read `README.md`, then `docs/ARCHITECTURE.md` (design, bilingual) and `wiki/content/index.md`
+(the source knowledge base: how to read the code, Chinese) before changing anything non-trivial.
+`docs/plan.md` is the task list.
 
 ## Commands
 
@@ -16,6 +17,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 uv sync && uv run --with pytest python -m pytest crates/barq-py/tests -q   # Python package
 python docs/img/generate.py                              # regenerate the architecture SVGs
+cd wiki && npm install && npm run check && npm test      # knowledge base: page/link checker, unit tests
+cd wiki && npm run dev                                   # knowledge base web app (React, graph view)
 ```
 
 ## Rules that are easy to break
@@ -25,6 +28,8 @@ python docs/img/generate.py                              # regenerate the archit
 - Serial and threaded runs must stay bit-identical; random draws are functions of `(seed, row, col)`.
 - Library crates never download or write files; network code lives in `examples/`.
 - Analysis rebuilds balances from records only: anything that changes cash or a position must be a record.
+- Knowledge base pages (`wiki/content/`) cite code as `crates/…:line`, checked against the commit in
+  `wiki/src/config.ts`; when code they describe changes, update the page and run `npm run check` in `wiki/`.
 
 ## Skills
 

@@ -5,7 +5,7 @@ mermaid-cli, so a diagram that GitHub would refuse to draw fails here first.
 Usage
     python3 skills/mermaid-diagrams/scripts/check_mermaid.py [PATH ...]
         PATH is a Markdown file or a directory (searched recursively, *.md).
-        Default: docs/
+        Default: docs/ and wiki/content/
 
 Options
     --out DIR        keep rendered SVGs in DIR (default: a temporary directory)
@@ -79,7 +79,7 @@ class Block:
 
 def find_markdown(paths: list[str]) -> list[Path]:
     out: list[Path] = []
-    for raw in paths or ["docs"]:
+    for raw in paths or ["docs", "wiki/content"]:
         p = Path(raw)
         if p.is_dir():
             out.extend(sorted(q for q in p.rglob("*.md") if "node_modules" not in q.parts))
