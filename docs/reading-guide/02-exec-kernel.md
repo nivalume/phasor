@@ -19,8 +19,8 @@
 | 1 | `src/lib.rs` | 53 | 模块文档：两种失败、确定性、验证策略 |
 | 2 | `src/types.rs` | 190 | 四个类型；重点是 `ExecuteOrderState` 的 `debt` / `free_cash` 注释（`types.rs:5-17`）和 `Order::default` 里的哨兵值（`types.rs:118-139`） |
 | 3 | `src/kernel.rs:528-701` | — | `execute_order` → `execute_validated`：零钉、忽略检查、校验、换算链、随机拒单、分发。先读这一段再读买卖 |
-| 4 | `src/kernel.rs:41-221` | — | `buy` |
-| 5 | `src/kernel.rs:223-379` | — | `sell` |
+| 4 | `src/kernel.rs:41-221` | — | `buy`：现金预算、费用反解、同一笔成交里如何平空 |
+| 5 | `src/kernel.rs:223-379` | — | `sell`：可卖数量、开空时如何记 `debt` |
 | 6 | `src/kernel.rs:381-526` | — | `validate_bar` / `param_violation` / `ValidatedOrder`（性能优化，可最后读） |
 | 7 | `tests/parity.rs`、`tests/parity_sequence.rs` | — | 看 fixture 怎么被重放、`agree` 怎么比较 |
 | 8 | `tests/fixtures/execute_order.tsv` | 474 行 | 挑 `buy_plain`、`*fees*`、`*granularity*`、`*short*` 几行手算 |
@@ -132,6 +132,23 @@ flowchart TD
 
 注意 `sign` 是 NumPy 语义（`kernel.rs:25-33`）：`sign(NaN) = 0`，所以 `0 × inf = NaN` 和参考实现一致。
 
+**`percent` 是可用资源的比例，不是目标仓位。** 只有上表第 5 步会把它设成 `|size|`；其它类型保持 `NaN`，`buy` / `sell` 都不看它。`TargetPercent` 在第 1 步已经乘进组合净值，后面按目标股数和当前持仓的差额成交。
+
+```mermaid
+flowchart LR
+  A["Percent 正数"] --> B["buy：现金预算 × percent"]
+  C["Percent 负数，或 size = −inf"] --> D["sell：可卖数量 × percent"]
+  E["TargetPercent"] --> F["先变成目标股数差额<br/>percent 保持 NaN"]
+  classDef base fill:#ddf4ff,stroke:#0969da;
+  classDef part fill:#fff8c5,stroke:#9a6700;
+  class B,D base;
+  class F part;
+```
+
+正比例进 `buy`（`kernel.rs:89-91`）。乘法发生在预算已经和 `cash`、`order.cash_limit`、以及 `lock_cash` 算出的上限取过最小之后。现金 100、`cash_limit = 60`、`percent = 0.5` 时最多花 30。此时请求量是 `+inf`，股数由这笔钱反推。
+
+负比例进 `sell`（`kernel.rs:268-291`）。`LongOnly` 的基数是当前持仓。允许做空时，基数是卖掉多头之后 `free_cash` 还能新开的空头。`lock_cash` 为真时，比例在这个上限里面乘掉，随后把 `percent` 置成 `NaN`，避免函数后面再乘一次。`size = −inf` 被第 4 步改写成 `Percent(−1)`，也就是把这份资源全部拿去卖或开空。
+
 ## 2.6 核心算法三：`buy`
 
 位置：`kernel.rs:48-221`。输入 `size > 0`（可为 `+inf`）、`percent`（NaN 表示没有）。
@@ -187,11 +204,56 @@ position < 0（在平空）：
 否则：new_free_cash = add(free_cash, -spend)
 ```
 
+**平空就在这一笔买单里。** 同一列只有一个带符号的持仓，`new_position = add(position, final_size)`（`kernel.rs:193`）。函数只返回一个 `OrderResult::filled(..., Buy)`（`kernel.rs:212-219`）；模拟循环对它 `push_order` 一次（`crates/barq-sim/src/from_orders.rs:520-522`）。`short_size` 只用来减 `debt`，不再执行第二张订单。
+
+```mermaid
+flowchart TD
+  A["一笔 Buy，数量 final_size"] --> B["new_position = position + final_size"]
+  B --> C{"原 position < 0？"}
+  C -- 否 --> D["debt 不变<br/>free_cash -= spend"]
+  C -- 是 --> E{"new_position < 0？"}
+  E -- 是 --> F["short_size = final_size<br/>空头还在"]
+  E -- 否 --> G["short_size = abs(position)<br/>多出的股数是新多头"]
+  F --> H["释放 debt，free_cash 加回两倍"]
+  G --> H
+  classDef base fill:#ddf4ff,stroke:#0969da;
+  classDef hot fill:#ffebe9,stroke:#cf222e;
+  class A base;
+  class H hot;
+```
+
+持仓 −5、买得起 8 股：订单记录是买 8，持仓变成 3，`short_size = 5`。买 3 股则持仓变成 −2，`short_size = 3`，没有新多头。`ShortOnly` 在更前面就把数量截成不超过当前空头（`kernel.rs:113-117`），所以走不到"买穿"。统计上要把这一笔拆成"已平的空头"和"新多头的开仓"，是第 4 章的 `exit_trades`（`crates/barq-records/src/trades.rs:580-606`）：它立刻写下已平的那一段，剩下的股数要等以后的卖出或收盘标记才另成一条记录。
+
 **费用反解**为什么是 `(cash_limit − fixed_fees) / (1 + fees)`：费用在上限*之内*。设可花名义金额 `x`，则 `x + x·fees + fixed = cash_limit`，解得 `x = (cash_limit − fixed)/(1 + fees)`。
 例：现金 100、`fees=0.1`、`fixed_fees=1`、`price=10`、`size=+inf` → `x = 99/1.1 = 90`，买 9 股，付费 10，现金归零。这就是总览自测题的答案。
 
-**`lock_cash` 下不够平空时的求解**（`kernel.rs:72-79`）：设最多能平 `s` 股，花费 `s·p·(1+fees) + fixed`，同时每平 1 股释放 `2·avg_entry` 的保证金，于是
+**`lock_cash` 决定这笔单能不能动用空头保证金。** 保证金本身在 `sell` 里记账，与这个开关无关（§2.7）。开关打开时，买单的预算从 `free_cash` 起算，而不是从 `cash` 起算（`kernel.rs:58-91`）。当前是空头时，平仓会把这一列的两份预留还回来，所以"够平"的预算是 `free_cash + 2·debt`，再拿去和整笔平仓成本比。这三路比较是精确比较。
+
+```mermaid
+flowchart TD
+  Q{"lock_cash？"} -- 否 --> C["预算从 cash 起"]
+  Q -- 是 --> P{"position ≥ 0？"}
+  P -- 是 --> F["预算从 free_cash 起"]
+  P -- 否 --> R{"free_cash + 2×debt 与平仓成本"}
+  R -- 大于 --> A["预算 = free_cash + 2×debt<br/>平完后剩余的部分可开多"]
+  R -- 小于 --> B["反解最多能平的股数<br/>预算只覆盖这一段"]
+  R -- 等于 --> E["预算从 cash 起<br/>恰好平完"]
+  C --> M["再与 cash、order.cash_limit 取最小<br/>percent 有值再乘"]
+  F --> M
+  A --> M
+  B --> M
+  E --> M
+  classDef base fill:#ddf4ff,stroke:#0969da;
+  classDef hot fill:#ffebe9,stroke:#cf222e;
+  class A,B hot;
+  class M base;
+```
+
+沿用 §2.7 的账户：现金 100 空 5 股 @10 之后，`cash = 150`、`debt = 50`、`free_cash = 50`，于是 `free_cash + 2·debt = 150`。其中 50 用来平空，剩下 100 可以开多。单列、没有其他空头时，`free_cash + 2·debt` 等于当时的 `cash`。同组里别的列也有空头时，组现金里还含着它们的 `2·debt`，这一列只加回自己的一份（共享方式见第 3 章）。
+
+不够平完时（`kernel.rs:72-79`）：设最多能平 `s` 股，花费 `s·p·(1+fees) + fixed`，每平 1 股释放 `2·avg_entry`，于是
 `free_cash + 2·avg_entry·s = s·p·(1+fees) + fixed` → `s = (free_cash − fixed) / (p(1+fees) − 2·avg_entry)`。
+解出来的 `s` 小于整笔空头，这笔买单不会开多。
 
 ## 2.7 核心算法四：`sell`
 
@@ -232,9 +294,26 @@ new_position < 0（有一部分变成空头）：
 否则：new_free_cash = free_cash + final_acq
 ```
 
-**为什么是 `2 × short_value`**（`types.rs:9-17`）：开空收到 `short_value` 的现金，但同时要为"将来买回"预留等值现金，再为空头本身的敞口占用一次，所以 `free_cash` 净变化是 `proceeds − 2·short_value`。
-平空时按 `debt / |position|` 的平均入场价对称释放。
-这个预留是路径相关的（取决于每次开空的价格），只靠 `cash` 和 `position` 推不出来，所以 `debt` 和 `free_cash` 必须是显式状态。
+同一列的持仓在空仓、多头、空头之间移动。加多、减多、加空、减空都留在原来的状态里。买穿或卖穿是同一笔成交穿过 0，只按穿过的那一段改 `debt`。
+
+```mermaid
+flowchart LR
+  flat["空仓"]
+  lng["多头，debt = 0"]
+  sht["空头<br/>debt = 数量 × 均价"]
+  flat -- buy --> lng
+  flat -- sell --> sht
+  lng -- 卖光 --> flat
+  lng -- 卖穿 --> sht
+  sht -- 买光 --> flat
+  sht -- 买穿 --> lng
+  classDef base fill:#ddf4ff,stroke:#0969da;
+  classDef hot fill:#ffebe9,stroke:#cf222e;
+  class lng base;
+  class sht hot;
+```
+
+**为什么是 `2 × short_value`**（`types.rs:9-17`）：开空收到 `short_value` 的现金，同时为"将来买回"预留等值现金，再为空头敞口占用一次。`free_cash` 的变化是 `proceeds − 2·short_value`。这段记账在 `new_position < 0` 的分支里总会发生，不看 `lock_cash`。`lock_cash` 只决定以后的订单是否遵守已经记下的预留（§2.6）。平空按 `debt / |position|` 对称释放。预留取决于每次开空的价格，只靠 `cash` 和 `position` 推不出来，所以 `debt` 和 `free_cash` 是显式状态。共享现金组里这两个现金字段是整组一份，`debt` 跟 `position` 一样每列一份（第 3 章）。
 测试 `shorting_records_debt_and_reserves_margin`（`kernel.rs:883-897`）：100 现金、空 5 股 @10 → `cash=150, debt=50, free_cash=50`。
 
 ## 2.8 14 种 `StatusInfo` 的触发点
@@ -295,3 +374,4 @@ new_position < 0（有一部分变成空头）：
 2. `percent = 0.5`、`cash = 100`、`cash_limit = 60` 时，买入最多花多少？（先 `min(100, 60)` 再乘 0.5 → 30。）
 3. 为什么 `is_close(adj_size, 0.0)` 测的是粒度取整之后、反解之前的 `adj_size`？去 fixture 里找一行 `granularity` 的案例验证你的答案。
 4. 平掉一半空头时 `free_cash` 变化多少？用 `avg_entry_price` 写出式子。
+5. 持仓 −5 时一笔买 8 且买得起。`OrderRecords` 里有几条？`debt` 按多少股释放？若要看到「平掉的 5 股」和「剩下的 3 股」分成两段，该读 `buy` 还是第 4 章的 `exit_trades`？

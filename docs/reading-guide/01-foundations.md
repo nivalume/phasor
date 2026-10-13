@@ -172,14 +172,84 @@ get(row, col):
 varies_by_row() = PerRow | Full | MappedColumns
 ```
 
+**逐列广播**：两个手续费值被逻辑上复用到 3 × 2 个格子里；每个格子读取时仍指向原来的列值。
+
+```mermaid
+flowchart LR
+  subgraph source["原始的逐列参数"]
+    feeA["fees[0] = 0.001"]
+    feeB["fees[1] = 0.002"]
+  end
+  subgraph cells["逻辑上的 3 行 × 2 列"]
+    a00["行 0 列 0"]
+    a10["行 1 列 0"]
+    a20["行 2 列 0"]
+    b01["行 0 列 1"]
+    b11["行 1 列 1"]
+    b21["行 2 列 1"]
+  end
+  feeA --> a00
+  feeA --> a10
+  feeA --> a20
+  feeB --> b01
+  feeB --> b11
+  feeB --> b21
+```
+
 动机（ARCHITECTURE §3.3）：100k × 2,000 的参数矩阵是 1.6 GB，而模拟有十几个这样的参数，物化不可行。`FlexArray` 只借用调用者给的形状，由 `get` 做下标运算。
 `varies_by_row()` 让循环把按列不变的参数提到 bar 循环外（`from_orders.rs:148-159`、`from_signals.rs:419-426` 用它决定是否每根 K 线重建 `ValidatedOrder`）。
 
-`MappedColumns` 是参数扫描不复制价格的关键：50 组参数 × 100 个标的 = 5,000 个逻辑列，但价格只有 100 列，`columns[col]` 把逻辑列映射回物理列。`barq-sim/src/lib.rs:58-92` 的 `count_where` 对它特殊处理，每个物理列只数一次。
+`MappedColumns` 把**逻辑模拟列**映射到行情矩阵的**物理数据列**。例如有两个标的 A、B 和两组参数 P1、P2，模拟要跑四条独立路径：P1+A、P1+B、P2+A、P2+B。参数会不同，但同一标的在两组参数下读的价格相同：
+
+```mermaid
+flowchart LR
+  subgraph prices["行情矩阵：物理列"]
+    priceA["A 的价格<br/>物理列 0"]
+    priceB["B 的价格<br/>物理列 1"]
+  end
+  subgraph runs["独立模拟：逻辑列"]
+    p1a["P1 + A"]
+    p1b["P1 + B"]
+    p2a["P2 + A"]
+    p2b["P2 + B"]
+  end
+  priceA --> p1a
+  priceB --> p1b
+  priceA --> p2a
+  priceB --> p2b
+```
+
+因此映射是 `columns = [0, 1, 0, 1]`。读取逻辑列 2 的第 `row` 行时，`get` 先找到 `columns[2] == 0`，再从原行情矩阵读取 A 的第 `row` 行。P1+A 与 P2+A 的仓位、成交和收益仍分别计算；共享的只有相同的价格输入。
+
+扩展到 50 组参数 × 100 个标的，会有 5,000 个逻辑模拟列，但行情物理矩阵仍只有 100 列。单个 100k × 100 的 `f64` 行情字段约 80 MB；复制 50 份约 4 GB，而 `MappedColumns` 只需原矩阵和列映射。它省掉的是重复存储与复制，不会省掉 5,000 条模拟路径本身的计算。`barq-sim/src/lib.rs:58-92` 的 `count_where` 对它特殊处理，每个物理列只数一次。
 
 细节：枚举里**不存 `n_cols`**，逻辑宽度由调用方隐含；`mapped` 用 `checked_mul` 校验形状（96 行），`full` 没有（157 行）。`T: Copy` 而不是只支持 `f64`，因为 `barq-sim` 把枚举也当参数传：`FlexArray::Scalar(StopEntryPrice::Close)`。
 
-## 1.8 核心算法五：标签的按位相等与 `group_indices`（`columns.rs:54-88, 305-325`）
+## 1.8 核心算法五：列标签、`Columns` 与 `group_indices`（`columns.rs:54-88, 208-343`）
+
+矩阵列保存数值；`Columns` 保存每一列“代表什么”的标签，不复制矩阵数据。标签按层级（`Level`）组织，例如参数扫描中的 `window` 和 `symbol`。每个层级必须恰好有 `n_cols` 个标签，否则 `Columns::new` 返回 `Error::LevelWidth`。
+
+```rust
+let windows = [10_i64, 20, 50];
+let symbols = ["BTC", "ETH"];
+let columns = Columns::new(vec![
+    Level::repeat("window", &windows, symbols.len()),
+    Level::tile("symbol", &symbols, windows.len()),
+]).unwrap();
+```
+
+`repeat` 让每个参数值占相邻列，`tile` 让每个参数块都包含所有标的，因此列标签是：
+
+| 列号 | window | symbol |
+|---:|---:|---|
+| 0 | 10 | BTC |
+| 1 | 10 | ETH |
+| 2 | 20 | BTC |
+| 3 | 20 | ETH |
+| 4 | 50 | BTC |
+| 5 | 50 | ETH |
+
+因此 `columns.describe(3)` 得到 `window=20, symbol=ETH`；`columns.group_indices("symbol")` 得到 BTC 对应 `[0, 2, 4]`、ETH 对应 `[1, 3, 5]`，可用于按标的聚合每列的收益等指标。查询不存在的层级会返回 `Error::UnknownLevel`。
 
 `Label::key()` 把 `Float(v)` 折成 `(1, v.to_bits())`，`PartialEq` 和 `Hash` 都走 `key()`。于是 `Float(NaN) == Float(NaN)`、`Float(0.0) != Float(-0.0)`——和 IEEE 相反，但有意为之（文档 32–34 行："标签是标识符，不是测量值"），这样 `0.8, 0.9, 0.95` 这类分位数阈值才能当 `HashMap` 键。
 `group_indices(level)`：一趟扫描建 `HashMap<Label, Vec<usize>>`，同时记录首次出现顺序，再按该顺序输出。它是第 5 章按参数聚合（`aggregate.rs:144`）的基础。
