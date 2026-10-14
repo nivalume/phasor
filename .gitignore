@@ -24,6 +24,3 @@ venv/
 data
 .data
 
-# Wiki front end
-wiki/node_modules/
-wiki/dist/

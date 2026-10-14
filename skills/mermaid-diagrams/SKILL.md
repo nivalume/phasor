@@ -27,12 +27,12 @@ current. One diagram per idea; two small diagrams beat one large one.
 
 | Reader's question | Type | Worked example in this repo |
 |---|---|---|
-| What are the types and who owns / borrows / implements what? | `classDiagram` | `wiki/content/crates/phasor-sim.md` (类图) |
-| What happens, in what order, between which parts, in one unit of work? | `sequenceDiagram` | `wiki/content/algorithms/bar-loop.md` (one bar of a shared account) |
-| Which decision leads where; what is the fixed order of stages? | `flowchart TD` | `wiki/content/algorithms/prepare-order.md` (`prepare_order`) |
-| What depends on what (crates, tasks, milestones)? | `flowchart BT` / `LR` | `wiki/content/guides/system-map.md` (crate dependencies) |
-| What states can a thing be in and what moves it? | `stateDiagram-v2` | `wiki/content/tooling/research-protocol.md` (research protocol) |
-| How long will phases take, in what order? | `gantt` | `wiki/content/guides/reading-roadmap.md` |
+| What are the types and who owns / borrows / implements what? | `classDiagram` | phasor-docs `crates/phasor-sim.md` (类图) |
+| What happens, in what order, between which parts, in one unit of work? | `sequenceDiagram` | phasor-docs `algorithms/bar-loop.md` (one bar of a shared account) |
+| Which decision leads where; what is the fixed order of stages? | `flowchart TD` | phasor-docs `algorithms/prepare-order.md` (`prepare_order`) |
+| What depends on what (crates, tasks, milestones)? | `flowchart BT` / `LR` | phasor-docs `guides/system-map.md` (crate dependencies) |
+| What states can a thing be in and what moves it? | `stateDiagram-v2` | phasor-docs `tooling/research-protocol.md` (research protocol) |
+| How long will phases take, in what order? | `gantt` | phasor-docs `guides/reading-roadmap.md` |
 
 Templates for each, with the member and arrow syntax that is known to render,
 are in [references/diagram-types.md](references/diagram-types.md).
@@ -47,7 +47,7 @@ are in [references/diagram-types.md](references/diagram-types.md).
    (`+FlexArray fees, fixed_fees, slippage…`) rather than listing all of them.
    If a class diagram needs more than ~12 classes, split by layer.
 3. **Language.** Labels follow the document's language (Chinese in
-   `*.zh-CN.md` and `wiki/content/`, English elsewhere); identifiers
+   `*.zh-CN.md` and the phasor-docs knowledge base, English elsewhere); identifiers
    stay exactly as in the code. Mixed text is fine: `"① 价格：+inf→close"`.
 4. **Style.** Use the house palette and stereotypes from
    [references/diagram-types.md](references/diagram-types.md) §Style
@@ -108,11 +108,11 @@ rejects.
 
 ## 6. Where this fits with the rest of the docs
 
-- `wiki/content/` — the knowledge base; Mermaid everywhere, every block validated
-  with this skill's checker. The wiki app renders the blocks with mermaid 11 in
-  the browser, so a block that passes here also draws there.
+- [nivalume/phasor-docs](https://github.com/nivalume/phasor-docs) — the knowledge base, a separate repository;
+  Mermaid everywhere. Its site renders the blocks with mermaid 11 in the browser;
+  check a checkout with `python3 skills/mermaid-diagrams/scripts/check_mermaid.py ../phasor-docs`.
 - `docs/ARCHITECTURE*.md` — a few Mermaid blocks plus the generated SVGs in
   `docs/img/{en,zh}/`; regenerate those with `python docs/img/generate.py`,
   never by editing the SVG.
-- A diagram that duplicates one of the generated SVGs should link to the SVG
-  instead (`![…](../../../docs/img/zh/bar-loop.svg)` from a wiki page), as the knowledge base does.
+- A diagram that duplicates one of the generated SVGs should use the SVG
+  instead, as the knowledge base does (it keeps copies in `assets/img/`).

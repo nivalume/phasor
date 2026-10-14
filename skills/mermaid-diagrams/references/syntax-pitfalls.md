@@ -13,6 +13,7 @@ suspects.
 | `Scalar(T)` as an enum variant in a class body | renders in the *method* compartment | cosmetic; drop the parentheses if it should be an attribute |
 | `class rolling { <<mod>> +a() +b() }` (stereotype inline with members) | no error; the box shows `<>` | put `<<mod>>` on its own line inside the body |
 | `+new()$` or `expanding_*` sharing a line with other members | no error; `$`/`*` apply to the whole line (underlined, or `a() : expanding_`) | one member per line when any member ends in `$` or `*` |
+| `pending --> registered : spec_id = sha256(card+spec)[:12]` (a second colon in a stateDiagram transition label) | `Expecting 'SPACE', 'NL', …` | write the colon as `#58;`: `[#58;12]` renders as `[:12]` |
 | `-events(field) BTreeMap~Option~InstrumentId~, Vec~(u64,f64)~~` (nested generics, two parameters, parentheses) | no error; garbled text such as `Vec~(u64,f64) : <>` | write the type with entities: `BTreeMap&lt;Option&lt;InstrumentId&gt;, Vec&lt;#40;u64,f64#41;&gt;&gt;` |
 
 ## Class diagrams

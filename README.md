@@ -85,9 +85,8 @@ It reads top down; §2 (system overview) and §11 (parallelism) cover the load-b
 
 For a guided path through the source itself (reading order per crate, the core algorithm of each
 module, class and sequence diagrams, exercises and further reading), see the
-[source knowledge base](wiki/content/index.md) (中文) in `wiki/`. It is plain Markdown that reads on
-GitHub, and `wiki/` also holds a React app that renders it with search and a graph of how the
-pages relate (`cd wiki && npm install && npm run dev`).
+[source knowledge base](https://phasor-docs.vercel.app) (中文), kept in [nivalume/phasor-docs](https://github.com/nivalume/phasor-docs). It is plain
+Markdown that reads on GitHub; the site adds search and a graph of how the pages relate.
 
 ## Status
 
