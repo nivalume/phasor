@@ -2,11 +2,11 @@
 title: 事件研究
 kind: algorithm
 summary: forward_paths 在每个事件前后记录相对事件当根收盘的收益路径，再按偏移求均值、中位数与命中率；它读未来，只做分析。
-parent: barq-analysis
+parent: phasor-analysis
 related: [look-ahead, ml-labels, metrics, signal-sweep]
 tags: [analysis, events]
 sources:
-  - crates/barq-analysis/src/events.rs
+  - crates/phasor-analysis/src/events.rs
 order: 1105
 ---
 
@@ -16,7 +16,7 @@ order: 1105
 
 ## 位置
 
-- `crates/barq-analysis/src/events.rs`：`forward_paths`、`mean_path`、`median_path`、`hit_rate`；输出类型 `EventPaths`
+- `crates/phasor-analysis/src/events.rs`：`forward_paths`、`mean_path`、`median_path`、`hit_rate`；输出类型 `EventPaths`
 
 ## 路径与聚合
 
@@ -24,7 +24,7 @@ order: 1105
 
 ## 相关
 
-- [barq-analysis：分析层](../crates/barq-analysis.md)：所属 crate；类图里的 `EventPaths` 就是这里的输出。
+- [phasor-analysis：分析层](../crates/phasor-analysis.md)：所属 crate；类图里的 `EventPaths` 就是这里的输出。
 - [延迟与前视偏差](../concepts/look-ahead.md)：为什么读未来的结果不能喂给信号。
 - [机器学习标签](../algorithms/ml-labels.md)：另一类有意读未来、只能做标签或分析的计算。
 - [SignalSweep：因子到信号列](../algorithms/signal-sweep.md)：事件通常就是这里生成的信号列。

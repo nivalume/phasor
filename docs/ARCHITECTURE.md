@@ -1,8 +1,8 @@
-# barq architecture
+# phasor architecture
 
 [中文版](ARCHITECTURE.zh-CN.md)
 
-One document, top down: why barq exists, the whole system, each pipeline stage
+One document, top down: why phasor exists, the whole system, each pipeline stage
 in data-flow order, the cross-cutting concerns, then what is planned. Section
 numbers are identical in the Chinese version, so `docs/ARCHITECTURE.md §7.3` in a
 code comment works for both.
@@ -20,17 +20,17 @@ knowledge base in [`wiki/`](../wiki/content/index.md) (Chinese).
 0. [Conventions](#0-conventions)
 1. [Goals and motivation](#1-goals-and-motivation)
 2. [System overview](#2-system-overview)
-3. [Foundations: barq-core and barq-model](#3-foundations-barq-core-and-barq-model)
-4. [Data layer: barq-data and barq.data](#4-data-layer-barq-data-and-barqdata)
-5. [Factor expressions: barq-expr](#5-factor-expressions-barq-expr)
+3. [Foundations: phasor-core and phasor-model](#3-foundations-phasor-core-and-phasor-model)
+4. [Data layer: phasor-data and phasor.data](#4-data-layer-phasor-data-and-phasordata)
+5. [Factor expressions: phasor-expr](#5-factor-expressions-phasor-expr)
 6. [Signals](#6-signals)
-7. [Execution kernel: barq-exec](#7-execution-kernel-barq-exec)
-8. [Simulation loops: barq-sim](#8-simulation-loops-barq-sim)
-9. [Records: barq-records](#9-records-barq-records)
-10. [Analysis: barq-analysis](#10-analysis-barq-analysis)
+7. [Execution kernel: phasor-exec](#7-execution-kernel-phasor-exec)
+8. [Simulation loops: phasor-sim](#8-simulation-loops-phasor-sim)
+9. [Records: phasor-records](#9-records-phasor-records)
+10. [Analysis: phasor-analysis](#10-analysis-phasor-analysis)
 11. [Parallelism](#11-parallelism)
-12. [Python layer: barq-py](#12-python-layer-barq-py)
-13. [Research layer: research/barq_lab](#13-research-layer-researchbarq_lab)
+12. [Python layer: phasor-py](#12-python-layer-phasor-py)
+13. [Research layer: research/phasor_lab](#13-research-layer-researchphasor_lab)
 14. [Verification](#14-verification)
 15. [Benchmarks and performance](#15-benchmarks-and-performance)
 16. [Development workflow](#16-development-workflow)
@@ -55,7 +55,7 @@ knowledge base in [`wiki/`](../wiki/content/index.md) (Chinese).
 
 ## 1. Goals and motivation
 
-### 1.1 What barq is for
+### 1.1 What phasor is for
 
 1. **Parallel parameter sweeps**: thousands of parameter sets as independent columns of one run.
 2. **Parallel backtests across symbols or multi-asset accounts**: a shared account is a contiguous group of columns (§8.3).
@@ -67,14 +67,14 @@ Secondary: strategies written in NautilusTrader's style later (source-level port
 
 | Finding | Evidence | Consequence |
 |---|---|---|
-| Porting a branchy loop to Rust buys nothing | vectorbt's own Rust backend: `simulate_from_orders` **0.73×–1.15×** vs Numba, but **6–10×** on vectorizable ops (`diff`, `pct_change`, shifts at 1000×100); barq's harness reproduces 0.74×–0.82× (§15.1) | speed must come from design, not the compiler |
+| Porting a branchy loop to Rust buys nothing | vectorbt's own Rust backend: `simulate_from_orders` **0.73×–1.15×** vs Numba, but **6–10×** on vectorizable ops (`diff`, `pct_change`, shifts at 1000×100); phasor's harness reproduces 0.74×–0.82× (§15.1) | speed must come from design, not the compiler |
 | The event-driven reference cannot sweep in parallel | NautilusTrader `BacktestNode::run()` is a sequential `for`; state is `Rc<RefCell<..>>` behind a global message bus; ~1.2–1.9 µs/event | parallelism is the opening |
 
 Result (§15.1): the loop is 2.6×–3.3× faster than vectorbt's Numba loop on one
 thread, 9.7×–12.1× on 4 threads. How much each design choice (column-major scans,
 stack-local state, `FlexArray` scalar fast path, threads) contributes is not measured.
 
-### 1.3 What barq is not
+### 1.3 What phasor is not
 
 - Not event-driven yet: no order book, ticks or latency model; execution is on bars.
 - Not a data vendor: library crates never download or write; network code lives in `examples/`.
@@ -96,10 +96,10 @@ between stages. Factors are `Matrix`, parameters are borrowed through `FlexArray
 
 ```mermaid
 flowchart LR
-  A["Tier A (phase 1)<br/>vectorized: arrays in"] --> K["barq_exec::execute_order"]
+  A["Tier A (phase 1)<br/>vectorized: arrays in"] --> K["phasor_exec::execute_order"]
   B["Tier B (phase 2, planned)<br/>event-driven Strategy"] -.-> K
   K --> R["RecordSink → same record schemas"]
-  R --> P["barq-analysis (written once)"]
+  R --> P["phasor-analysis (written once)"]
 ```
 
 Nanoseconds per column-bar versus microseconds per event: the vectorized tier
@@ -115,27 +115,27 @@ double as a native `from_order_func`.
 
 ### 2.3 Crates
 
-![Crate dependency graph: barq-core at the bottom; model, generic, signals above it; exec, data, expr, indicators; records, sim; analysis on top; barq and barq-py are façades](img/en/crates.svg)
+![Crate dependency graph: phasor-core at the bottom; model, generic, signals above it; exec, data, expr, indicators; records, sim; analysis on top; phasor and phasor-py are façades](img/en/crates.svg)
 
 | Crate | Role |
 |---|---|
-| `barq-core` | `Matrix`, `FlexArray`, column labels, float tolerances, `Error` (§3); no external deps |
-| `barq-model` | execution enums, ids, `BarType`, `OhlcvPanel`, fixed-point `Price`/`Quantity` (§3.6) |
-| `barq-generic` | rolling / expanding / EWM windows, shifts, fills, crossovers; seeded synthetic prices (`random_walk`, `gbm`, `ohlc_from_close`) |
-| `barq-signals` | signal cleaning, exit generation, ranks, ranges (§6.2) |
-| `barq-indicators` | MA, MSTD, BBANDS, RSI, STOCH, MACD, ATR, OBV with sweeps (§6.4) |
-| `barq-expr` | expression parser, graph compiler, native + Polars backends, Alpha158/360 (§5) |
-| `barq-exec` | the order execution kernel (§7) |
-| `barq-records` | record schemas, sinks, trades, drawdowns, mapped arrays (§9) |
-| `barq-sim` | `from_orders` / `from_signals` loops, stops, groups, parallel runners (§8) |
-| `barq-analysis` | `Portfolio`, value/returns chain, metrics, stats, aggregation (§10) |
-| `barq-data` | CSV / Parquet / catalog → Arrow → panels, point-in-time alignment (§4) |
-| `barq` | façade, `prelude`, `SignalSweep` (§6.1); feature `data` adds barq-data |
-| `barq-py` | PyO3 extension `barq._barq` + Python package `barq` (§12) |
+| `phasor-core` | `Matrix`, `FlexArray`, column labels, float tolerances, `Error` (§3); no external deps |
+| `phasor-model` | execution enums, ids, `BarType`, `OhlcvPanel`, fixed-point `Price`/`Quantity` (§3.6) |
+| `phasor-generic` | rolling / expanding / EWM windows, shifts, fills, crossovers; seeded synthetic prices (`random_walk`, `gbm`, `ohlc_from_close`) |
+| `phasor-signals` | signal cleaning, exit generation, ranks, ranges (§6.2) |
+| `phasor-indicators` | MA, MSTD, BBANDS, RSI, STOCH, MACD, ATR, OBV with sweeps (§6.4) |
+| `phasor-expr` | expression parser, graph compiler, native + Polars backends, Alpha158/360 (§5) |
+| `phasor-exec` | the order execution kernel (§7) |
+| `phasor-records` | record schemas, sinks, trades, drawdowns, mapped arrays (§9) |
+| `phasor-sim` | `from_orders` / `from_signals` loops, stops, groups, parallel runners (§8) |
+| `phasor-analysis` | `Portfolio`, value/returns chain, metrics, stats, aggregation (§10) |
+| `phasor-data` | CSV / Parquet / catalog → Arrow → panels, point-in-time alignment (§4) |
+| `phasor` | façade, `prelude`, `SignalSweep` (§6.1); feature `data` adds phasor-data |
+| `phasor-py` | PyO3 extension `phasor._phasor` + Python package `phasor` (§12) |
 
-External runtime dependencies: `rayon` (barq-expr), optional `polars` 0.46
-(barq-expr), `arrow-*`/`parquet` 59 + `csv` (barq-data), `pyo3`/`numpy` 0.29
-(barq-py). barq-sim uses only `std::thread::scope`.
+External runtime dependencies: `rayon` (phasor-expr), optional `polars` 0.46
+(phasor-expr), `arrow-*`/`parquet` 59 + `csv` (phasor-data), `pyo3`/`numpy` 0.29
+(phasor-py). phasor-sim uses only `std::thread::scope`.
 
 ### 2.4 Scope decisions
 
@@ -150,15 +150,15 @@ External runtime dependencies: `rayon` (barq-expr), optional `polars` 0.46
 
 ---
 
-## 3. Foundations: barq-core and barq-model
+## 3. Foundations: phasor-core and phasor-model
 
 ### 3.1 The column axis
 
 ![Column axis: col = param_idx × n_symbols + symbol_idx; parameters repeat, symbols tile; each account is a contiguous slice; in memory each column is one contiguous run](img/en/columns.svg)
 
-- Parameter labels **repeat** (`Level::repeat`), symbol labels **tile** (`Level::tile`), in `crates/barq-core/src/columns.rs`.
+- Parameter labels **repeat** (`Level::repeat`), symbol labels **tile** (`Level::tile`), in `crates/phasor-core/src/columns.rs`.
 - **Contiguity**: one parameter set occupies adjacent columns, so a shared account is a slice (`group_lens=[2,2,2]`). The simulator only needs shape and group lengths.
-- The layout is a constructor convention (`Level`, `column_of`, `SignalSweep`, `barq.strategy.sweep`), pinned by `one_parameter_combination_occupies_contiguous_columns`, not checked at runtime.
+- The layout is a constructor convention (`Level`, `column_of`, `SignalSweep`, `phasor.strategy.sweep`), pinned by `one_parameter_combination_occupies_contiguous_columns`, not checked at runtime.
 - **Labels**: `Columns { levels, n_cols }`; `Label = Int | Float | Str | Bool` (floats by bit pattern). `group_indices(level)` drives by-parameter aggregation (§10.5).
 
 ### 3.2 Memory layout
@@ -188,7 +188,7 @@ columns while only 100 exist (`column_map` in Python).
 
 ### 3.4 The float tolerance layer
 
-`crates/barq-core/src/math.rs`:
+`crates/phasor-core/src/math.rs`:
 
 | Item | Rule |
 |---|---|
@@ -203,7 +203,7 @@ columns while only 100 exist (`column_map` in Python).
 - `Err(Error::{Broadcast, FlexLen, UnknownLevel, LevelWidth, Invariant})` means an invariant broke (negative cash, bad parameter); the run stops.
 - **A rejected order is never an `Err`**: it is an `OrderResult` with `status = Ignored | Rejected` and a `status_info` reason (§7.6), recorded in logs (§9.4).
 
-### 3.6 Domain model (barq-model)
+### 3.6 Domain model (phasor-model)
 
 | Item | Detail |
 |---|---|
@@ -216,7 +216,7 @@ Execution semantics follow vectorbt; value and identifier types follow NautilusT
 
 ---
 
-## 4. Data layer: barq-data and barq.data
+## 4. Data layer: phasor-data and phasor.data
 
 ```mermaid
 flowchart LR
@@ -228,7 +228,7 @@ flowchart LR
   W --> A["align → T × instruments"]
 ```
 
-`crates/barq-data/src/lib.rs` never downloads and never writes; downloaders are
+`crates/phasor-data/src/lib.rs` never downloads and never writes; downloaders are
 in `examples/` (`binance.py`, `fetch.py`, `download_binance_vision.py`).
 
 ### 4.1 Catalog layout
@@ -236,7 +236,7 @@ in `examples/` (`binance.py`, `fetch.py`, `download_binance_vision.py`).
 `<root>/data/<name>/<key>/*.csv | *.parquet`. `name` is the dataset (`bars`,
 `funding`, `news`); `key` is a `BarType` for bars or an `InstrumentId` otherwise.
 `catalog(root, name, keys)` lists files sorted. Python's default root is
-`~/.cache/barq/catalog`.
+`~/.cache/phasor/catalog`.
 
 ### 4.2 Schema and loading
 
@@ -269,14 +269,14 @@ Global events broadcast to every instrument. Python: `Dataset.asof(panel, field=
 
 ### 4.5 The Python data API
 
-`crates/barq-py/python/barq/data.py`: `DataSchema(...)`, `files({key: path})`,
+`crates/phasor-py/python/phasor/data.py`: `DataSchema(...)`, `files({key: path})`,
 `Catalog(root, schemas).source(name, keys)` → `.load(start, end)` / `.prepare()`.
 `BarPanel` exposes `(T, S)` Fortran arrays, `instruments`, `coverage()`. Loading,
 `prepare` and `align` release the GIL; a Python decoder re-acquires it per batch.
 
 ---
 
-## 5. Factor expressions: barq-expr
+## 5. Factor expressions: phasor-expr
 
 ```rust
 let factors = FactorSet::compile([("trend", "$close / Mean($close, 20) - 1")])?;
@@ -346,7 +346,7 @@ essentially the outputs. `each_symbol_evaluates_exactly_as_it_would_alone` pins 
 
 | Operators | Kernel | Cost / row |
 |---|---|---|
-| `Mean` | prefix sums (`barq_generic::rolling`) | O(1) |
+| `Mean` | prefix sums (`phasor_generic::rolling`) | O(1) |
 | `Max Min` | monotonic deque | amortized O(1) |
 | `Sum Std Var Skew Kurt WMA Slope Rsquare Resi Corr Cov` | incremental accumulators (`window.rs`) | O(1) |
 | `Quantile Med Rank Mad` | sorted ring for windows ≤ 256, else Fenwick tree over sorted positions (`order.rs`) | O(window) shift / O(log n) |
@@ -396,17 +396,17 @@ output); per-symbol parallelism is valid only while every op reads one symbol
 
 **The rule that matters: delay.** A factor from bar `t`'s close is known after
 bar `t`; trading on it at `t` is look-ahead. Every helper delays by default or
-takes the delay as a parameter (`crates/barq/tests/factor_path.rs`).
+takes the delay as a parameter (`crates/phasor/tests/factor_path.rs`).
 
 ### 6.1 `SignalSweep` (Rust)
 
-`barq::sweep::SignalSweep::from_factor((name, &Matrix), symbols, cases, delay, rule)`:
+`phasor::sweep::SignalSweep::from_factor((name, &Matrix), symbols, cases, delay, rule)`:
 `rule(factor[row - delay, symbol], &params) -> (entry, exit)` for every case ×
 symbol; first `delay` rows and non-finite scores emit nothing; columns labelled
 `factor`/`case` (repeat) × `symbol` (tile). `args(&swept_close)` returns a
-ready `FromSignals`. Example: `crates/barq/examples/factor_sweep.rs`.
+ready `FromSignals`. Example: `crates/phasor/examples/factor_sweep.rs`.
 
-### 6.2 barq-signals
+### 6.2 phasor-signals
 
 Column-major `&[bool]` utilities: `clean_enex` (strict alternation), `generate_exits`,
 `exit_after`, `exit_on`, `generate_alternating`, ranks (`signal_rank`,
@@ -415,10 +415,10 @@ Column-major `&[bool]` utilities: `clean_enex` (strict alternation), `generate_e
 ### 6.3 Python function strategies
 
 ```python
-@barq.strategy
+@phasor.strategy
 def ma_cross(data, fast, slow):
-    f = barq.factors(data, fast=f"Mean($close, {fast})", slow=f"Mean($close, {slow})")
-    return barq.crossed_above(f["fast"], f["slow"]), barq.crossed_above(f["slow"], f["fast"])
+    f = phasor.factors(data, fast=f"Mean($close, {fast})", slow=f"Mean($close, {slow})")
+    return phasor.crossed_above(f["fast"], f["slow"]), phasor.crossed_above(f["slow"], f["fast"])
 
 pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 ```
@@ -430,15 +430,15 @@ calls the function per parameter set, delays, concatenates columns
 
 ### 6.4 Indicators
 
-`barq-indicators`: `ma mstd bbands rsi stoch macd true_range/atr obv` over
+`phasor-indicators`: `ma mstd bbands rsi stoch macd true_range/atr obv` over
 parameter grids with the §3.1 layout (`column_of = comb * n_input + input_col`)
 and shared-intermediate caches. Rust only, single-threaded.
 
 ---
 
-## 7. Execution kernel: barq-exec
+## 7. Execution kernel: phasor-exec
 
-`execute_order(state, order, reject_draw)` in `crates/barq-exec/src/kernel.rs`
+`execute_order(state, order, reject_draw)` in `crates/phasor-exec/src/kernel.rs`
 executes one order against one account at one bar. Both loops call it, and phase 2 will.
 
 ### 7.1 State and request
@@ -494,14 +494,14 @@ ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition
 MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`.
 `raise_reject` turns a rejection into an error. `reject_prob` takes a
 caller-supplied draw. Both loops compute it from `(seed, row, col)` with
-SplitMix64 (`crates/barq-sim/src/random.rs`), only when the probability is
+SplitMix64 (`crates/phasor-sim/src/random.rs`), only when the probability is
 non-zero, so it does not depend on the thread count or the grouping.
 `cash_limit` (not in the reference, not in the log schema) caps the cash a buy
 may spend, applied before `percent`; sells and shorts are unaffected.
 
 ---
 
-## 8. Simulation loops: barq-sim
+## 8. Simulation loops: phasor-sim
 
 Two loops (orders, signals), each plain / logged / serial / parallel.
 
@@ -544,7 +544,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 
 ### 8.5 Cash flows outside fills
 
-Both loops take `cash_deposits`, `cash_dividends` and `cash_earnings` (`crates/barq-sim/src/cash.rs`).
+Both loops take `cash_deposits`, `cash_dividends` and `cash_earnings` (`crates/phasor-sim/src/cash.rs`).
 The defaults are a scalar zero, detected once per group, so a run without them
 does no extra work per bar.
 
@@ -557,11 +557,11 @@ does no extra work per bar.
 - A deposit is in the bar's valuation, so a target-sized order on the same bar invests it.
 - A negative amount is capped at `max(free_cash, 0)`, so cash never goes below zero; the amount actually applied is what is recorded.
 - `NaN` means no flow; `±inf` is an error.
-- vectorbt 1.1.0 has no counterpart, so there is no fixture. `crates/barq-analysis/tests/cash_flows.rs` checks hand-calculated accounts, checks that every logged order's cash and free cash equal the balances rebuilt from records (§10.2), ungrouped and shared, and checks thread invariance.
+- vectorbt 1.1.0 has no counterpart, so there is no fixture. `crates/phasor-analysis/tests/cash_flows.rs` checks hand-calculated accounts, checks that every logged order's cash and free cash equal the balances rebuilt from records (§10.2), ungrouped and shared, and checks thread invariance.
 
 ---
 
-## 9. Records: barq-records
+## 9. Records: phasor-records
 
 The contract between simulation and analysis, and between tiers. All struct-of-arrays.
 
@@ -573,7 +573,7 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 | `LogRecords` | 37: before-state, `req_*`, `new_*`, `res_*`, `order_id` | one order considered |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
-| `RangeRecords` | start / end / status | barq-signals ranges |
+| `RangeRecords` | start / end / status | phasor-signals ranges |
 | `CashRecords` | `col, idx, amount, kind` | one cash flow that was not a fill (§8.5) |
 
 `CashRecords` travel inside `OrderRecords` as its `cash` field, so sinks
@@ -625,7 +625,7 @@ at the last close; input must be sorted.
 
 ---
 
-## 10. Analysis: barq-analysis
+## 10. Analysis: phasor-analysis
 
 ### 10.1 `Portfolio`
 
@@ -663,7 +663,7 @@ Titles and order match vectorbt's `Portfolio.stats()`, pinned row by row (§14.3
 
 ### 10.5 Aggregating sweeps
 
-- `traded_only(values)` masks accounts that never traded. **Pitfall:** zero volatility can give `+inf` Sharpe, which a naive argmax picks (`crates/barq/tests/sweep.rs`).
+- `traded_only(values)` masks accounts that never traded. **Pitfall:** zero volatility can give `+inf` Sharpe, which a naive argmax picks (`crates/phasor/tests/sweep.rs`).
 - `group_by(columns, level, values, Reduce::…)` reduces per label; `best_column` names the winner (`window=20, symbol=BTC`).
 
 ---
@@ -674,10 +674,10 @@ Titles and order match vectorbt's `Portfolio.stats()`, pinned row by row (§14.3
 
 | Where | Mechanism | Unit |
 |---|---|---|
-| barq-sim `simulate_into_parallel` | `std::thread::scope`, contiguous chunks | account group |
-| barq-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | one symbol through the whole graph |
-| barq-expr Polars backend | Polars pool | lazy frames |
-| barq-py `lib.rs`, `expr.rs`, `data.rs` | `py.detach` (GIL released) | — |
+| phasor-sim `simulate_into_parallel` | `std::thread::scope`, contiguous chunks | account group |
+| phasor-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | one symbol through the whole graph |
+| phasor-expr Polars backend | Polars pool | lazy frames |
+| phasor-py `lib.rs`, `expr.rs`, `data.rs` | `py.detach` (GIL released) | — |
 
 Everything else is single-threaded.
 
@@ -690,7 +690,7 @@ Everything else is single-threaded.
 - Serial and threaded output are bit-identical (tested); the lowest failing chunk's error wins.
 - Scoped threads, not a pool: they force `Sync` inputs and column-local state; tasks are 10⁴–10⁶ iterations, so scheduling cost is noise.
 
-`cargo run --release --example scaling -p barq-sim` (20,000 × 256, 4-core Xeon):
+`cargo run --release --example scaling -p phasor-sim` (20,000 × 256, 4-core Xeon):
 
 | Workload | 1 thread | 4 threads | Speedup |
 |---|---:|---:|---:|
@@ -720,12 +720,12 @@ an engine field.
 
 ---
 
-## 12. Python layer: barq-py
+## 12. Python layer: phasor-py
 
 ### 12.1 Packaging
 
-One wheel: Rust extension `barq._barq` (PyO3 0.29, `abi3-py39`, maturin) + package
-`crates/barq-py/python/barq/`. Extras: `data` (pyarrow), `test` (pytest, vectorbt 1.1.0).
+One wheel: Rust extension `phasor._phasor` (PyO3 0.29, `abi3-py39`, maturin) + package
+`crates/phasor-py/python/phasor/`. Extras: `data` (pyarrow), `test` (pytest, vectorbt 1.1.0).
 
 ### 12.2 Arrays cross without copies — and must be Fortran-ordered
 
@@ -737,7 +737,7 @@ are never written. 1-D arrays are ambiguous, so each call site states
 
 ### 12.3 Simulation entry points
 
-`barq.from_signals(close, entries, exits, *, …)` and `barq.from_orders(close, *, size, …)`
+`phasor.from_signals(close, entries, exits, *, …)` and `phasor.from_orders(close, *, size, …)`
 mirror the Rust structs: every parameter is scalar, per-column 1-D or `(T, C)`;
 `cash_sharing` / `group_lens`; `call_seq` in `"default" | "auto"`; `column_map`
 (prices `[T, S]`, signals `[T, C]`, `Portfolio.price_nbytes` reports retained
@@ -748,26 +748,26 @@ returns what was applied.
 
 ### 12.4 Other bindings
 
-`barq.FactorSet` (`compile`, `evaluate`, `required_fields`, `uses_future`),
-`barq.Expression`, `alpha158()`, `alpha360()` (native backend only);
-`crossed_above`, `factors`, `@barq.strategy`; `barq.data` (decoders get
+`phasor.FactorSet` (`compile`, `evaluate`, `required_fields`, `uses_future`),
+`phasor.Expression`, `alpha158()`, `alpha360()` (native backend only);
+`crossed_above`, `factors`, `@phasor.strategy`; `phasor.data` (decoders get
 `pyarrow.RecordBatch` via the Arrow C Data Interface — `arrow.rs`, the only
-`unsafe`); `InstrumentId`, `BarType`; `barq.validation` (pure NumPy: `rolling`, `expanding`, `purged_kfold` with purge and embargo, `walk_forward` that selects on train and reports the chosen key's test score).
+`unsafe`); `InstrumentId`, `BarType`; `phasor.validation` (pure NumPy: `rolling`, `expanding`, `purged_kfold` with purge and embargo, `walk_forward` that selects on train and reports the chosen key's test score).
 
-### 12.5 `barq.Portfolio` and the GIL
+### 12.5 `phasor.Portfolio` and the GIL
 
-- Owns records (sorted once for shared groups), close at source width, column map, groups, scoring, and a `barq_analysis::Cache` that every method's borrowing Rust `Portfolio` reads and fills (`Portfolio::from_borrowed`), so a value curve derived for one call serves the next; `clear_cache()` releases it.
+- Owns records (sorted once for shared groups), close at source width, column map, groups, scoring, and a `phasor_analysis::Cache` that every method's borrowing Rust `Portfolio` reads and fills (`Portfolio::from_borrowed`), so a value curve derived for one call serves the next; `clear_cache()` releases it.
 - Records come back as dicts of NumPy arrays (`orders()`, `trades()`, `logs()`, `reason_counts(col)`).
 - **GIL**: factor evaluation, data loading, `from_signals` / `from_orders` and every `Portfolio` derivation release it (`py.detach`); only the NumPy conversions hold it.
-- Not exposed: rolling metrics, drawdown records, indicators, barq-signals, `CallSeq::Explicit`, Polars.
+- Not exposed: rolling metrics, drawdown records, indicators, phasor-signals, `CallSeq::Explicit`, Polars.
 
 ---
 
-## 13. Research layer: research/barq_lab
+## 13. Research layer: research/phasor_lab
 
 ![Pre-registered protocol: an LLM proposes, a human reviews, a contract check approves, then one in-sample run, at most three out-of-sample batches 90 days apart, and forward shadow tracking; every step appends to a hash-chained ledger; the LLM never sees results](img/en/research.svg)
 
-A separate package (`barq-lab`). The model writes hypotheses and specs; a fixed
+A separate package (`phasor-lab`). The model writes hypotheses and specs; a fixed
 protocol decides. The model never sees results, so it cannot fit the data; a
 healthy pipeline mostly rejects.
 
@@ -788,11 +788,11 @@ compiles, not NaN-dominated, **prefix-consistent** = no look-ahead, smoke run) �
 z < −2) → `report`. `calibrate` runs negative controls, including a deliberate
 future leak that must be rejected.
 
-### 13.3 The harness and its use of barq
+### 13.3 The harness and its use of phasor
 
 `types/factor_ts/harness.py`: `FactorSet.compile`, reject `uses_future`, quantized
 target weights decided at `t`, executed at `t + 1`, then **one**
-`barq.from_orders(..., size_type="targetpercent", cash_sharing=True, call_seq="auto", column_map=…, threads=4)`
+`phasor.from_orders(..., size_type="targetpercent", cash_sharing=True, call_seq="auto", column_map=…, threads=4)`
 over every member × cost multiplier (0×, 1×, 2×). Gate: t-stat above the
 Bonferroni bound `Φ⁻¹(1 − α/2N)`, t ≤ 8 (else suspected look-ahead), positive
 Sharpe at 2× costs, consistency across members and assets.
@@ -813,33 +813,33 @@ Sharpe at 2× costs, consistency across members and assets.
 
 | Test | Catches |
 |---|---|
-| `barq-exec/tests/parity.rs` | one kernel call → names the broken cascade stage |
-| `barq-exec/tests/parity_sequence.rs` | chained calls, own outputs fed forward → state threading, residue |
-| `barq-analysis/tests/parity_analysis.rs` | orders → value → metrics end to end (cannot localize) |
+| `phasor-exec/tests/parity.rs` | one kernel call → names the broken cascade stage |
+| `phasor-exec/tests/parity_sequence.rs` | chained calls, own outputs fed forward → state threading, residue |
+| `phasor-analysis/tests/parity_analysis.rs` | orders → value → metrics end to end (cannot localize) |
 
 ### 14.3 Parity tests by layer
 
 | Test | Fixture (rows) | Tolerance |
 |---|---|---|
-| `barq-exec/tests/parity.rs` | `execute_order.tsv` (474) | `agree` |
-| `barq-exec/tests/parity_sequence.rs` | `order_sequence.tsv` (1,504 steps) | `agree` |
-| `barq-sim/tests/parity_from_orders.rs` | `from_orders.tsv` (290) | `agree`, field by field |
-| `barq-sim/tests/parity_from_signals.rs` | `from_signals.tsv` (181) | `agree` |
-| `barq-sim/tests/parity_signals.rs` | `signals.tsv` (5,088, exhaustive) | `is_close` |
-| `barq-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv` (48) | 1e-9 rel |
-| `barq-records/tests/parity_trades.rs` | `trades.tsv` (267) | `is_close`, ints exact |
-| `barq-records/tests/parity_drawdowns.rs` | `drawdowns.tsv` (998) | 1e-12 rel |
-| `barq-records/tests/parity_mapped.rs` | `mapped.tsv` (28,367) | 1e-12 rel |
-| `barq-generic/tests/parity_generic.rs` | `generic.tsv` (1,650) | `is_close` |
-| `barq-indicators/tests/parity_indicators.rs` | `indicators.tsv` (480) | `is_close`; sweeps bit-identical |
-| `barq-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv` (5,782) | exact / 1e-12 |
-| `barq-analysis/tests/parity_analysis.rs` | `analysis.tsv` (37) | `is_close` |
-| `barq-analysis/tests/parity_metrics.rs` | `metrics.tsv` (2,047) | 1e-9 rel |
-| `barq-analysis/tests/parity_stats.rs` | `stats.tsv` (72) | 1e-9 rel; titles exact |
-| `barq-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv` (240), `qlib_alpha360.tsv` (64) | 1e-6 (1e-4 `CORR*/CORD*`); both backends |
+| `phasor-exec/tests/parity.rs` | `execute_order.tsv` (474) | `agree` |
+| `phasor-exec/tests/parity_sequence.rs` | `order_sequence.tsv` (1,504 steps) | `agree` |
+| `phasor-sim/tests/parity_from_orders.rs` | `from_orders.tsv` (290) | `agree`, field by field |
+| `phasor-sim/tests/parity_from_signals.rs` | `from_signals.tsv` (181) | `agree` |
+| `phasor-sim/tests/parity_signals.rs` | `signals.tsv` (5,088, exhaustive) | `is_close` |
+| `phasor-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv` (48) | 1e-9 rel |
+| `phasor-records/tests/parity_trades.rs` | `trades.tsv` (267) | `is_close`, ints exact |
+| `phasor-records/tests/parity_drawdowns.rs` | `drawdowns.tsv` (998) | 1e-12 rel |
+| `phasor-records/tests/parity_mapped.rs` | `mapped.tsv` (28,367) | 1e-12 rel |
+| `phasor-generic/tests/parity_generic.rs` | `generic.tsv` (1,650) | `is_close` |
+| `phasor-indicators/tests/parity_indicators.rs` | `indicators.tsv` (480) | `is_close`; sweeps bit-identical |
+| `phasor-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv` (5,782) | exact / 1e-12 |
+| `phasor-analysis/tests/parity_analysis.rs` | `analysis.tsv` (37) | `is_close` |
+| `phasor-analysis/tests/parity_metrics.rs` | `metrics.tsv` (2,047) | 1e-9 rel |
+| `phasor-analysis/tests/parity_stats.rs` | `stats.tsv` (72) | 1e-9 rel; titles exact |
+| `phasor-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv` (240), `qlib_alpha360.tsv` (64) | 1e-6 (1e-4 `CORR*/CORD*`); both backends |
 
-Structural tests: `crates/barq/tests/{sweep,factor_sweep,factor_path}.rs`,
-`crates/barq-analysis/tests/shared_accounts.rs`, barq-expr unit tests (§5.5).
+Structural tests: `crates/phasor/tests/{sweep,factor_sweep,factor_path}.rs`,
+`crates/phasor-analysis/tests/shared_accounts.rs`, phasor-expr unit tests (§5.5).
 
 ### 14.4 Mutation testing
 
@@ -852,12 +852,12 @@ sequence harness catches removing both.
 
 ### 14.5 Python tests
 
-`crates/barq-py/tests/`: `test_bindings.py` (differential against live vectorbt +
+`crates/phasor-py/tests/`: `test_bindings.py` (differential against live vectorbt +
 structural: thread determinism, C-order refusal, no writes to borrowed arrays),
 `test_shared_accounts.py` (48 committed cases, also on 3 threads), plus
 `test_column_map`, `test_data`, `test_examples`, `test_expressions`,
 `test_strategy`. vectorbt-dependent tests skip without it; install
-`crates/barq-py[test]` to run them.
+`crates/phasor-py[test]` to run them.
 
 ### 14.6 Regenerating fixtures
 
@@ -878,7 +878,7 @@ downloads). Read the diff afterwards; see `tests/parity/README.md`.
 ### 15.1 Execution loop against vectorbt
 
 ```bash
-cargo run --release --example bench -p barq-sim      # → benchmarks/results/barq.tsv
+cargo run --release --example bench -p phasor-sim      # → benchmarks/results/phasor.tsv
 .venv-parity/bin/python benchmarks/bench_vectorbt.py  # → benchmarks/results/vectorbt.tsv
 python benchmarks/compare.py [--check-baseline]
 ```
@@ -893,22 +893,22 @@ python benchmarks/compare.py [--check-baseline]
 
 | Comparison (4-core Xeon 2.1 GHz, 3 sittings) | Median range |
 |---|---|
-| barq vs vectorbt Numba | 2.6×–3.3× |
-| barq vs vectorbt Rust | 3.5×–4.9× |
-| barq 4 threads vs vectorbt Numba | 9.7×–12.1× |
+| phasor vs vectorbt Numba | 2.6×–3.3× |
+| phasor vs vectorbt Rust | 3.5×–4.9× |
+| phasor 4 threads vs vectorbt Numba | 9.7×–12.1× |
 | vectorbt Rust vs vectorbt Numba | 0.74×–0.82× |
 
-Ranges, because the Numba loop loses more to a busy machine than barq does.
+Ranges, because the Numba loop loses more to a busy machine than phasor does.
 
 ### 15.2 Other performance tools
 
 | Command | Measures |
 |---|---|
-| `cargo run --release --example bench -p barq-sim` | `from_orders` and `from_signals` workloads for the regression gate |
+| `cargo run --release --example bench -p phasor-sim` | `from_orders` and `from_signals` workloads for the regression gate |
 | `uv run python benchmarks/bench_python.py` | the Python layer: signals, sweep wrapper, `Portfolio` reads |
-| `cargo run --release --example scaling -p barq-sim` | thread scaling (§11.2) |
-| `cargo run --release --example scale -p barq-expr -- <rows> <cols> [ops\|sets]` | per-operator, Alpha158 and Alpha360 wall-clock with peak RSS |
-| `cargo bench -p barq-expr --features polars` | native vs Polars (§5.6) |
+| `cargo run --release --example scaling -p phasor-sim` | thread scaling (§11.2) |
+| `cargo run --release --example scale -p phasor-expr -- <rows> <cols> [ops\|sets]` | per-operator, Alpha158 and Alpha360 wall-clock with peak RSS |
+| `cargo bench -p phasor-expr --features polars` | native vs Polars (§5.6) |
 
 ### 15.3 Factor engine history
 
@@ -930,8 +930,8 @@ Ranges, because the Numba loop loses more to a busy machine than barq does.
 |---|---|
 | `mise.toml` | Rust 1.96.0, Python 3.14.6, uv 0.11.33 |
 | `Cargo.toml` | edition 2024, `rust-version = 1.85`; lints `unsafe_code = deny`, `clippy::float_cmp = deny`; release `lto`, `codegen-units = 1` |
-| Features | `barq-expr/polars`; `barq/data`, `barq/polars` |
-| Python | uv workspace `barq-dev` (editable `barq[data]`), ruff, pyright |
+| Features | `phasor-expr/polars`; `phasor/data`, `phasor/polars` |
+| Python | uv workspace `phasor-dev` (editable `phasor[data]`), ruff, pyright |
 
 ### 16.2 Commands
 
@@ -939,9 +939,9 @@ Ranges, because the Numba loop loses more to a busy machine than barq does.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
-cargo test -p barq-expr --features polars
-uv sync                                   # build + install barq into .venv
-uv run --with pytest python -m pytest crates/barq-py/tests -q
+cargo test -p phasor-expr --features polars
+uv sync                                   # build + install phasor into .venv
+uv run --with pytest python -m pytest crates/phasor-py/tests -q
 python docs/img/generate.py               # regenerate the diagrams in this document
 ```
 
@@ -951,12 +951,12 @@ No CI configuration yet.
 
 | Example | Shows |
 |---|---|
-| `examples/sweep.py` | `@barq.strategy` MA cross, 7 params × 4 symbols on 4 threads |
+| `examples/sweep.py` | `@phasor.strategy` MA cross, 7 params × 4 symbols on 4 threads |
 | `examples/portfolio.py` | shared-cash rebalancing; per-parameter shared accounts |
 | `examples/multi_data.py` | bars + funding + news, as-of / windowed alignment, `column_map` |
 | `examples/crypto.py` | MA sweep on Binance klines with a custom decoder |
 | `examples/fetch.py`, `binance.py`, `download_binance_vision.py` | example-only downloaders |
-| `crates/barq/examples/factor_sweep.rs` | Rust: factor → `SignalSweep` → `from_signals` |
+| `crates/phasor/examples/factor_sweep.rs` | Rust: factor → `SignalSweep` → `from_signals` |
 
 ---
 
@@ -970,7 +970,7 @@ Design target; nothing exists yet.
 |---|---|
 | Compatibility | source-level: change imports, keep names and signatures, no linking (Appendix A) |
 | Target | NautilusTrader **v2** (`on_quote`, `on_trade`, `on_book*`, split `on_*_event`, `publish_message`, `BarType` enum) |
-| Shape | struct with `core: StrategyCore` + user state, `barq_strategy!` macro, `DataActor` with `on_start` / `on_bar` |
+| Shape | struct with `core: StrategyCore` + user state, `phasor_strategy!` macro, `DataActor` with `on_start` / `on_bar` |
 | Minimum surface | `Strategy::new`, `cache.instrument()`, `order_factory.market()`, `submit_order`, `close_all_positions`, `portfolio.is_net_*`, `subscribe_bars`, indicators, `on_start/on_bar/on_stop` |
 | Sweep API | `ParamGrid::new().sweep(…).per_instrument([...])`; `Portfolio::from_strategy::<S>(&data, grid).run()` returns the same `Portfolio` |
 | Bar matching | L1 book; each bar → 4 ticks O → H → L → C (nearer extreme first) |
@@ -997,7 +997,7 @@ None affects correctness of results.
 |---|---|
 | `CallSeq::Explicit` not exposed to Python | §12.3 |
 | `Symbol` / `Venue` not interned despite a module comment | §3.6 |
-| stale comments: barq-analysis says no cash sharing; `from_orders.rs` justifies scoped threads by a missing mirror | crate docs |
+| stale comments: phasor-analysis says no cash sharing; `from_orders.rs` justifies scoped threads by a missing mirror | crate docs |
 | `propose.py` cites `tests/test_propose.py`; the check is `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |
 | the two Qlib fixtures used different Qlib/NumPy/pandas versions | fixture headers |
 
@@ -1005,7 +1005,7 @@ None affects correctness of results.
 
 ## Appendix A. Licensing and provenance
 
-barq is Apache-2.0. Both references are specifications and test oracles; **no
+phasor is Apache-2.0. Both references are specifications and test oracles; **no
 code is copied**.
 
 | Reference | Licence | Consequence |
@@ -1038,17 +1038,17 @@ appears only in the optional `test` extra.
 
 | Topic | Files | Section |
 |---|---|---|
-| matrix, broadcasting, labels, tolerances, errors | `crates/barq-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
-| enums, ids, bars, fixed point | `crates/barq-model/src/{enums,ids,bar,types}.rs` | §3.6 |
-| data loading and alignment | `crates/barq-data/src/lib.rs`, `crates/barq-py/python/barq/data.py` | §4 |
-| expressions | `crates/barq-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
-| signals, sweeps, indicators | `crates/barq/src/sweep.rs`, `crates/barq-signals/src`, `crates/barq-indicators/src`, `crates/barq-py/python/barq/strategy.py` | §6 |
-| execution kernel | `crates/barq-exec/src/{types,kernel}.rs` | §7 |
-| simulation | `crates/barq-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
-| records | `crates/barq-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
-| analysis | `crates/barq-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python bindings | `crates/barq-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/barq-py/python/barq/` | §12 |
-| research protocol | `research/barq_lab/` | §13 |
+| matrix, broadcasting, labels, tolerances, errors | `crates/phasor-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
+| enums, ids, bars, fixed point | `crates/phasor-model/src/{enums,ids,bar,types}.rs` | §3.6 |
+| data loading and alignment | `crates/phasor-data/src/lib.rs`, `crates/phasor-py/python/phasor/data.py` | §4 |
+| expressions | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
+| signals, sweeps, indicators | `crates/phasor/src/sweep.rs`, `crates/phasor-signals/src`, `crates/phasor-indicators/src`, `crates/phasor-py/python/phasor/strategy.py` | §6 |
+| execution kernel | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
+| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
+| records | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
+| analysis | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
+| Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` | §12 |
+| research protocol | `research/phasor_lab/` | §13 |
 | parity harness | `tests/parity/`, `tests/fixtures/`, `crates/*/tests/` | §14 |
-| benchmarks | `benchmarks/`, `crates/barq-sim/examples/{bench,scaling}.rs`, `crates/barq-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
+| benchmarks | `benchmarks/`, `crates/phasor-sim/examples/{bench,scaling}.rs`, `crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
 | diagrams | `docs/img/generate.py` → `docs/img/{en,zh}/*.svg` | — |

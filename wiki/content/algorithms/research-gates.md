@@ -6,10 +6,10 @@ parent: research-protocol
 related: [overfitting-stats, hash-chain-ledger, research-harness, factor-graph]
 tags: [research, statistics, multiple-testing]
 sources:
-  - research/barq_lab/protocol/policy.py:64-68
-  - research/barq_lab/types/factor_ts/__init__.py:96-136
-  - research/barq_lab/types/factor_ts/spec.py:212-249
-  - research/barq_lab/types/factor_ts/calibration.py
+  - research/phasor_lab/protocol/policy.py:64-68
+  - research/phasor_lab/types/factor_ts/__init__.py:96-136
+  - research/phasor_lab/types/factor_ts/spec.py:212-249
+  - research/phasor_lab/types/factor_ts/calibration.py
 order: 103
 ---
 
@@ -19,11 +19,11 @@ order: 103
 
 ## 位置
 
-- `research/barq_lab/protocol/policy.py:64-68`（`t_required`）
-- `research/barq_lab/types/factor_ts/__init__.py:115-136`（样本内 gate 与 OOS gate）
-- `research/barq_lab/types/factor_ts/__init__.py:96-109`（跨资产）
-- `research/barq_lab/types/factor_ts/spec.py:212-249`（`common_subtree`）
-- `research/barq_lab/types/factor_ts/calibration.py`（负对照）
+- `research/phasor_lab/protocol/policy.py:64-68`（`t_required`）
+- `research/phasor_lab/types/factor_ts/__init__.py:115-136`（样本内 gate 与 OOS gate）
+- `research/phasor_lab/types/factor_ts/__init__.py:96-109`（跨资产）
+- `research/phasor_lab/types/factor_ts/spec.py:212-249`（`common_subtree`）
+- `research/phasor_lab/types/factor_ts/calibration.py`（负对照）
 
 ## 门槛与多重比较
 
@@ -50,7 +50,7 @@ forward：z = (mean(daily_fwd) − daily_mean_IS) / (daily_std_IS / √n_fwd)；
 
 ## 相关
 
-- [研究协议 barq_lab](../tooling/research-protocol.md)：门槛在状态机的 `run`、`oos`、`forward` 三处判定。
+- [研究协议 phasor_lab](../tooling/research-protocol.md)：门槛在状态机的 `run`、`oos`、`forward` 三处判定。
 - [过拟合检验：PSR、DSR、PBO](../algorithms/overfitting-stats.md)：DSR 与 PBO 从另一面处理"试了很多次才找到一个好的"。
 - [哈希链账本](../algorithms/hash-chain-ledger.md)：N 和 M 从账本里数出来，所以失败的运行也抬高下一次的门槛。
 - [评估框架与合同检查](../algorithms/research-harness.md)：t、sharpe、成员与跨资产比例在这里算出。

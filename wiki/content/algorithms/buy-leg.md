@@ -2,12 +2,12 @@
 title: buy：买入、平空与 lock_cash 预算
 kind: algorithm
 summary: 先定现金预算，再按费用反解可买股数；一笔买单可以平空并开多，lock_cash 决定预算能否动用空头保证金。
-parent: barq-exec
+parent: phasor-exec
 related: [short-margin, sell-leg, size-cascade, float-tolerance, trade-views, status-info]
 tags: [execution, buying, margin]
 sources:
-  - crates/barq-exec/src/kernel.rs:41-221
-  - crates/barq-sim/src/from_orders.rs:520-522
+  - crates/phasor-exec/src/kernel.rs:41-221
+  - crates/phasor-sim/src/from_orders.rs:520-522
 order: 803
 ---
 
@@ -17,12 +17,12 @@ order: 803
 
 ## 位置
 
-- `crates/barq-exec/src/kernel.rs:48-221`：`buy`
-- `crates/barq-exec/src/kernel.rs:58-91`：现金预算与 `lock_cash`
-- `crates/barq-exec/src/kernel.rs:72-79`：不够平空时的求解
-- `crates/barq-exec/src/kernel.rs:144`：买得起判断
-- `crates/barq-exec/src/kernel.rs:193`、`crates/barq-exec/src/kernel.rs:212-219`：一笔成交里平空
-- `crates/barq-sim/src/from_orders.rs:520-522`：模拟循环只 `push_order` 一次
+- `crates/phasor-exec/src/kernel.rs:48-221`：`buy`
+- `crates/phasor-exec/src/kernel.rs:58-91`：现金预算与 `lock_cash`
+- `crates/phasor-exec/src/kernel.rs:72-79`：不够平空时的求解
+- `crates/phasor-exec/src/kernel.rs:144`：买得起判断
+- `crates/phasor-exec/src/kernel.rs:193`、`crates/phasor-exec/src/kernel.rs:212-219`：一笔成交里平空
+- `crates/phasor-sim/src/from_orders.rs:520-522`：模拟循环只 `push_order` 一次
 
 ## 伪代码
 
@@ -39,7 +39,7 @@ cash_limit =
                     不够平     → 解出最多能平多少（见下）
                     恰好够     → cash
   else: cash
-cash_limit = min(cash_limit, cash, order.cash_limit)        # cash_limit 是 barq 新增，参考实现没有
+cash_limit = min(cash_limit, cash, order.cash_limit)        # cash_limit 是 phasor 新增，参考实现没有
 if percent 给定: cash_limit = min(cash_limit, percent × cash_limit)
 
 LongOnly/Both:  cash_limit == 0 → Rejected·NoCashLong
@@ -81,7 +81,7 @@ position < 0（在平空）：
 
 ## 平空就在这一笔买单里
 
-**平空就在这一笔买单里。** 同一列只有一个带符号的持仓，`new_position = add(position, final_size)`（`kernel.rs:193`）。函数只返回一个 `OrderResult::filled(..., Buy)`（`kernel.rs:212-219`）；模拟循环对它 `push_order` 一次（`crates/barq-sim/src/from_orders.rs:520-522`）。`short_size` 只用来减 `debt`，不再执行第二张订单。
+**平空就在这一笔买单里。** 同一列只有一个带符号的持仓，`new_position = add(position, final_size)`（`kernel.rs:193`）。函数只返回一个 `OrderResult::filled(..., Buy)`（`kernel.rs:212-219`）；模拟循环对它 `push_order` 一次（`crates/phasor-sim/src/from_orders.rs:520-522`）。`short_size` 只用来减 `debt`，不再执行第二张订单。
 
 ```mermaid
 flowchart TD
@@ -99,7 +99,7 @@ flowchart TD
   class H hot;
 ```
 
-持仓 −5、买得起 8 股：订单记录是买 8，持仓变成 3，`short_size = 5`。买 3 股则持仓变成 −2，`short_size = 3`，没有新多头。`ShortOnly` 在更前面就把数量截成不超过当前空头（`kernel.rs:113-117`），所以走不到"买穿"。统计上要把这一笔拆成"已平的空头"和"新多头的开仓"，是[三种交易视图](../algorithms/trade-views.md)里的 `exit_trades`（`crates/barq-records/src/trades.rs:580-606`）：它立刻写下已平的那一段，剩下的股数要等以后的卖出或收盘标记才另成一条记录。
+持仓 −5、买得起 8 股：订单记录是买 8，持仓变成 3，`short_size = 5`。买 3 股则持仓变成 −2，`short_size = 3`，没有新多头。`ShortOnly` 在更前面就把数量截成不超过当前空头（`kernel.rs:113-117`），所以走不到"买穿"。统计上要把这一笔拆成"已平的空头"和"新多头的开仓"，是[三种交易视图](../algorithms/trade-views.md)里的 `exit_trades`（`crates/phasor-records/src/trades.rs:580-606`）：它立刻写下已平的那一段，剩下的股数要等以后的卖出或收盘标记才另成一条记录。
 
 ## 费用反解
 
@@ -130,7 +130,7 @@ flowchart TD
   class M base;
 ```
 
-沿用[空头保证金](../concepts/short-margin.md)的账户：现金 100 空 5 股 @10 之后，`cash = 150`、`debt = 50`、`free_cash = 50`，于是 `free_cash + 2·debt = 150`。其中 50 用来平空，剩下 100 可以开多。单列、没有其他空头时，`free_cash + 2·debt` 等于当时的 `cash`。同组里别的列也有空头时，组现金里还含着它们的 `2·debt`，这一列只加回自己的一份（共享方式见 [barq-sim](../crates/barq-sim.md)）。
+沿用[空头保证金](../concepts/short-margin.md)的账户：现金 100 空 5 股 @10 之后，`cash = 150`、`debt = 50`、`free_cash = 50`，于是 `free_cash + 2·debt = 150`。其中 50 用来平空，剩下 100 可以开多。单列、没有其他空头时，`free_cash + 2·debt` 等于当时的 `cash`。同组里别的列也有空头时，组现金里还含着它们的 `2·debt`，这一列只加回自己的一份（共享方式见 [phasor-sim](../crates/phasor-sim.md)）。
 
 不够平完时（`kernel.rs:72-79`）：设最多能平 `s` 股，花费 `s·p·(1+fees) + fixed`，每平 1 股释放 `2·avg_entry`，于是
 `free_cash + 2·avg_entry·s = s·p·(1+fees) + fixed` → `s = (free_cash − fixed) / (p(1+fees) − 2·avg_entry)`。
@@ -138,7 +138,7 @@ flowchart TD
 
 ## 相关
 
-- [barq-exec：撮合内核](../crates/barq-exec.md)：`buy` 是 `execute_validated` 的两个分支之一。
+- [phasor-exec：撮合内核](../crates/phasor-exec.md)：`buy` 是 `execute_validated` 的两个分支之一。
 - [空头保证金：debt 与 free_cash](../concepts/short-margin.md)：平空释放的 `debt`、`lock_cash` 遵守的预留是在哪里记下的。
 - [sell：卖出与开空](../algorithms/sell-leg.md)：另一个分支；卖穿 0 时开空。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：`percent` 从哪来，为什么只有 `Percent` 会设置它。

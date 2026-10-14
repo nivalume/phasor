@@ -2,27 +2,27 @@
 title: 指标参数网格与共享缓存
 kind: algorithm
 summary: 调用方先展开参数组合，输出列是 comb × n_input + input_col；共享中间量按决定它的参数做键，扫描里只算一次。
-parent: barq-indicators
+parent: phasor-indicators
 related: [column-axis, column-labels, generic-windows, signal-sweep, strategy-sweep]
 tags: [indicators, sweep, cache, columns]
 sources:
-  - crates/barq-indicators/src/sweep.rs
-  - crates/barq-indicators/src/indicators.rs:29-602
+  - crates/phasor-indicators/src/sweep.rs
+  - crates/phasor-indicators/src/indicators.rs:29-602
 order: 501
 ---
 
 # 指标参数网格与共享缓存
 
-[barq-indicators](../crates/barq-indicators.md) 的每个指标函数都收一组已经展开好的参数组合，把所有组合的结果写进同一个矩阵；列的排法与全仓库的[列轴](../concepts/column-axis.md)一致，标签用 [`Columns` 与 `Level`](../concepts/column-labels.md) 生成。
+[phasor-indicators](../crates/phasor-indicators.md) 的每个指标函数都收一组已经展开好的参数组合，把所有组合的结果写进同一个矩阵；列的排法与全仓库的[列轴](../concepts/column-axis.md)一致，标签用 [`Columns` 与 `Level`](../concepts/column-labels.md) 生成。
 
 ## 位置
 
-- `crates/barq-indicators/src/sweep.rs:44`（`combinations`）
-- `crates/barq-indicators/src/sweep.rs:103`（`sweep_columns`）
-- `crates/barq-indicators/src/sweep.rs:135-137`（`column_of`）
-- `crates/barq-indicators/src/indicators.rs:29-133`（`Indicator`、`Cache`、`per_column`、`place`）
-- `crates/barq-indicators/src/indicators.rs:149-169`（`ma`，其余指标的模板）
-- `crates/barq-indicators/src/indicators.rs:237-292`（`bbands`）、`306-353`（`rsi`）、`451-511`（`macd`）
+- `crates/phasor-indicators/src/sweep.rs:44`（`combinations`）
+- `crates/phasor-indicators/src/sweep.rs:103`（`sweep_columns`）
+- `crates/phasor-indicators/src/sweep.rs:135-137`（`column_of`）
+- `crates/phasor-indicators/src/indicators.rs:29-133`（`Indicator`、`Cache`、`per_column`、`place`）
+- `crates/phasor-indicators/src/indicators.rs:149-169`（`ma`，其余指标的模板）
+- `crates/phasor-indicators/src/indicators.rs:237-292`（`bbands`）、`306-353`（`rsi`）、`451-511`（`macd`）
 
 ## 列布局契约
 
@@ -51,7 +51,7 @@ MA、MSTD 和 EWM 背后的窗口核见 [前缀和与 EWM 窗口核](../algorith
 
 ## 相关
 
-- [barq-indicators：技术指标](../crates/barq-indicators.md)：所属 crate，`ddof` 与 RSI 的阅读陷阱。
+- [phasor-indicators：技术指标](../crates/phasor-indicators.md)：所属 crate，`ddof` 与 RSI 的阅读陷阱。
 - [列轴与列主序](../concepts/column-axis.md)：`param_idx × n_symbols + symbol_idx` 这条公式在全仓库的出处。
 - [列标签：Columns、Level 与 group_indices](../concepts/column-labels.md)：`Level::repeat`/`tile` 如何生成扫描的列标签。
 - [前缀和与 EWM 窗口核](../algorithms/generic-windows.md)：`rolling_mean_1d`、`rolling_std_1d`、`ewm_mean_1d` 的数值细节。

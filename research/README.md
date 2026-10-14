@@ -1,6 +1,6 @@
-# barq-lab
+# phasor-lab
 
-`barq-lab` is a pre-registered research protocol for barq factor experiments. The agent writes hypotheses and implementations; a fixed protocol decides the outcome. The LLM never sees a result, so it cannot optimise against the data.
+`phasor-lab` is a pre-registered research protocol for phasor factor experiments. The agent writes hypotheses and implementations; a fixed protocol decides the outcome. The LLM never sees a result, so it cannot optimise against the data.
 
 ```
 propose ─► review/approve ─► run (once, in-sample) ─► gate ─► oos (batched) ─► forward (shadow) ─► report
@@ -9,24 +9,24 @@ propose ─► review/approve ─► run (once, in-sample) ─► gate ─► oo
 
 ## Commands
 
-The ledger repository is `BARQ_LAB_LEDGER`, which defaults to `../barq-ledger` next to this repo. Commands must run in an environment with barq installed, such as `rdagent4barq`.
+The ledger repository is `PHASOR_LAB_LEDGER`, which defaults to `../phasor-ledger` next to this repo. Commands must run in an environment with phasor installed, such as `rdagent4phasor`.
 
 ```bash
 pip install -e research
-barq-lab propose --symbols BTCUSDT --prompt "trend following: established moves persist" --n 6
-barq-lab propose --symbols BTCUSDT --pdf paper.pdf --pages 38-52 --n 6
-barq-lab propose --symbols BTCUSDT --n 6            # no direction: the agent covers factor families
-barq-lab review                                     # edit pending/<id>.yaml by hand if needed
-barq-lab approve <id> [<id> ...]                    # freezes card+spec; `repair <id>` if its check fails
-barq-lab run                                        # every registered spec once, 2021-01..2025-01
-barq-lab oos                                        # batch of current in-sample passes (>= 90 days apart, 3 batches max)
-barq-lab forward                                    # survivors on bars newer than their registration
-barq-lab report
-barq-lab calibrate --symbols BTCUSDT                # negative and positive controls
-barq-lab import-legacy                              # trials made on the same data before the ledger
+phasor-lab propose --symbols BTCUSDT --prompt "trend following: established moves persist" --n 6
+phasor-lab propose --symbols BTCUSDT --pdf paper.pdf --pages 38-52 --n 6
+phasor-lab propose --symbols BTCUSDT --n 6            # no direction: the agent covers factor families
+phasor-lab review                                     # edit pending/<id>.yaml by hand if needed
+phasor-lab approve <id> [<id> ...]                    # freezes card+spec; `repair <id>` if its check fails
+phasor-lab run                                        # every registered spec once, 2021-01..2025-01
+phasor-lab oos                                        # batch of current in-sample passes (>= 90 days apart, 3 batches max)
+phasor-lab forward                                    # survivors on bars newer than their registration
+phasor-lab report
+phasor-lab calibrate --symbols BTCUSDT                # negative and positive controls
+phasor-lab import-legacy                              # trials made on the same data before the ledger
 ```
 
-The LLM is configured with `BARQ_LAB_MODEL`, `BARQ_LAB_API_BASE` and `BARQ_LAB_API_KEY`. If they are not set, it uses `CHAT_MODEL` and `OPENAI_*` from `../RD-Agent/.env`.
+The LLM is configured with `PHASOR_LAB_MODEL`, `PHASOR_LAB_API_BASE` and `PHASOR_LAB_API_KEY`. If they are not set, it uses `CHAT_MODEL` and `OPENAI_*` from `../RD-Agent/.env`.
 
 ## What the protocol enforces
 

@@ -38,7 +38,7 @@ order: 40
 | 按 `available_time` 的 as-of / 窗口对齐 | 防止用到晚发布的数据 | [按时点对齐 align](../algorithms/pit-alignment.md) |
 | Fortran 序零拷贝进 Rust、GIL 释放、`Cache` 跨调用复用 | Python 边界的三个规则 | [Python 边界：F 序与一维的三种含义](../concepts/python-boundary.md)、[PyPortfolio 的跨调用缓存与 GIL](../concepts/portfolio-cache.md) |
 | purged k-fold + embargo、walk-forward 在训练集选参 | 时间序列交叉验证 | [时间序列交叉验证](../algorithms/ts-cross-validation.md) |
-| 哈希链账本 + 预注册 + Bonferroni 门槛 | 模型永远看不到结果 | [哈希链账本](../algorithms/hash-chain-ledger.md)、[研究协议 barq_lab](../tooling/research-protocol.md)、[门槛、多重比较与原创性检查](../algorithms/research-gates.md) |
+| 哈希链账本 + 预注册 + Bonferroni 门槛 | 模型永远看不到结果 | [哈希链账本](../algorithms/hash-chain-ledger.md)、[研究协议 phasor_lab](../tooling/research-protocol.md)、[门槛、多重比较与原创性检查](../algorithms/research-gates.md) |
 | 差分测试：外部环境生成 TSV fixture，`cargo test` 重放 | 没有 Python 也能验证到参考实现 | [差分测试与 fixture](../tooling/parity-testing.md) |
 
 ## 相关

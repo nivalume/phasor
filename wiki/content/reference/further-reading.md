@@ -15,7 +15,7 @@ order: 50
 
 ## 基础层
 
-对应页面：[barq-core](../crates/barq-core.md) · [barq-model](../crates/barq-model.md)
+对应页面：[phasor-core](../crates/phasor-core.md) · [phasor-model](../crates/phasor-model.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -31,7 +31,7 @@ order: 50
 
 ## 撮合内核
 
-对应页面：[barq-exec](../crates/barq-exec.md)
+对应页面：[phasor-exec](../crates/phasor-exec.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -42,11 +42,11 @@ order: 50
 
 ## 模拟循环
 
-对应页面：[barq-sim](../crates/barq-sim.md)
+对应页面：[phasor-sim](../crates/phasor-sim.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
-| vectorbt 文档 `Portfolio.from_signals` 参数说明（`accumulate`、[`upon_*_conflict`](../algorithms/signal-conflicts.md)、`upon_opposite_entry`、[`sl_stop`/`sl_trail`/`tp_stop`](../algorithms/stop-engine.md)、`stop_entry_price`/`stop_exit_price`/`upon_stop_exit`/`upon_stop_update`）；"Grouping / cash sharing / [call_seq](../algorithms/call-seq-auto.md)" 小节 | 文档 / 英 | [barq-sim](../crates/barq-sim.md) 每个枚举的用户视角解释 |
+| vectorbt 文档 `Portfolio.from_signals` 参数说明（`accumulate`、[`upon_*_conflict`](../algorithms/signal-conflicts.md)、`upon_opposite_entry`、[`sl_stop`/`sl_trail`/`tp_stop`](../algorithms/stop-engine.md)、`stop_entry_price`/`stop_exit_price`/`upon_stop_exit`/`upon_stop_update`）；"Grouping / cash sharing / [call_seq](../algorithms/call-seq-auto.md)" 小节 | 文档 / 英 | [phasor-sim](../crates/phasor-sim.md) 每个枚举的用户视角解释 |
 | Steele, Lea & Flood, "Fast Splittable Pseudorandom Number Generators"（OOPSLA 2014，DOI 10.1145/2660193.2660195）：<https://2014.splashcon.org/event/oopsla2014-fast-splittable-pseudorandom-number-generators> | 论文 / 英 | [SplitMix64](../concepts/stateless-rng.md) 的输出函数；为什么它是 64 位双射 |
 | Salmon, Moraes, Dror & Shaw, "Parallel Random Numbers: As Easy as 1, 2, 3"（SC 2011） | 论文 / 英 | "随机数是坐标的函数"（计数器式 RNG）这一思想，`uniform(seed,row,col)` 的理论背景 |
 | Rust 标准库文档 `std::thread::scope`（RFC 3151，Rust 1.63） | 文档 / 英 | [作用域线程](../algorithms/parallel-simulation.md)为什么强制 `Sync` 输入与列本地状态 |
@@ -55,7 +55,7 @@ order: 50
 
 ## 记录
 
-对应页面：[barq-records](../crates/barq-records.md)
+对应页面：[phasor-records](../crates/phasor-records.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -67,7 +67,7 @@ order: 50
 
 ## 分析
 
-对应页面：[barq-analysis](../crates/barq-analysis.md)
+对应页面：[phasor-analysis](../crates/phasor-analysis.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -85,7 +85,7 @@ order: 50
 
 ## 因子引擎
 
-对应页面：[barq-expr](../crates/barq-expr.md)
+对应页面：[phasor-expr](../crates/phasor-expr.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -108,11 +108,11 @@ order: 50
 
 ## 通用算子、指标、信号
 
-对应页面：[barq-generic](../crates/barq-generic.md) · [barq-indicators](../crates/barq-indicators.md) · [barq-signals](../crates/barq-signals.md)
+对应页面：[phasor-generic](../crates/phasor-generic.md) · [phasor-indicators](../crates/phasor-indicators.md) · [phasor-signals](../crates/phasor-signals.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
-| J. Welles Wilder, *New Concepts in Technical Trading Systems*（1978） | 书 / 英 | RSI、TR/ATR 的原始定义，对照 barq 的 Cutler/EMA 变体 |
+| J. Welles Wilder, *New Concepts in Technical Trading Systems*（1978） | 书 / 英 | RSI、TR/ATR 的原始定义，对照 phasor 的 Cutler/EMA 变体 |
 | John Bollinger, *Bollinger on Bollinger Bands*（2001）；Gerald Appel 的 MACD；Joseph Granville 的 OBV | 书 / 英 | 指标定义 |
 | pandas `ewm` 文档；vectorbt `IndicatorFactory` 文档、`signals.accessors` 文档 | 文档 / 英 | [`adjust`/`ignore_na`](../algorithms/generic-windows.md)；[参数网格与列堆叠](../algorithms/indicator-sweep.md)；[`pos_rank`、`partition_ranges`](../algorithms/signal-rank-ranges.md) |
 | Knuth, TAOCP 卷 2 算法 P（Fisher–Yates / Durstenfeld） | 书 / 英 | [`random_n`](../algorithms/random-signals.md) 的部分洗牌 |
@@ -122,7 +122,7 @@ order: 50
 
 ## 数据层
 
-对应页面：[barq-data](../crates/barq-data.md)
+对应页面：[phasor-data](../crates/phasor-data.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -134,7 +134,7 @@ order: 50
 
 ## Python 层与门面
 
-对应页面：[barq-py](../crates/barq-py.md) · [barq](../crates/barq.md)
+对应页面：[phasor-py](../crates/phasor-py.md) · [phasor](../crates/phasor.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -147,7 +147,7 @@ order: 50
 
 ## 研究协议、验证、基准
 
-对应页面：[研究协议 barq_lab](../tooling/research-protocol.md) · [差分测试与 fixture](../tooling/parity-testing.md) · [基准协议](../tooling/benchmarks.md)
+对应页面：[研究协议 phasor_lab](../tooling/research-protocol.md) · [差分测试与 fixture](../tooling/parity-testing.md) · [基准协议](../tooling/benchmarks.md)
 
 | 资料 | 类型 / 语言 | 为什么读 |
 |---|---|---|
@@ -165,7 +165,7 @@ order: 50
 |---|---|---|
 | *The Rust Programming Language*（中译《Rust 程序设计语言》，kaisery.github.io/trpl-zh-cn） | 书 / 英、中 | 所有权、借用、trait、生命周期 |
 | 《Rust 语言圣经》：<https://course.rs> | 书 / 中 | 同上，更口语化；"性能优化"章对读内核有帮助 |
-| Rust 标准库文档：`OnceLock`、`Cow`、`VecDeque`、`partition_point`、`select_nth_unstable_by`、`chunks_mut`、`split_at_mut`、`mem::take` | 文档 / 英 | [记录](../crates/barq-records.md)、[分析](../crates/barq-analysis.md)、[因子引擎](../crates/barq-expr.md)里反复出现 |
+| Rust 标准库文档：`OnceLock`、`Cow`、`VecDeque`、`partition_point`、`select_nth_unstable_by`、`chunks_mut`、`split_at_mut`、`mem::take` | 文档 / 英 | [记录](../crates/phasor-records.md)、[分析](../crates/phasor-analysis.md)、[因子引擎](../crates/phasor-expr.md)里反复出现 |
 | Rust 性能之书 *The Rust Performance Book*（nnethercote） | 书 / 英 | `#[inline(never)]`、寄存器压力、分配 |
 | rayon 文档；`cargo doc --workspace --no-deps --open` | 文档 / 英 | 并行；导航 |
 
@@ -174,4 +174,4 @@ order: 50
 - [练习与自测](../guides/exercises.md)：同样按领域分节，做题卡住时回到这里找对应的资料。
 - [术语表](../reference/glossary.md)：资料里的英文术语（PSR、CSCV、purge、embargo、hash-consing）在这里有一句话的中文定义。
 - [核心算法一览](../guides/algorithm-index.md)：每个算法页面末尾的资料都出自这张总表。
-- [研究协议 barq_lab](../tooling/research-protocol.md)：预注册与多重比较资料的使用者。
+- [研究协议 phasor_lab](../tooling/research-protocol.md)：预注册与多重比较资料的使用者。

@@ -5,7 +5,7 @@ Two offline examples over synthetic BTC/ETH/SOL prices:
 2. Two moving-average parameter sets, each with its own three-symbol account.
 """
 
-import barq
+import phasor
 import numpy as np
 
 
@@ -18,7 +18,7 @@ def main():
     # Targets apply at this bar's close. NaN means no order; zero means exit.
     targets = np.full_like(close, np.nan)
     targets[::20] = 0.30  # 90% invested, leaving room for costs.
-    allocated = barq.from_orders(
+    allocated = phasor.from_orders(
         close,
         targets,
         size_type="targetpercent",
@@ -47,7 +47,7 @@ def main():
         f"trend_{i}": f"Mean($close, {fast}) / Mean($close, {slow}) - 1"
         for i, (fast, slow) in enumerate(pairs)
     }
-    factors = barq.FactorSet.compile(formulas).evaluate({"close": close})
+    factors = phasor.FactorSet.compile(formulas).evaluate({"close": close})
     entries, exits = [], []
     for name in formulas:
         score = factors[name]
@@ -59,7 +59,7 @@ def main():
         exits.append(exit_)
     # Columns: A-BTC, A-ETH, A-SOL, B-BTC, B-ETH, B-SOL.
     # Each parameter set gets its own 100,000, shared only within its group.
-    pf = barq.from_signals(
+    pf = phasor.from_signals(
         close,
         np.concatenate(entries, axis=1),
         np.concatenate(exits, axis=1),

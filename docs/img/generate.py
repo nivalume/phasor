@@ -148,13 +148,13 @@ def pipeline(t):
     s = Svg(1000, 610, t("pipeline_title"))
     x, w = 290, 420
     stages = [
-        ("files", "barq-data", "plain"),
+        ("files", "phasor-data", "plain"),
         ("panel", "BarPanel · OhlcvPanel", "plain"),
-        ("factors", "barq-expr · FactorSet", "accent"),
-        ("signals", "SignalSweep · @barq.strategy", "plain"),
-        ("sim", "barq-sim → barq-exec", "accent"),
-        ("records", "barq-records", "plain"),
-        ("analysis", "barq-analysis · Portfolio", "plain"),
+        ("factors", "phasor-expr · FactorSet", "accent"),
+        ("signals", "SignalSweep · @phasor.strategy", "plain"),
+        ("sim", "phasor-sim → phasor-exec", "accent"),
+        ("records", "phasor-records", "plain"),
+        ("analysis", "phasor-analysis · Portfolio", "plain"),
     ]
     shapes = [
         "CSV · Parquet · catalog",
@@ -186,22 +186,22 @@ def crates(t):
     s = Svg(1000, 470, t("crates_title"))
     W, H = 150, 46
     pos = {
-        "barq-core": (425, 400),
-        "barq-model": (220, 310),
-        "barq-generic": (520, 310),
-        "barq-signals": (760, 310),
-        "barq-exec": (40, 220),
-        "barq-data": (220, 220),
-        "barq-indicators": (620, 220),
-        "barq-expr": (430, 220),
-        "barq-records": (40, 130),
-        "barq-sim": (220, 130),
-        "barq-analysis": (220, 40),
-        "barq": (560, 40),
-        "barq-py": (800, 130),
+        "phasor-core": (425, 400),
+        "phasor-model": (220, 310),
+        "phasor-generic": (520, 310),
+        "phasor-signals": (760, 310),
+        "phasor-exec": (40, 220),
+        "phasor-data": (220, 220),
+        "phasor-indicators": (620, 220),
+        "phasor-expr": (430, 220),
+        "phasor-records": (40, 130),
+        "phasor-sim": (220, 130),
+        "phasor-analysis": (220, 40),
+        "phasor": (560, 40),
+        "phasor-py": (800, 130),
     }
-    tone = {"barq-expr": "accent", "barq-sim": "accent", "barq-exec": "accent", "barq-py": "purple",
-            "barq": "purple", "barq-data": "amber"}
+    tone = {"phasor-expr": "accent", "phasor-sim": "accent", "phasor-exec": "accent", "phasor-py": "purple",
+            "phasor": "purple", "phasor-data": "amber"}
     for name, (x, y) in pos.items():
         s.box(x, y, W, H, name, tone=tone.get(name, "plain"), size=12)
 
@@ -215,11 +215,11 @@ def crates(t):
         s.arrow(ax + W / 2, ay + H, bx + W / 2, by, color=LINE)
 
     for a, b in [
-        ("barq-model", "barq-core"), ("barq-generic", "barq-core"), ("barq-signals", "barq-core"),
-        ("barq-exec", "barq-model"), ("barq-data", "barq-model"), ("barq-expr", "barq-generic"),
-        ("barq-expr", "barq-model"), ("barq-indicators", "barq-generic"),
-        ("barq-records", "barq-exec"), ("barq-sim", "barq-records"), ("barq-sim", "barq-exec"),
-        ("barq-analysis", "barq-sim"),
+        ("phasor-model", "phasor-core"), ("phasor-generic", "phasor-core"), ("phasor-signals", "phasor-core"),
+        ("phasor-exec", "phasor-model"), ("phasor-data", "phasor-model"), ("phasor-expr", "phasor-generic"),
+        ("phasor-expr", "phasor-model"), ("phasor-indicators", "phasor-generic"),
+        ("phasor-records", "phasor-exec"), ("phasor-sim", "phasor-records"), ("phasor-sim", "phasor-exec"),
+        ("phasor-analysis", "phasor-sim"),
     ]:
         edge(a, b)
     s.text(40, 25, t("crates_note"), size=11, color=MUTED, anchor="start")

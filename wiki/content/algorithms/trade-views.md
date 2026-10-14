@@ -2,16 +2,16 @@
 title: 三种交易视图
 kind: algorithm
 summary: entry_trades、exit_trades、positions 用同一个容差 PnL 公式，按不同规则把成交配对成交易，只在 Σ pnl 上一致。
-parent: barq-records
+parent: phasor-records
 related: [excursions, float-tolerance, colmap, metrics, drawdowns, rebuild-chain]
 tags: [trades, pnl, records]
 sources:
-  - crates/barq-records/src/trades.rs:11-19
-  - crates/barq-records/src/trades.rs:78-94
-  - crates/barq-records/src/trades.rs:368-486
-  - crates/barq-records/src/trades.rs:502-628
-  - crates/barq-records/src/trades.rs:639-697
-  - crates/barq-records/tests/parity_trades.rs
+  - crates/phasor-records/src/trades.rs:11-19
+  - crates/phasor-records/src/trades.rs:78-94
+  - crates/phasor-records/src/trades.rs:368-486
+  - crates/phasor-records/src/trades.rs:502-628
+  - crates/phasor-records/src/trades.rs:639-697
+  - crates/phasor-records/tests/parity_trades.rs
 order: 903
 ---
 
@@ -21,11 +21,11 @@ order: 903
 
 ## 位置
 
-- `crates/barq-records/src/trades.rs:78-94`（`trade_stats`，PnL 公式）
-- `crates/barq-records/src/trades.rs:368-486`（`entry_trades`）
-- `crates/barq-records/src/trades.rs:502-628`（`exit_trades`）
-- `crates/barq-records/src/trades.rs:639-697`（`positions`）
-- `crates/barq-records/src/trades.rs:11-19`（三种视图的对比表）
+- `crates/phasor-records/src/trades.rs:78-94`（`trade_stats`，PnL 公式）
+- `crates/phasor-records/src/trades.rs:368-486`（`entry_trades`）
+- `crates/phasor-records/src/trades.rs:502-628`（`exit_trades`）
+- `crates/phasor-records/src/trades.rs:639-697`（`positions`）
+- `crates/phasor-records/src/trades.rs:11-19`（三种视图的对比表）
 
 ## 共用的 PnL 公式
 
@@ -60,7 +60,7 @@ ret = pnl / entry_val
 
 ## 相关
 
-- [barq-records：记录与派生视图](../crates/barq-records.md)：所属 crate；默认视图是 `ExitTrades`、未平仓交易如何计入指标等陷阱。
+- [phasor-records：记录与派生视图](../crates/phasor-records.md)：所属 crate；默认视图是 `ExitTrades`、未平仓交易如何计入指标等陷阱。
 - [MAE / MFE 与 edge ratio](../algorithms/excursions.md)：在这些交易记录上计算持有期间的偏移。
 - [浮点容差与零钉](../concepts/float-tolerance.md)：`add` 让平手往返的 PnL 精确为 0。
 - [ColMap 稳定计数排序与 MappedArray](../algorithms/colmap.md)：`column_ranges` 依赖的按列分组。

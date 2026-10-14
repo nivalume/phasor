@@ -11,4 +11,4 @@ export const CODE_REF: string = import.meta.env.VITE_CODE_REF ?? "cffa4f13f5ff28
 /** Branch used for "edit this page" and for links to non-code repository files. */
 export const CONTENT_REF: string = import.meta.env.VITE_CONTENT_REF ?? "main";
 
-export const SITE_TITLE = "barq 知识库";
+export const SITE_TITLE = "phasor 知识库";

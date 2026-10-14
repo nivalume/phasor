@@ -2,11 +2,11 @@
 title: sell：卖出与开空
 kind: algorithm
 summary: 先算可卖数量的上限（只做多时是持仓，允许做空时看 free_cash 还能空多少），持仓卖穿 0 的那一段记成空头负债。
-parent: barq-exec
+parent: phasor-exec
 related: [short-margin, buy-leg, size-cascade, status-info, float-tolerance]
 tags: [execution, selling, shorting]
 sources:
-  - crates/barq-exec/src/kernel.rs:223-379
+  - crates/phasor-exec/src/kernel.rs:223-379
 order: 804
 ---
 
@@ -16,9 +16,9 @@ order: 804
 
 ## 位置
 
-- `crates/barq-exec/src/kernel.rs:228-379`：`sell`
-- `crates/barq-exec/src/kernel.rs:268-291`：`lock_cash` 时在上限里乘掉 `percent`
-- `crates/barq-exec/src/kernel.rs:349-366`：开空时记 `debt`、扣 `free_cash`
+- `crates/phasor-exec/src/kernel.rs:228-379`：`sell`
+- `crates/phasor-exec/src/kernel.rs:268-291`：`lock_cash` 时在上限里乘掉 `percent`
+- `crates/phasor-exec/src/kernel.rs:349-366`：开空时记 `debt`、扣 `free_cash`
 
 ## 伪代码
 
@@ -63,7 +63,7 @@ new_position < 0（有一部分变成空头）：
 
 ## 相关
 
-- [barq-exec：撮合内核](../crates/barq-exec.md)：`sell` 是 `execute_validated` 的两个分支之一。
+- [phasor-exec：撮合内核](../crates/phasor-exec.md)：`sell` 是 `execute_validated` 的两个分支之一。
 - [空头保证金：debt 与 free_cash](../concepts/short-margin.md)：`new_position < 0` 分支里 `2 × short_value` 的由来。
 - [buy：买入、平空与 lock_cash 预算](../algorithms/buy-leg.md)：另一个分支；平空时按 `debt / |position|` 释放。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：负比例和 `size = −inf` 怎样变成 `sell` 的 `percent`。

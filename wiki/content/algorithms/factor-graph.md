@@ -2,11 +2,11 @@
 title: 依赖图编译：哈希合并、Ref 视图与槽位调度
 kind: algorithm
 summary: 整组因子以 (Op, inputs) 哈希合并成一张依赖序的图，常量折叠，Ref 变成零拷贝视图，暂存槽位在最后一个读者之后复用。
-parent: barq-expr
+parent: phasor-expr
 related: [pratt-parser, native-evaluation, alpha-feature-sets, rolling-accumulators]
 tags: [compiler, graph, scheduling]
 sources:
-  - crates/barq-expr/src/graph.rs
+  - crates/phasor-expr/src/graph.rs
 order: 702
 ---
 
@@ -16,11 +16,11 @@ order: 702
 
 ## 位置
 
-- `crates/barq-expr/src/graph.rs:37-154`：类型（`Graph`、`Node`、`Op`）
-- `crates/barq-expr/src/graph.rs:288-451`：`Builder::node`/`call`
-- `crates/barq-expr/src/graph.rs:251-286`：`intern`（251–270）与 `fold`（273–286）
-- `crates/barq-expr/src/graph.rs:185-240`：`schedule`
-- `crates/barq-expr/src/graph.rs:541-629`：5 个测试（调度器最清楚的规格）
+- `crates/phasor-expr/src/graph.rs:37-154`：类型（`Graph`、`Node`、`Op`）
+- `crates/phasor-expr/src/graph.rs:288-451`：`Builder::node`/`call`
+- `crates/phasor-expr/src/graph.rs:251-286`：`intern`（251–270）与 `fold`（273–286）
+- `crates/phasor-expr/src/graph.rs:185-240`：`schedule`
+- `crates/phasor-expr/src/graph.rs:541-629`：5 个测试（调度器最清楚的规格）
 
 ![依赖图](../../../docs/img/zh/graph.svg)
 
@@ -67,7 +67,7 @@ Alpha158 里不直写的 10 个输出是 `CNTP{d}`/`CNTN{d}`，因为 `CNTD{d} =
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；编译是四个阶段里的第二个，阅读陷阱第 8、9 条都出自这里。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；编译是四个阶段里的第二个，阅读陷阱第 8、9 条都出自这里。
 - [Pratt 解析器](../algorithms/pratt-parser.md)：上一阶段，产出被合并的 `Expression` 树。
 - [原生求值：按标的并行走图](../algorithms/native-evaluation.md)：下一阶段，`run_column` 按这里排好的节点顺序和槽位执行。
 - [Alpha158 与 Alpha360](../concepts/alpha-feature-sets.md)：上面实测表里的两套特征集。

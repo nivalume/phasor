@@ -2,11 +2,11 @@
 title: 过拟合检验：PSR、DSR、PBO
 kind: algorithm
 summary: 在每根 K 线的 Sharpe 上算 PSR、期望最大 Sharpe 与 DSR，并用 CSCV 枚举样本内外划分得到 PBO。
-parent: barq-analysis
+parent: phasor-analysis
 related: [metrics, sweep-aggregation, research-gates, exercises]
 tags: [statistics, overfitting, sharpe]
 sources:
-  - crates/barq-analysis/src/robust.rs
+  - crates/phasor-analysis/src/robust.rs
 order: 1104
 ---
 
@@ -16,7 +16,7 @@ order: 1104
 
 ## 位置
 
-- `crates/barq-analysis/src/robust.rs`：`probabilistic_sharpe`、`expected_max_sharpe`、`deflated_sharpe`、`pbo_cscv`；`norm_cdf`、`norm_ppf`；`erfc` 内部 62–89
+- `crates/phasor-analysis/src/robust.rs`：`probabilistic_sharpe`、`expected_max_sharpe`、`deflated_sharpe`、`pbo_cscv`；`norm_cdf`、`norm_ppf`；`erfc` 内部 62–89
 
 ## 公式
 
@@ -42,7 +42,7 @@ PBO (CSCV)：
 
 ## 相关
 
-- [barq-analysis：分析层](../crates/barq-analysis.md)：所属 crate；PSR、DSR、PBO 与 Acklam 逼近的原始论文列在它的[延伸资料](../crates/barq-analysis.md#延伸资料)里。
+- [phasor-analysis：分析层](../crates/phasor-analysis.md)：所属 crate；PSR、DSR、PBO 与 Acklam 逼近的原始论文列在它的[延伸资料](../crates/phasor-analysis.md#延伸资料)里。
 - [指标公式表](../reference/metrics.md)：那里的 `sharpe_ratio` 年化并减去无风险利率，与这里每根 K 线的 Sharpe 不同。
 - [扫描结果汇总与 +inf 陷阱](../concepts/sweep-aggregation.md)：先汇总扫描结果、选出赢家，再用这里的检验问它是不是运气；两处都要防零方差列的 ∞。
 - [门槛、多重比较与原创性检查](../algorithms/research-gates.md)：研究协议用 Bonferroni 门槛处理同一个多重比较问题的另一面。

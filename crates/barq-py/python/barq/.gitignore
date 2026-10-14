@@ -1,4 +1,0 @@
-# The built extension, dropped in place for an in-tree test run.
-_barq.so
-_barq*.pyd
-__pycache__/

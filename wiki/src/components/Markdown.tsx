@@ -20,7 +20,7 @@ function textOf(node: Root | RootContent | ElementContent): string {
 }
 
 /**
- * Inline code that names a repository file (`crates/barq-exec/src/kernel.rs:144`,
+ * Inline code that names a repository file (`crates/phasor-exec/src/kernel.rs:144`,
  * or `src/lib.rs` on a crate page) becomes a link to that file and line on
  * GitHub, but only when the file exists. Runs before rendering so it can skip
  * code that is already inside a link or a code block.

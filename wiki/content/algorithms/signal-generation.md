@@ -2,26 +2,26 @@
 title: 信号清洗与出场生成
 kind: algorithm
 summary: clean_enex 用三相状态机把进出场整理成严格交替；generate_exits 给每个进场开一个出场窗口，由回调挑行。
-parent: barq-signals
+parent: phasor-signals
 related: [signal-conflicts, signal-sweep, crossover, random-signals, stop-engine]
 tags: [signals, state-machine, exits]
 sources:
-  - crates/barq-signals/src/clean.rs:12-62
-  - crates/barq-signals/src/generate.rs:25-249
+  - crates/phasor-signals/src/clean.rs:12-62
+  - crates/phasor-signals/src/generate.rs:25-249
 order: 401
 ---
 
 # 信号清洗与出场生成
 
-[barq-signals](../crates/barq-signals.md) 里两个最常用的变换：`clean_enex` 把一列进场和出场整理成严格交替的序列，`generate_exits` 从进场生成出场。两者都不替模拟器解冲突——同一根上的进出冲突属于 `from_signals`，那里有持仓可以对照（见 [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)）。
+[phasor-signals](../crates/phasor-signals.md) 里两个最常用的变换：`clean_enex` 把一列进场和出场整理成严格交替的序列，`generate_exits` 从进场生成出场。两者都不替模拟器解冲突——同一根上的进出冲突属于 `from_signals`，那里有持仓可以对照（见 [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)）。
 
 ## 位置
 
-- `crates/barq-signals/src/clean.rs:12-62`（`FirstSignal`、`clean_enex_1d`）
-- `crates/barq-signals/src/generate.rs:25-59`（`ExitChoice`、`ExitWindow`）
-- `crates/barq-signals/src/generate.rs:72-133`（`generate_exits`）
-- `crates/barq-signals/src/generate.rs:144`、`167`（`exit_after`、`exit_on`）
-- `crates/barq-signals/src/generate.rs:201-249`（`generate_alternating`）
+- `crates/phasor-signals/src/clean.rs:12-62`（`FirstSignal`、`clean_enex_1d`）
+- `crates/phasor-signals/src/generate.rs:25-59`（`ExitChoice`、`ExitWindow`）
+- `crates/phasor-signals/src/generate.rs:72-133`（`generate_exits`）
+- `crates/phasor-signals/src/generate.rs:144`、`167`（`exit_after`、`exit_on`）
+- `crates/phasor-signals/src/generate.rs:201-249`（`generate_alternating`）
 
 ## 清洗：`clean_enex_1d`
 
@@ -48,7 +48,7 @@ stateDiagram-v2
 
 ## 相关
 
-- [barq-signals：信号工具箱](../crates/barq-signals.md)：所属 crate；`clean_enex` 丢掉同根双信号是它的阅读陷阱之一。
+- [phasor-signals：信号工具箱](../crates/phasor-signals.md)：所属 crate；`clean_enex` 丢掉同根双信号是它的阅读陷阱之一。
 - [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)：同一根进出冲突真正被解决的地方。
 - [SignalSweep：因子到信号列](../algorithms/signal-sweep.md)：另一条信号路径，根本不清洗。
 - [crossed_above 的交叉规则](../algorithms/crossover.md)：最常见的进出场来源。

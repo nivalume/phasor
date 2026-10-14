@@ -1,6 +1,6 @@
-# barq 知识库
+# phasor 知识库
 
-barq 源码的知识库：每页讲一件事（一个 crate、一个概念或一个算法），页面之间的链接、所属、依赖和相关关系组成一张图。
+phasor 源码的知识库：每页讲一件事（一个 crate、一个概念或一个算法），页面之间的链接、所属、依赖和相关关系组成一张图。
 
 - **内容**在 [`content/`](content/index.md)：普通 Markdown，在 GitHub 上直接可读，从 [index.md](content/index.md) 开始。
 - **网页**在 `src/`：React 应用，渲染同一批 Markdown，加上搜索、按页面类型分组的目录、每页的局部图谱和反向链接，以及整个知识库的关系图。
@@ -42,12 +42,12 @@ Frontmatter：
 title: 数量换算链与 percent        # 必填；正文第一行的 # 标题与它相同
 kind: algorithm                    # 必填；与目录一致
 summary: 一句话，160 字以内。        # 必填；用于搜索结果、悬停提示和图谱卡片
-parent: barq-exec                  # concept / algorithm 必填：所属的 crate 或 tooling 页面
-depends: [barq-core, barq-model]   # 只用于 crate 页面：Cargo.toml 里的依赖
+parent: phasor-exec                  # concept / algorithm 必填：所属的 crate 或 tooling 页面
+depends: [phasor-core, phasor-model]   # 只用于 crate 页面：Cargo.toml 里的依赖
 related: [buy-leg, sell-leg]       # 可选：参见
 tags: [execution, sizing]          # 可选
 sources:                           # 可选：这页讲的代码，路径必须存在，可带 :行 或 :起-止
-  - crates/barq-exec/src/kernel.rs:610-677
+  - crates/phasor-exec/src/kernel.rs:610-677
 order: 802                         # 可选：同类页面里的顺序
 ---
 ```
@@ -58,9 +58,9 @@ crate 页面的小节顺序固定：定位 → 文件与阅读顺序 → 类图 
 
 所有链接都写相对路径，这样 GitHub 和网页里都能点：
 
-- 到另一页：`[数量换算链](../algorithms/size-cascade.md)`，可以带锚点 `#小节标题`（GitHub 的规则：小写，空格变 `-`，去掉标点，中文保留）。从 `index.md` 出发写 `crates/barq-exec.md`。
+- 到另一页：`[数量换算链](../algorithms/size-cascade.md)`，可以带锚点 `#小节标题`（GitHub 的规则：小写，空格变 `-`，去掉标点，中文保留）。从 `index.md` 出发写 `crates/phasor-exec.md`。
 - 到仓库文件：`[docs/plan.md](../../../docs/plan.md)`；图片：`![…](../../../docs/img/zh/bar-loop.svg)`。
-- 代码位置写成行内代码：`` `crates/barq-exec/src/kernel.rs:144` ``。网页会把它变成 GitHub 链接（文件存在时才链接）。crate 页面及其子页面里也可以写相对 crate 的路径（`` `src/lib.rs` ``）。
+- 代码位置写成行内代码：`` `crates/phasor-exec/src/kernel.rs:144` ``。网页会把它变成 GitHub 链接（文件存在时才链接）。crate 页面及其子页面里也可以写相对 crate 的路径（`` `src/lib.rs` ``）。
 
 代码链接打开 [`src/config.ts`](src/config.ts) 里 `CODE_REF` 指定的提交，页面里的行号都按那个提交核对过。代码改动后重新核对行号，再更新 `CODE_REF`（或构建时设置 `VITE_CODE_REF`）。
 

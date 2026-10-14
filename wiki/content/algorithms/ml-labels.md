@@ -2,25 +2,25 @@
 title: 机器学习标签
 kind: algorithm
 summary: 四个监督学习目标，每个都读未来；triple_barrier 返回决定行，给 purge 切分用。只能做 y，绝不能做信号。
-parent: barq-signals
+parent: phasor-signals
 related: [look-ahead, ts-cross-validation, event-study, research-harness]
 tags: [labels, look-ahead, ml]
 sources:
-  - crates/barq-signals/src/labels.rs
+  - crates/phasor-signals/src/labels.rs
 order: 404
 ---
 
 # 机器学习标签
 
-`labels.rs` 是 [barq-signals](../crates/barq-signals.md) 里唯一读未来的模块：第 `t` 根的标签由 `t` 之后的 K 线算出——这正是标签的意义——所以它们只能做模型要预测的 `y`，不能做进出场或特征（模块文档 1–14 行）。每个函数的文档都有一段 "Look-ahead" 写明看多远，训练/测试切分要留的空隙（purge）可以直接从签名读出来；规则本身见 [延迟与前视偏差](../concepts/look-ahead.md)。
+`labels.rs` 是 [phasor-signals](../crates/phasor-signals.md) 里唯一读未来的模块：第 `t` 根的标签由 `t` 之后的 K 线算出——这正是标签的意义——所以它们只能做模型要预测的 `y`，不能做进出场或特征（模块文档 1–14 行）。每个函数的文档都有一段 "Look-ahead" 写明看多远，训练/测试切分要留的空隙（purge）可以直接从签名读出来；规则本身见 [延迟与前视偏差](../concepts/look-ahead.md)。
 
 ## 位置
 
-- `crates/barq-signals/src/labels.rs:1-23`（模块文档）
-- `crates/barq-signals/src/labels.rs:41-48`（`fixed_horizon_returns`）
-- `crates/barq-signals/src/labels.rs:83-89`（`trend_labels`）
-- `crates/barq-signals/src/labels.rs:138-146`（`triple_barrier`）
-- `crates/barq-signals/src/labels.rs:224-234`（`pivot_labels`）
+- `crates/phasor-signals/src/labels.rs:1-23`（模块文档）
+- `crates/phasor-signals/src/labels.rs:41-48`（`fixed_horizon_returns`）
+- `crates/phasor-signals/src/labels.rs:83-89`（`trend_labels`）
+- `crates/phasor-signals/src/labels.rs:138-146`（`triple_barrier`）
+- `crates/phasor-signals/src/labels.rs:224-234`（`pivot_labels`）
 
 ## 四个标签函数
 
@@ -35,7 +35,7 @@ order: 404
 
 ## 相关
 
-- [barq-signals：信号工具箱](../crates/barq-signals.md)：所属 crate；"标签里 0 一词多义"是它的阅读陷阱之一。
+- [phasor-signals：信号工具箱](../crates/phasor-signals.md)：所属 crate；"标签里 0 一词多义"是它的阅读陷阱之一。
 - [延迟与前视偏差](../concepts/look-ahead.md)：哪些函数读未来、哪些机制挡住它；这里是读未来的一端。
 - [时间序列交叉验证](../algorithms/ts-cross-validation.md)：`purged_kfold` 的 `purge` 就是按 `triple_barrier` 的决定行定的。
 - [事件研究](../algorithms/event-study.md)：`forward_paths` 同样读未来，同样只做分析。

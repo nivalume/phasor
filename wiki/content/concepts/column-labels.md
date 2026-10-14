@@ -2,25 +2,25 @@
 title: 列标签：Columns、Level 与 group_indices
 kind: concept
 summary: Columns 给每列贴分层标签而不复制数据；浮点标签按位相等，group_indices 按首次出现顺序把列号分组。
-parent: barq-core
+parent: phasor-core
 related: [column-axis, sweep-aggregation, errors-vs-rejections, flex-array]
 tags: [labels, columns, grouping]
 sources:
-  - crates/barq-core/src/columns.rs:54-88
-  - crates/barq-core/src/columns.rs:208-343
+  - crates/phasor-core/src/columns.rs:54-88
+  - crates/phasor-core/src/columns.rs:208-343
 order: 104
 ---
 
 # 列标签：Columns、Level 与 group_indices
 
-一次参数扫描的输出是成千上万列数值，只看列号不知道哪一列是哪组参数、哪个标的。[barq-core](../crates/barq-core.md) 的 `Columns` 把这层含义单独存起来，供描述、分组和按参数聚合使用。
+一次参数扫描的输出是成千上万列数值，只看列号不知道哪一列是哪组参数、哪个标的。[phasor-core](../crates/phasor-core.md) 的 `Columns` 把这层含义单独存起来，供描述、分组和按参数聚合使用。
 
 ## 位置
 
-- `crates/barq-core/src/columns.rs:54-88`：`Label` 的按位相等
-- `crates/barq-core/src/columns.rs:151-179`：`Level::repeat` / `tile`
-- `crates/barq-core/src/columns.rs:208-343`：`Columns`
-- `crates/barq-core/src/columns.rs:305-325`：`group_indices`
+- `crates/phasor-core/src/columns.rs:54-88`：`Label` 的按位相等
+- `crates/phasor-core/src/columns.rs:151-179`：`Level::repeat` / `tile`
+- `crates/phasor-core/src/columns.rs:208-343`：`Columns`
+- `crates/phasor-core/src/columns.rs:305-325`：`group_indices`
 
 ## 列标签、`Columns` 与 `group_indices`（`columns.rs:54-88, 208-343`）
 
@@ -53,7 +53,7 @@ let columns = Columns::new(vec![
 
 ## 相关
 
-- [barq-core：基础类型](../crates/barq-core.md)：`Columns`、`Level`、`Label` 所在的 crate。
+- [phasor-core：基础类型](../crates/phasor-core.md)：`Columns`、`Level`、`Label` 所在的 crate。
 - [列轴与列主序](../concepts/column-axis.md)：`repeat` / `tile` 产生的列轴布局，以及它为什么让共享账户成为一个切片。
 - [扫描结果汇总与 +inf 陷阱](../concepts/sweep-aggregation.md)：`group_indices` 是按参数聚合的基础。
 - [错误与拒单](../concepts/errors-vs-rejections.md)：`LevelWidth`、`UnknownLevel` 是不变量错误。

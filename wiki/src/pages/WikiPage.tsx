@@ -119,7 +119,7 @@ export function WikiPage({ page, anchor }: { page: Page; anchor: string | null }
 
   useEffect(() => setTab("body"), [page.id]);
   useEffect(() => {
-    document.title = `${page.title} · barq 知识库`;
+    document.title = `${page.title} · phasor 知识库`;
   }, [page]);
 
   // Scroll to the anchor (or the top) after each navigation; again once diagrams above it have drawn.

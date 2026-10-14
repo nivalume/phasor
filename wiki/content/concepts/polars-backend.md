@@ -2,13 +2,13 @@
 title: Polars 后端
 kind: concept
 summary: 可选的 polars 特性提供第二个 ComputeBackend：直接把语法树编译成按标的分组的 Polars 惰性表达式，用来独立交叉验证原生后端，慢 3–15×。
-parent: barq-expr
+parent: phasor-expr
 related: [native-evaluation, qlib-operators, alpha-feature-sets, parity-testing, benchmarks]
 tags: [polars, backend, verification]
 sources:
-  - crates/barq-expr/src/polars_backend.rs
-  - crates/barq-expr/src/backend.rs
-  - crates/barq-expr/tests/parity_qlib.rs
+  - crates/phasor-expr/src/polars_backend.rs
+  - crates/phasor-expr/src/backend.rs
+  - crates/phasor-expr/tests/parity_qlib.rs
 order: 708
 ---
 
@@ -18,15 +18,15 @@ order: 708
 
 ## 位置
 
-- `crates/barq-expr/src/polars_backend.rs`：`PolarsBackend`（`polars` 特性）
-- `crates/barq-expr/src/backend.rs`：`ComputeBackend` trait 与 `NativeBackend`
-- `crates/barq-expr/tests/parity_qlib.rs`：`polars_matches_qlib_alpha158_fixture` 等 Qlib fixture 测试的 Polars 版本
+- `crates/phasor-expr/src/polars_backend.rs`：`PolarsBackend`（`polars` 特性）
+- `crates/phasor-expr/src/backend.rs`：`ComputeBackend` trait 与 `NativeBackend`
+- `crates/phasor-expr/tests/parity_qlib.rs`：`polars_matches_qlib_alpha158_fixture` 等 Qlib fixture 测试的 Polars 版本
 
 ## 实现
 
-**Polars 后端**（`polars_backend.rs`）：长表 + `__barq_expr_symbol` 列，每个因子表达式 `.over(symbol)`，64 个因子一批 `lazy().select().collect()`。直接编译语法树而不是图，所以没有槽位/视图。`Mean Std Sum Max Min Var Quantile Med EMA Cov` 用 Polars 原生滚动，`Rank IdxMax IdxMin Slope Rsquare Resi Skew Kurt Mad Count WMA` 用 `rolling_map` 调 `eval.rs` 里的参考归约器，`Corr` 用 `map_multiple` 每窗重算以得到 2e-5 掩码。用途：独立交叉验证（Qlib fixture 在两个后端上都跑）。慢 3–15×。
+**Polars 后端**（`polars_backend.rs`）：长表 + `__phasor_expr_symbol` 列，每个因子表达式 `.over(symbol)`，64 个因子一批 `lazy().select().collect()`。直接编译语法树而不是图，所以没有槽位/视图。`Mean Std Sum Max Min Var Quantile Med EMA Cov` 用 Polars 原生滚动，`Rank IdxMax IdxMin Slope Rsquare Resi Skew Kurt Mad Count WMA` 用 `rolling_map` 调 `eval.rs` 里的参考归约器，`Corr` 用 `map_multiple` 每窗重算以得到 2e-5 掩码。用途：独立交叉验证（Qlib fixture 在两个后端上都跑）。慢 3–15×。
 
-这些参考归约器（`eval.rs:590-849`）只在 `cfg(any(test, feature = "polars"))` 下编译，见 [barq-expr 的阅读陷阱](../crates/barq-expr.md#阅读陷阱)第 11 条；[路线图](../guides/roadmap.md)说这个后端"只在下游需要 Polars 时存在"。
+这些参考归约器（`eval.rs:590-849`）只在 `cfg(any(test, feature = "polars"))` 下编译，见 [phasor-expr 的阅读陷阱](../crates/phasor-expr.md#阅读陷阱)第 11 条；[路线图](../guides/roadmap.md)说这个后端"只在下游需要 Polars 时存在"。
 
 ## 启用与性能
 
@@ -44,7 +44,7 @@ order: 708
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；类图里 `ComputeBackend` 的两个实现。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；类图里 `ComputeBackend` 的两个实现。
 - [原生求值：按标的并行走图](../algorithms/native-evaluation.md)：被交叉验证的默认后端；它有图、槽位与视图，这里没有。
 - [因子算子与 Qlib 对照](../reference/qlib-operators.md)：两个后端都要满足的 Qlib 语义。
 - [Alpha158 与 Alpha360](../concepts/alpha-feature-sets.md)：性能表里的两个主要负载，也是 Qlib fixture 的内容。

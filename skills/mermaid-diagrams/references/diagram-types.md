@@ -137,9 +137,9 @@ Dependency graph variant (`flowchart BT`, arrows mean "depends on"):
 
 ```mermaid
 flowchart BT
-  core["barq-core"] 
-  exec["barq-exec"] --> core
-  sim["barq-sim"] --> exec
+  core["phasor-core"] 
+  exec["phasor-exec"] --> core
+  sim["phasor-sim"] --> exec
   classDef base fill:#ddf4ff,stroke:#0969da;
   class core base;
 ```
@@ -176,8 +176,8 @@ gantt
   section 准备
   环境与全局地图        :a0, 1, 1d
   section 交易路线
-  barq-core + barq-model :a1, after a0, 1d
-  barq-sim               :a3, after a1, 3d
+  phasor-core + phasor-model :a1, after a0, 1d
+  phasor-sim               :a3, after a1, 3d
 ```
 
 Rules of thumb: tasks need an id to be referenced by `after`; sections group

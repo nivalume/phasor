@@ -1,6 +1,6 @@
-# barq 功能扩展计划：对齐 VectorBT PRO
+# phasor 功能扩展计划：对齐 VectorBT PRO
 
-目标：把 VectorBT PRO（下称 PRO）公开文档里列出的功能在 barq 里全部实现，并补上
+目标：把 VectorBT PRO（下称 PRO）公开文档里列出的功能在 phasor 里全部实现，并补上
 PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 功能清单来自 2026-10 对 [vectorbt.pro/features](https://vectorbt.pro/features/overview/)
@@ -46,7 +46,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 1. **P1**：`from_signals` 在新功能全部关闭时比 main 慢 3.8%，超过约束里的 3%。这是违反约束的问题，排第一。
 2. **P2**：新加的分析、信号、数据功能只有 Rust 接口，Python 用户用不到。
-3. **B4 → C1–C4**：杠杆、保证金、强平、资金费。这是资金费套利回测的关键路径，做完才能在 barq 里准确回测现货多 + 永续空。
+3. **B4 → C1–C4**：杠杆、保证金、强平、资金费。这是资金费套利回测的关键路径，做完才能在 phasor 里准确回测现货多 + 永续空。
 
 ---
 
@@ -57,7 +57,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | 约束 | 内容 |
 |---|---|
 | 默认行为不变 | 新参数取默认值时，结果和之前逐位一致。`tests/fixtures/` 下的对照 fixture（vectorbt 1.1.0 和 Qlib）不允许因为新功能而重新生成 |
-| 关闭时不变慢 | 新功能全部关闭时，`cargo run --release --example bench -p barq-sim` 的吞吐下降不超过 3%（和 main 交替多轮测量，看中位数） |
+| 关闭时不变慢 | 新功能全部关闭时，`cargo run --release --example bench -p phasor-sim` 的吞吐下降不超过 3%（和 main 交替多轮测量，看中位数） |
 | 不抄代码 | PRO 是闭源软件，只根据公开文档描述的行为独立实现。参数名尽量沿用 PRO 的公开名字，代码独立（同 `ARCHITECTURE.md` 附录 A 对 NautilusTrader 的做法） |
 | 记录是唯一来源 | 分析层只从记录重建余额。凡是改变现金或持仓的东西，都要落成记录 |
 | 库不联网 | `crates/` 下的库既不下载也不写文件。联网的数据源放在单独的可选包里（G0） |
@@ -89,10 +89,10 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - [ ] `from_signals` 已有但 Python 不能设的止损参数：`upon_stop_exit`（含 `Reverse`）、`stop_entry_price`（含 `FillPrice`）、`stop_exit_price`、`upon_stop_update`。
 
 - [ ] **P3 合并三份 SplitMix64 随机数实现**（S）
-  - 为什么：`barq-sim/src/random.rs`、`barq-signals/src/random.rs`、`barq-generic/src/synthetic.rs` 各有一份。并行开发时各自写的，以后改一处容易漏另外两处。
+  - 为什么：`phasor-sim/src/random.rs`、`phasor-signals/src/random.rs`、`phasor-generic/src/synthetic.rs` 各有一份。并行开发时各自写的，以后改一处容易漏另外两处。
   - 现状：三处的 SplitMix64 混合步骤相同；sim 和 signals 从 `(seed, row, col)` 映射到 `[0, 1)` 的方式也相同；synthetic 多一个 salt 参数，并且映射到开区间 `(0, 1)`（加 0.5），两种结果不同。
   - 要做：
-    - [ ] `barq-core` 提供混合步骤和带 salt 的链式哈希，两种均匀映射各自保留，三处改为调用它。
+    - [ ] `phasor-core` 提供混合步骤和带 salt 的链式哈希，两种均匀映射各自保留，三处改为调用它。
     - [ ] 先加测试固定三处现在的输出（覆盖 `(seed, row, col, salt)` 和两种区间），保证合并不改变任何已有结果。
 
 ### A. 账户模型地基
@@ -105,7 +105,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - `CashRecords { col, idx, amount, kind }`，作为 `OrderRecords.cash` 字段存放。这样 sink、多线程合并、排序、`Portfolio` 构造函数不用改接口就会带上它。
     - `kind`：`Deposit`、`Earning`、`Dividend`。资金费、利息、强平在对应功能落地时追加。
     - 分析层的现金和可用现金都计入这些记录。入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`。有入金时，总收益改为逐根连乘，回撤在扣掉入金后的曲线上计算。
-  - 位置：`crates/barq-records/src/cash.rs`，`crates/barq-analysis/src/series.rs`，`ARCHITECTURE.md` §8.5、§9.1、§10.2。
+  - 位置：`crates/phasor-records/src/cash.rs`，`crates/phasor-analysis/src/series.rs`，`ARCHITECTURE.md` §8.5、§9.1、§10.2。
 
 - [ ] **A2 K 线内的处理阶段**（M，部分完成）
   - 为什么：限价单、时间止损、现金收支、强平都需要在一根 K 线里有明确的先后顺序，否则同一组输入在不同实现里结果不同。
@@ -116,7 +116,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - [ ] 限价单和新止损类型（`td_stop`、`stop_ladder` 等）在开盘、盘中阶段的处理（随 D2、D5 做）。
     - [ ] 止损成交和开盘现金流之间的先后顺序写进文档。
     - [ ] 收盘：资金费、借贷利息入账，强平检查（随 C2–C4 做）。
-  - 位置：入账函数在 `crates/barq-sim/src/cash.rs`；先后顺序由 `crates/barq-sim/src/from_orders.rs`、`from_signals.rs` 的 K 线循环决定。
+  - 位置：入账函数在 `crates/phasor-sim/src/cash.rs`；先后顺序由 `crates/phasor-sim/src/from_orders.rs`、`from_signals.rs` 的 K 线循环决定。
 
 - [ ] **A3 显式的模拟状态结构**（S，推迟到 D1）
   - 为什么：D 要加挂单，F 要保存和恢复状态，都需要一个公开的、可以序列化的状态结构。
@@ -133,17 +133,17 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 - [x] **B1 入金/出金 `cash_deposits`**（S）
   - 为什么：定投、出金、多策略之间调拨资金都需要。PRO 有这个参数。
   - 做了什么：开盘入账，按账户组读取（同 `init_cash` 的规则）；出金最多扣到可用现金，记录里存实际金额。Python 里共享账户传 `(T, n_groups)`，一维数组表示每根 K 线一个值。
-  - 位置：`crates/barq-sim/src/cash.rs`。
+  - 位置：`crates/phasor-sim/src/cash.rs`。
 
 - [x] **B2 现金收支 `cash_earnings`**（S）
   - 为什么：利息、管理费，以及在 C3 做完之前事先算好的资金费，都要能计入现金和收益。
   - 做了什么：收盘按列入账；扣款最多扣到可用现金。
-  - 位置：`crates/barq-sim/src/cash.rs`。
+  - 位置：`crates/phasor-sim/src/cash.rs`。
 
 - [x] **B3 分红 `cash_dividends`**（S）
   - 为什么：股票回测不算分红会低估收益。
   - 做了什么：每股金额 × 当根 K 线下单之前的持仓，开盘入账（所以除息日买入拿不到，卖出不丢）；空头支付分红。Python 里和价格同形状，经过 `column_map`。
-  - 位置：`crates/barq-sim/src/cash.rs`。
+  - 位置：`crates/phasor-sim/src/cash.rs`。
 
 - [ ] **B4 杠杆 `leverage` / `leverage_mode`**（L）
   - 为什么：现货杠杆和保证金交易都需要；现在做空要冻结 2 倍市值，资金占用和真实账户差很多。也是 C1 的前提。
@@ -179,16 +179,16 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 - [x] **B9 单笔现金上限 `cash_limit`，随机拒单 `reject_prob`**（S）
   - 为什么：`cash_limit` 限制单笔买单的资金；`reject_prob` 测试成交失败时策略的表现，它原来是已知问题（参数存在但没接进循环）。
   - 做了什么：`cash_limit` 只限制买单，在 `percent` 之前生效，不写进日志（日志格式和参考实现一致）。随机数由 `(seed, row, col)` 经 SplitMix64 算出，和线程数、分组无关。内核改为在买卖之前判断随机拒单。
-  - 位置：`crates/barq-exec/src/kernel.rs`、`crates/barq-sim/src/random.rs`。
+  - 位置：`crates/phasor-exec/src/kernel.rs`、`crates/phasor-sim/src/random.rs`。
 
 - [x] **B10 敞口指标**（S）
   - 为什么：看仓位占比、多空敞口、净敞口，是检查组合风险的基本工具。
   - 做了什么：`Portfolio` 上的方法。`allocations`（按列）和 `long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`（按账户）的分母是账户总净值，已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变；`position_coverage` 是每列持有非零仓位的 K 线占比。Python 未接，见 P2。
-  - 位置：`crates/barq-analysis/src/portfolio.rs`，测试 `crates/barq-analysis/tests/exposure.rs`。
+  - 位置：`crates/phasor-analysis/src/portfolio.rs`，测试 `crates/phasor-analysis/tests/exposure.rs`。
 
 ### C. 保证金、强平、资金费（PRO 没有）
 
-PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支持，因为资金费套利、永续 CTA 这类策略的结果主要取决于这几项。
+PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支持，因为资金费套利、永续 CTA 这类策略的结果主要取决于这几项。
 
 - [ ] **C1 保证金账户模型**（L）
   - 为什么：永续合约用保证金，不是现金账户那样冻结 2 倍市值；资金占用错了，收益率和可用资金都错。
@@ -211,7 +211,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 做什么：
     - [ ] 输入 `funding_rate`（非结算时点为 NaN），可选 `funding_price`。
     - [ ] 收盘结算 `payment = −position × funding_price × multiplier × rate`，记为 `CashRecords(kind=Funding)`。
-    - [ ] `research/barq_lab` 的 `funding_modeled` 改成真实开关。
+    - [ ] `research/phasor_lab` 的 `funding_modeled` 改成真实开关。
 
 - [ ] **C4 标记价格和借贷利息**（M）
   - 为什么：交易所按标记价格算资金费和强平；借来的钱和券要付利息。
@@ -285,7 +285,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 为什么：内置循环满足不了时，让用户自己写循环，但仍然输出同样的记录、用同一套分析。
   - 做什么：
     - [x] 已公开：撮合内核和内核状态（`execute_order`、`execute_validated`、`ValidatedOrder`、`ExecuteOrderState`、`ProcessOrderState`），止损判定（`stop_price`、`from_stop`），记录写入（`RecordSink`、`LogSink`），从记录构造 `Portfolio`（`Portfolio::from_records`）。
-    - [ ] 现金流入账函数（`barq-sim` 的 `cash` 模块，目前私有）。
+    - [ ] 现金流入账函数（`phasor-sim` 的 `cash` 模块，目前私有）。
     - [ ] 按 `(seed, row, col)` 取随机数的函数（目前私有，和 P3 一起做）。
     - [ ] 列和账户组状态（A3）、挂单判定（D1、D2）。
 
@@ -310,7 +310,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 为什么：回测结果要能跨进程、跨机器保存和读回。
   - 做什么：记录存 Arrow IPC 或 Parquet，状态存带版本号的二进制。
 - [ ] **F5 Stepper**（L）
-  - 为什么：实盘时由外部执行层回报成交，barq 逐根推进模拟并对账。
+  - 为什么：实盘时由外部执行层回报成交，phasor 逐根推进模拟并对账。
 - [ ] **F6 长历史分批**（S）
   - 为什么：控制内存。和 K1 一起做。
 
@@ -320,7 +320,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 
 - [ ] **G0 联网代码的包结构**（S，待决定）
   - 为什么："库不联网"是现有原则，下载代码要有地方放。
-  - 做什么：建议新建可选 Python 包 `barq-connectors`；数据库读写放 `barq-store` 或 Python 层（待决定事项 2）。
+  - 做什么：建议新建可选 Python 包 `phasor-connectors`；数据库读写放 `phasor-store` 或 Python 层（待决定事项 2）。
 
 - [ ] **G1 数据源连接器**（XL，分批）
   - 为什么：现在只有 `examples/` 里的下载脚本。
@@ -346,12 +346,12 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 做什么：
     - [x] `random_walk`、`gbm`、`ohlc_from_close`，带种子可复现，某一列的结果不随列数变化。
     - [ ] 对已有序列打乱或扰动（`randomize`），J3 的"打乱价格重跑"要用。
-  - 位置：`crates/barq-generic/src/synthetic.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-generic/src/synthetic.rs`。Python 未接，见 P2。
 
 ### H. 指标、信号、标签
 
 - [ ] **H1 现有指标和信号函数接到 Python**（S）
-  - 为什么：8 个 Rust 指标（MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV）和 `barq-signals` 的函数 Python 都调用不了。
+  - 为什么：8 个 Rust 指标（MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV）和 `phasor-signals` 的函数 Python 都调用不了。
 
 - [ ] **H2 指标工厂**（M）
   - 为什么：用户自定义的指标也要能做参数网格、带参数标签输出。
@@ -377,7 +377,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] 信号间隔和连续长度：原本就有，`ranges.rs` 的 `partition_ranges`、`between_ranges`、`between_partition_ranges`，加上 `duration`、`mean_closed_duration`（Python 未接，见 H1）。
     - [ ] 一张信号汇总统计表（次数、间隔和长度的均值与分位数）。
     - [ ] 匹配型随机基线：信号数量和分布与原策略相同，只打乱位置。
-  - 位置：`crates/barq-signals/src/random.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-signals/src/random.rs`。Python 未接，见 P2。
 
 - [ ] **H7 机器学习标签**（M，部分完成）
   - 为什么：训练预测模型需要目标值。
@@ -385,7 +385,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] `fixed_horizon_returns`、`trend_labels`、`triple_barrier`、`pivot_labels`。这些读取未来数据，只能作训练目标，文档里写明。
     - [ ] 均值类标签（未来一段的均值相对当前）。
     - [ ] 用模型预测值回测，并和简单基线比较的辅助函数。
-  - 位置：`crates/barq-signals/src/labels.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-signals/src/labels.rs`。Python 未接，见 P2。
 
 ### I. 分析
 
@@ -395,7 +395,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] `excursions`（每笔交易的 MAE/MFE，价格距离和收益率）、`edge_ratio`。
     - [ ] 作为 `Portfolio` 方法（现在要自己传 high/low/close）。
     - [ ] 多空分开统计，加进统计表。
-  - 位置：`crates/barq-records/src/excursions.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-records/src/excursions.rs`。Python 未接，见 P2。
 
 - [ ] **I2 回撤记录和滚动指标接到 Python**（S）
   - 为什么：Rust 里有，Python 拿不到。
@@ -414,11 +414,11 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 - [x] **I6 事件研究**（M）
   - 为什么：财报、新闻、信号等事件之后价格一般怎么走，是判断事件有没有信息量的直接方法。
   - 做了什么：`forward_paths`（每个事件前后相对事件当根收盘价的收益路径 `close[t+k]/close[t] − 1`，范围 `−before..=after`；靠近边界的事件保留并用 NaN 补齐）、`mean_path`、`median_path`、`hit_rate`。读取未来数据，只用于分析。Python 未接，见 P2。
-  - 位置：`crates/barq-analysis/src/events.rs`。
+  - 位置：`crates/phasor-analysis/src/events.rs`。
 
 - [ ] **I7 图表**（M）
   - 为什么：净值、回撤、交易点位、参数热力图，看图比看数字快。
-  - 做什么：可选 extra `barq[plot]`（Plotly）。
+  - 做什么：可选 extra `phasor[plot]`（Plotly）。
 
 - [ ] **I8 结果转 pandas**（S）
   - 为什么：方便接到用户已有的 pandas 代码。
@@ -434,8 +434,8 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] `rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`、`walk_forward`（在训练集上选参，报告所选参数的测试集得分）。纯 NumPy。
     - [x] 自定义切分：手工构造 `Split(train, test)` 传给 `walk_forward`，会检查范围和重叠。
     - [ ] 从日期区间或布尔掩码生成切分，包括按日历切分（每月、每季度）。
-    - [ ] `research/barq_lab` 的 walk-forward 改用这个模块。这不是直接替换，要先处理三点：最后一段不完整的窗口（`rolling` 现在丢弃，研究模块保留），零波动和 NaN 的选取规则，以及重跑子区间还是切片全程收益。验收：研究模块的输出逐位不变，或者变化有明确记录。
-  - 位置：`crates/barq-py/python/barq/validation.py`，用 `barq.validation` 调用。
+    - [ ] `research/phasor_lab` 的 walk-forward 改用这个模块。这不是直接替换，要先处理三点：最后一段不完整的窗口（`rolling` 现在丢弃，研究模块保留），零波动和 NaN 的选取规则，以及重跑子区间还是切片全程收益。验收：研究模块的输出逐位不变，或者变化有明确记录。
+  - 位置：`crates/phasor-py/python/phasor/validation.py`，用 `phasor.validation` 调用。
 
 - [ ] **J3 稳健性检验**（M，部分完成）
   - 为什么：扫了很多参数之后，最好的结果很可能是运气。要知道它有多大概率是过拟合。
@@ -443,9 +443,9 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
     - [x] `probabilistic_sharpe`、`deflated_sharpe`、`expected_max_sharpe`、`pbo_cscv`（Bailey 与 López de Prado）。
     - [ ] 置换检验。
     - [ ] 邻近参数比较（最优参数附近是否也好）。
-    - [ ] 延迟信号检验：延迟机制已经有（`barq.strategy` 的 `signal_delay`），缺把 delay=k 和 k+1 的结果并排比较、给出结论的函数。
+    - [ ] 延迟信号检验：延迟机制已经有（`phasor.strategy` 的 `signal_delay`），缺把 delay=k 和 k+1 的结果并排比较、给出结论的函数。
     - [ ] 在打乱的价格上重跑（依赖 G5 的 `randomize`）。
-  - 位置：`crates/barq-analysis/src/robust.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-analysis/src/robust.rs`。Python 未接，见 P2。
 
 - [ ] **J4 组合优化**（M）
   - 为什么：多资产配置的权重怎么定。
@@ -475,9 +475,9 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
 - [ ] **L3 定时任务与通知**（S）
   - 为什么：定时更新数据、定时跑策略，有结果时发 Telegram 或 Slack。
 - [ ] **L4 CLI**（M）
-  - 为什么：不写 Python 也能跑回测、更新数据：`barq run`、`barq data update`、`barq sweep`。
+  - 为什么：不写 Python 也能跑回测、更新数据：`phasor run`、`phasor data update`、`phasor sweep`。
 - [ ] **L5 开发者工具**（S）
-  - 为什么：`barq.help(obj)` 查签名和文档；检查广播后的输入形状，排查形状错误。
+  - 为什么：`phasor.help(obj)` 查签名和文档；检查广播后的输入形状，排查形状错误。
 
 ### M. AI 接口
 
@@ -485,7 +485,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。barq 原生支�
   - 为什么：让人和编码助手都能快速查到 API 和用法。
 - [ ] **M2 MCP 服务**（M）
   - 为什么：编码助手可以查 API、读源码、跑一次小回测。
-  - 注意：`research/barq_lab` 规定模型不能看到研究结果。MCP 的回测只用于开发调试，不能接到 `barq_lab` 的数据和账本上，这条要写进文档和代码检查。
+  - 注意：`research/phasor_lab` 规定模型不能看到研究结果。MCP 的回测只用于开发调试，不能接到 `phasor_lab` 的数据和账本上，这条要写进文档和代码检查。
 - [ ] **M3 Agent skills**（S）
   - 为什么：仓库里写好"怎么写策略、怎么加功能、怎么跑对照测试"，编码助手按规矩做。
 
@@ -570,7 +570,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 
 "任务"列是本计划的编号。
 
-| PRO 功能（公开文档） | barq 现状 | 任务 |
+| PRO 功能（公开文档） | phasor 现状 | 任务 |
 |---|---|---|
 | `from_orders` | 有 | — |
 | `from_signals` | 有 | D7、E3 扩展 |

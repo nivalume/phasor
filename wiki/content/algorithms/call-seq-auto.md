@@ -2,12 +2,12 @@
 title: call_seq=auto：共享账户内的执行顺序
 kind: algorithm
 summary: Auto 用估算的订单金额给组内各列排序，插入排序稳定升序、NaN 最后，让卖单释放的现金先于买单可用。
-parent: barq-sim
+parent: phasor-sim
 related: [bar-loop, size-cascade, short-margin, parallel-simulation, buy-leg]
 tags: [simulation, ordering, cash-sharing]
 sources:
-  - crates/barq-sim/src/groups.rs:213-322
-  - crates/barq-sim/tests/parity_cash_sharing.rs
+  - crates/phasor-sim/src/groups.rs:213-322
+  - crates/phasor-sim/tests/parity_cash_sharing.rs
 order: 1002
 ---
 
@@ -17,9 +17,9 @@ order: 1002
 
 ## 位置
 
-- `crates/barq-sim/src/groups.rs:213-249`（`CallSeq::resolve`）
-- `crates/barq-sim/src/groups.rs:262-297`（`approx_order_value`）
-- `crates/barq-sim/src/groups.rs:309-322`（`insert_argsort`）
+- `crates/phasor-sim/src/groups.rs:213-249`（`CallSeq::resolve`）
+- `crates/phasor-sim/src/groups.rs:262-297`（`approx_order_value`）
+- `crates/phasor-sim/src/groups.rs:309-322`（`insert_argsort`）
 
 ## 估算订单金额：approx_order_value
 
@@ -49,7 +49,7 @@ approx_order_value(size, size_type, direction, cash, position, free_cash, val_pr
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate；`Groups` 与 `CallSeq` 的类图。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate；`Groups` 与 `CallSeq` 的类图。
 - [from_orders 的一根 K 线](../algorithms/bar-loop.md)：排序结果 `seq` 决定第二遍的执行顺序。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：估算金额对应的内核换算规则。
 - [空头保证金：debt 与 free_cash](../concepts/short-margin.md)：`Percent` 平空分支里 `free_cash` 的来历。

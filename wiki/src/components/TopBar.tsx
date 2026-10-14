@@ -33,8 +33,8 @@ export function TopBar({
           {menuOpen ? "✕" : "☰"}
         </button>
       ) : null}
-      <a className="brand" href="#/" aria-label="barq 知识库首页">
-        <span className="brand__mark">barq</span>
+      <a className="brand" href="#/" aria-label="phasor 知识库首页">
+        <span className="brand__mark">phasor</span>
         <span>知识库</span>
         <span className="brand__sub">/ WIKI</span>
       </a>

@@ -2,24 +2,24 @@
 title: 按时点对齐 align
 kind: algorithm
 summary: 事件按标的分桶稳定排序，再用两个单调前进的指针做 as-of 与左开右闭窗口聚合，每个标的 O(T + E)，每格 O(1)。
-parent: barq-data
+parent: phasor-data
 related: [data-loading, look-ahead, monotonic-queue, rolling-accumulators]
 tags: [data, as-of, two-pointer, point-in-time]
 sources:
-  - crates/barq-data/src/lib.rs:456-552
-  - crates/barq-py/tests/test_data.py:100-110
+  - crates/phasor-data/src/lib.rs:456-552
+  - crates/phasor-py/tests/test_data.py:100-110
 order: 602
 ---
 
 # 按时点对齐 align
 
-`align` 把一个辅助数据集（资金费率、新闻、基本面）的某个字段对齐到 [barq-data](../crates/barq-data.md) 面板的时间轴上，得到 `T × S` 的矩阵：要么取"此刻最后一个已发布的值"（as-of），要么对最近一段时间内发布的事件求和、计数或取均值。用的是发布时间 `available_time`，所以结果在每个时刻都只包含当时已经能看到的信息（见 [延迟与前视偏差](../concepts/look-ahead.md)）。
+`align` 把一个辅助数据集（资金费率、新闻、基本面）的某个字段对齐到 [phasor-data](../crates/phasor-data.md) 面板的时间轴上，得到 `T × S` 的矩阵：要么取"此刻最后一个已发布的值"（as-of），要么对最近一段时间内发布的事件求和、计数或取均值。用的是发布时间 `available_time`，所以结果在每个时刻都只包含当时已经能看到的信息（见 [延迟与前视偏差](../concepts/look-ahead.md)）。
 
 ## 位置
 
-- `crates/barq-data/src/lib.rs:456-484`（`events`：按标的分桶并稳定排序）
-- `crates/barq-data/src/lib.rs:487-552`（`align`：双指针 as-of / 窗口聚合）
-- `crates/barq-py/tests/test_data.py:100-110`（并列事件与窗口边界的例子）
+- `crates/phasor-data/src/lib.rs:456-484`（`events`：按标的分桶并稳定排序）
+- `crates/phasor-data/src/lib.rs:487-552`（`align`：双指针 as-of / 窗口聚合）
+- `crates/phasor-py/tests/test_data.py:100-110`（并列事件与窗口边界的例子）
 
 ## 分桶与稳定排序：`events`
 
@@ -60,7 +60,7 @@ for (i, t) in time:                                      time 严格递增
 
 ## 相关
 
-- [barq-data：数据层](../crates/barq-data.md)：所属 crate；`Count` 含 NaN 行、`events()` 每次重新排序等阅读陷阱。
+- [phasor-data：数据层](../crates/phasor-data.md)：所属 crate；`Count` 含 NaN 行、`events()` 每次重新排序等阅读陷阱。
 - [加载 load 与面板 prepare](../algorithms/data-loading.md)：`align` 的输入（`load` 出的数据集）和时间轴（`prepare` 出的面板）从哪里来。
 - [延迟与前视偏差](../concepts/look-ahead.md)：`available_time` 是数据层挡住前视的那道机制。
 - [单调队列：窗口极值与极值位置](../algorithms/monotonic-queue.md)：另一个靠"下标单调前进、每个元素进出各一次"得到均摊 O(1) 的窗口算法。

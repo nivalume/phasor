@@ -2,11 +2,11 @@
 title: 原生求值：按标的并行走图
 kind: algorithm
 summary: 每个标的列是一个 rayon 任务，借用拆分让任务 c 独占每个输出的第 c 列；run_column 按依赖序走图，平移操作数分段而不物化。
-parent: barq-expr
+parent: phasor-expr
 related: [factor-graph, rolling-accumulators, order-statistics, parallel-simulation, column-axis]
 tags: [evaluation, parallel, rayon]
 sources:
-  - crates/barq-expr/src/eval.rs:169-472
+  - crates/phasor-expr/src/eval.rs:169-472
 order: 703
 ---
 
@@ -16,12 +16,12 @@ order: 703
 
 ## 位置
 
-- `crates/barq-expr/src/eval.rs:169-216`：`evaluate`
-- `crates/barq-expr/src/eval.rs:318-403`：`run_column`
-- `crates/barq-expr/src/eval.rs:238-315`：`Arg`/`Seg`/`segments`
-- `crates/barq-expr/src/eval.rs:420-472`：`step`
-- `crates/barq-expr/src/eval.rs:510-546`：`binary_series`
-- `crates/barq-expr/src/eval.rs:556-588`：`rolling_into`
+- `crates/phasor-expr/src/eval.rs:169-216`：`evaluate`
+- `crates/phasor-expr/src/eval.rs:318-403`：`run_column`
+- `crates/phasor-expr/src/eval.rs:238-315`：`Arg`/`Seg`/`segments`
+- `crates/phasor-expr/src/eval.rs:420-472`：`step`
+- `crates/phasor-expr/src/eval.rs:510-546`：`binary_series`
+- `crates/phasor-expr/src/eval.rs:556-588`：`rolling_into`
 
 ![求值](../../../docs/img/zh/evaluate.svg)
 
@@ -45,7 +45,7 @@ binary_series：dispatch! 宏对每个 BinaryOp 展开一个 match 臂，臂内�
           → 算子和操作数形态都在行循环**之外**解决，每个 case 编译成可自动向量化的直线循环
 step：Ref(k<0) 复制 column[|k|..] 再 NaN 填尾；Delta(k) = Sub(x, x.shifted(k))；Ema/Rolling 先物化到 spare[0]；
       Pair 两边物化后 zip 成 Vec<(f64,f64)>
-rolling_into：Mean/Max/Min 转给 barq_generic；其余 → window.rs 累加器 / order.rs / rolling_arg_extreme_into
+rolling_into：Mean/Max/Min 转给 phasor_generic；其余 → window.rs 累加器 / order.rs / rolling_arg_extreme_into
 ```
 
 `rolling_into` 转出去的核分别见 [O(1) 滚动累加器](../algorithms/rolling-accumulators.md)、[单调队列](../algorithms/monotonic-queue.md)和[顺序统计量](../algorithms/order-statistics.md)。
@@ -56,7 +56,7 @@ rolling_into：Mean/Max/Min 转给 barq_generic；其余 → window.rs 累加器
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；阅读陷阱第 9 条说的就是 `run_column` 对调度器不变量的依赖。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；阅读陷阱第 9 条说的就是 `run_column` 对调度器不变量的依赖。
 - [依赖图编译：哈希合并、Ref 视图与槽位调度](../algorithms/factor-graph.md)：`nodes` 的顺序、槽位与视图都在那里决定。
 - [O(1) 滚动累加器](../algorithms/rolling-accumulators.md)：`rolling_into` 调用的大部分核。
 - [顺序统计量：有序环与树状数组](../algorithms/order-statistics.md)：`Quantile`/`Med`/`Rank`/`Mad` 的核，以及 O(n log n) 的树状数组路径。

@@ -2,11 +2,11 @@
 title: execute_order 的固定顺序
 kind: algorithm
 summary: 零钉、忽略检查、校验、换算链、随机拒单、分发：顺序不能换，每一步都有 fixture 钉住。
-parent: barq-exec
+parent: phasor-exec
 related: [size-cascade, validated-order, errors-vs-rejections, status-info, float-tolerance, stateless-rng]
 tags: [execution, validation, ordering]
 sources:
-  - crates/barq-exec/src/kernel.rs:559-701
+  - crates/phasor-exec/src/kernel.rs:559-701
 order: 801
 ---
 
@@ -16,10 +16,10 @@ order: 801
 
 ## 位置
 
-- `crates/barq-exec/src/kernel.rs:559-701`：`execute_validated`
-- `crates/barq-exec/src/kernel.rs:583-596`：忽略检查
-- `crates/barq-exec/src/kernel.rs:598-602`：先 bar 后参数
-- `crates/barq-exec/src/kernel.rs:679-693`：随机拒单
+- `crates/phasor-exec/src/kernel.rs:559-701`：`execute_validated`
+- `crates/phasor-exec/src/kernel.rs:583-596`：忽略检查
+- `crates/phasor-exec/src/kernel.rs:598-602`：先 bar 后参数
+- `crates/phasor-exec/src/kernel.rs:679-693`：随机拒单
 
 ## `execute_validated` 的固定顺序
 
@@ -55,7 +55,7 @@ flowchart TD
 
 ## 相关
 
-- [barq-exec：撮合内核](../crates/barq-exec.md)：`execute_order` 是这个 crate 的唯一入口。
+- [phasor-exec：撮合内核](../crates/phasor-exec.md)：`execute_order` 是这个 crate 的唯一入口。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：流程图里“数量换算链”那一步的展开。
 - [ValidatedOrder：按列提升参数校验](../concepts/validated-order.md)：参数校验那一半为什么能提到循环外、为什么违例要带着走。
 - [错误与拒单](../concepts/errors-vs-rejections.md)：哪些出口是 `Err`，哪些是 `Ignored` / `Rejected`。

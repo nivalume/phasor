@@ -20,7 +20,7 @@ describe("resolveHref", () => {
     expect(resolveHref(from, "../algorithms/sell-leg.md#思路")).toEqual({ type: "page", id: "sell-leg", anchor: "思路" });
   });
   it("resolves links from index.md", () => {
-    expect(resolveHref("wiki/content/index.md", "crates/barq-exec.md")).toEqual({ type: "page", id: "barq-exec", anchor: null });
+    expect(resolveHref("wiki/content/index.md", "crates/phasor-exec.md")).toEqual({ type: "page", id: "phasor-exec", anchor: null });
   });
   it("treats other repository paths as repo links", () => {
     expect(resolveHref(from, "../../../docs/plan.md")).toEqual({ type: "repo", path: "docs/plan.md", anchor: null });
@@ -61,20 +61,20 @@ describe("maskCode and inline code", () => {
 });
 
 describe("resolveCodePath", () => {
-  const files = new Set(["crates/barq-sim/src/lib.rs", "crates/barq-sim/tests/parity_signals.rs", "crates/barq-py/src/array.rs", "tests/fixtures/a.tsv"]);
+  const files = new Set(["crates/phasor-sim/src/lib.rs", "crates/phasor-sim/tests/parity_signals.rs", "crates/phasor-py/src/array.rs", "tests/fixtures/a.tsv"]);
   const exists = (p: string) => files.has(p) || [...files].some((f) => f.startsWith(`${p}/`));
-  const sim = { kind: "crate", id: "barq-sim", parent: null } as never;
-  const algo = { kind: "algorithm", id: "bar-loop", parent: "barq-sim" } as never;
+  const sim = { kind: "crate", id: "phasor-sim", parent: null } as never;
+  const algo = { kind: "algorithm", id: "bar-loop", parent: "phasor-sim" } as never;
   it("keeps paths from the repository root", () => {
     expect(resolveCodePath("tests/fixtures/a.tsv", null, exists)).toBe("tests/fixtures/a.tsv");
     expect(resolveCodePath("tests/fixtures/", null, exists)).toBe("tests/fixtures/");
   });
   it("resolves paths relative to the page's crate, keeping the line suffix", () => {
-    expect(resolveCodePath("src/lib.rs:57-93", sim, exists)).toBe("crates/barq-sim/src/lib.rs:57-93");
-    expect(resolveCodePath("tests/parity_signals.rs", algo, exists)).toBe("crates/barq-sim/tests/parity_signals.rs");
+    expect(resolveCodePath("src/lib.rs:57-93", sim, exists)).toBe("crates/phasor-sim/src/lib.rs:57-93");
+    expect(resolveCodePath("tests/parity_signals.rs", algo, exists)).toBe("crates/phasor-sim/tests/parity_signals.rs");
   });
   it("resolves crate-qualified paths under crates/", () => {
-    expect(resolveCodePath("barq-py/src/array.rs", null, exists)).toBe("crates/barq-py/src/array.rs");
+    expect(resolveCodePath("phasor-py/src/array.rs", null, exists)).toBe("crates/phasor-py/src/array.rs");
   });
   it("returns null for missing files and non-paths", () => {
     expect(resolveCodePath("src/missing.rs", sim, exists)).toBeNull();
@@ -85,27 +85,27 @@ describe("resolveCodePath", () => {
 
 describe("buildWiki", () => {
   const wiki = buildWiki([
-    page("wiki/content/crates/barq-exec.md", "title: exec\nkind: crate\nsummary: s\ndepends: [barq-core]", "# exec\n\n[buy](../algorithms/buy-leg.md)\n"),
-    page("wiki/content/crates/barq-core.md", "title: core\nkind: crate\nsummary: s", "# core\n"),
+    page("wiki/content/crates/phasor-exec.md", "title: exec\nkind: crate\nsummary: s\ndepends: [phasor-core]", "# exec\n\n[buy](../algorithms/buy-leg.md)\n"),
+    page("wiki/content/crates/phasor-core.md", "title: core\nkind: crate\nsummary: s", "# core\n"),
     page(
       "wiki/content/algorithms/buy-leg.md",
-      "title: buy\nkind: algorithm\nsummary: s\nparent: barq-exec\nrelated: [barq-core]",
-      "# buy\n\n见 [exec](../crates/barq-exec.md) 与 `[not](../crates/barq-core.md)`\n",
+      "title: buy\nkind: algorithm\nsummary: s\nparent: phasor-exec\nrelated: [phasor-core]",
+      "# buy\n\n见 [exec](../crates/phasor-exec.md) 与 `[not](../crates/phasor-core.md)`\n",
     ),
   ]);
   it("builds one page per file", () => {
-    expect([...wiki.pages.keys()].sort()).toEqual(["barq-core", "barq-exec", "buy-leg"]);
+    expect([...wiki.pages.keys()].sort()).toEqual(["buy-leg", "phasor-core", "phasor-exec"]);
     expect(wiki.problems).toEqual([]);
   });
   it("creates typed edges from links and frontmatter", () => {
     const key = (e: { source: string; target: string; kind: string }) => `${e.kind}:${e.source}>${e.target}`;
     expect(wiki.edges.map(key).sort()).toEqual(
-      ["depends:barq-exec>barq-core", "link:barq-exec>buy-leg", "link:buy-leg>barq-exec", "parent:buy-leg>barq-exec", "related:buy-leg>barq-core"].sort(),
+      ["depends:phasor-exec>phasor-core", "link:phasor-exec>buy-leg", "link:buy-leg>phasor-exec", "parent:buy-leg>phasor-exec", "related:buy-leg>phasor-core"].sort(),
     );
   });
   it("indexes backlinks and neighbourhoods", () => {
-    expect(wiki.incoming.get("barq-exec")?.map((e) => e.source).sort()).toEqual(["buy-leg", "buy-leg"]);
-    expect([...neighbourhood(wiki, "barq-core", 1)].sort()).toEqual(["barq-core", "barq-exec", "buy-leg"]);
+    expect(wiki.incoming.get("phasor-exec")?.map((e) => e.source).sort()).toEqual(["buy-leg", "buy-leg"]);
+    expect([...neighbourhood(wiki, "phasor-core", 1)].sort()).toEqual(["buy-leg", "phasor-core", "phasor-exec"]);
   });
   it("reports duplicate ids and broken frontmatter", () => {
     const bad = buildWiki([

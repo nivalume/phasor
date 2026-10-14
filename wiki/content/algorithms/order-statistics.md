@@ -2,11 +2,11 @@
 title: 顺序统计量：有序环与树状数组
 kind: algorithm
 summary: Quantile、Med、Rank、Mad 需要有序窗口：窗口 ≤ 256 用有序环，更长或扩展窗口用按排序位置建的两棵树状数组，两条路径逐位一致。
-parent: barq-expr
+parent: phasor-expr
 related: [rolling-accumulators, monotonic-queue, native-evaluation, alpha-feature-sets]
 tags: [rolling, data-structures, fenwick]
 sources:
-  - crates/barq-expr/src/order.rs
+  - crates/phasor-expr/src/order.rs
 order: 706
 ---
 
@@ -16,11 +16,11 @@ order: 706
 
 ## 位置
 
-- `crates/barq-expr/src/order.rs:1-28`：模块文档
-- `crates/barq-expr/src/order.rs:40-62`：`ordered_into`（按窗口长度二选一）
-- `crates/barq-expr/src/order.rs:69-118`：有序环 `ring`
-- `crates/barq-expr/src/order.rs:120-241`：树状数组 `Ordered`
-- `crates/barq-expr/src/order.rs:307`：测试 `ring_and_tree_agree_bit_for_bit`
+- `crates/phasor-expr/src/order.rs:1-28`：模块文档
+- `crates/phasor-expr/src/order.rs:40-62`：`ordered_into`（按窗口长度二选一）
+- `crates/phasor-expr/src/order.rs:69-118`：有序环 `ring`
+- `crates/phasor-expr/src/order.rs:120-241`：树状数组 `Ordered`
+- `crates/phasor-expr/src/order.rs:307`：测试 `ring_and_tree_agree_bit_for_bit`
 
 ## 两条路径
 
@@ -49,7 +49,7 @@ mad()：kth(0) == kth(count−1) → 0；mean = total/n；用 prefix 在 mean �
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；阅读陷阱第 6、7 条（`Rank` 是时序百分位、`Mad` 关于均值）说的就是这里的语义。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；阅读陷阱第 6、7 条（`Rank` 是时序百分位、`Mad` 关于均值）说的就是这里的语义。
 - [O(1) 滚动累加器](../algorithms/rolling-accumulators.md)：不需要有序窗口的统计量走的路径。
 - [单调队列：窗口极值与极值位置](../algorithms/monotonic-queue.md)：只需要极值时的更便宜的结构，同在 `order.rs` 的 `IdxMax`/`IdxMin`。
 - [原生求值：按标的并行走图](../algorithms/native-evaluation.md)：`rolling_into` 把这四个算子分派到 `ordered_into`；树状数组路径是每列 O(n log n) 的例外。

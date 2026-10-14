@@ -2,11 +2,11 @@
 title: Pratt 解析器
 kind: algorithm
 summary: 一张 (left_bp, right_bp) 绑定力表加一个循环决定所有优先级与结合性：l < min_bp 就停，否则以 right_bp 递归解析右边。
-parent: barq-expr
+parent: phasor-expr
 related: [factor-graph, qlib-operators, look-ahead]
 tags: [parser, expressions, compiler]
 sources:
-  - crates/barq-expr/src/parse.rs:67-242
+  - crates/phasor-expr/src/parse.rs:67-242
 order: 701
 ---
 
@@ -16,8 +16,8 @@ order: 701
 
 ## 位置
 
-- `crates/barq-expr/src/parse.rs:67-242`：入口 `parse` 到解析循环
-- `crates/barq-expr/src/parse.rs:224-232`：绑定力表
+- `crates/phasor-expr/src/parse.rs:67-242`：入口 `parse` 到解析循环
+- `crates/phasor-expr/src/parse.rs:224-232`：绑定力表
 
 ## 入口与词法
 
@@ -45,11 +45,11 @@ order: 701
 一元负号的操作数以 11 解析，所以 `-2**2 = -(2**2)`，但 `-a*b = (-a)*b`。
 深度 > 128 报错（防 `((((…))))` 爆栈）。`uses_future()` 只检测 `Ref(x, 负字面量)`，够用，因为非字面量偏移在编译期就被拒绝。
 
-这张表与 Python/Qlib 的优先级不同（比较比 `&`/`|` 绑得紧），见 [barq-expr 的阅读陷阱](../crates/barq-expr.md#阅读陷阱)第 1 条。
+这张表与 Python/Qlib 的优先级不同（比较比 `&`/`|` 绑得紧），见 [phasor-expr 的阅读陷阱](../crates/phasor-expr.md#阅读陷阱)第 1 条。
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；解析是四个阶段里的第一个。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；解析是四个阶段里的第一个。
 - [依赖图编译：哈希合并、Ref 视图与槽位调度](../algorithms/factor-graph.md)：下一阶段，把 `Expression` 树编译进共享的依赖图。
 - [因子算子与 Qlib 对照](../reference/qlib-operators.md)：解析器接受的字段、运算符与函数一览。
 - [延迟与前视偏差](../concepts/look-ahead.md)：`uses_future()` 标出读未来的 `Ref(x, 负数)`。

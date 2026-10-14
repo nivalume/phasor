@@ -102,7 +102,7 @@ export function App() {
       {content}
       {route.name !== "graph" ? (
         <footer className="site-foot">
-          <span>barq 知识库 · {wiki.pages.size} 页 · 内容在 wiki/content/</span>
+          <span>phasor 知识库 · {wiki.pages.size} 页 · 内容在 wiki/content/</span>
           <span>
             代码行号对应提交{" "}
             <a href={`${REPO_URL}/tree/${CODE_REF}`} target="_blank" rel="noreferrer">

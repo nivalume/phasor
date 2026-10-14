@@ -1,4 +1,4 @@
-# barq
+# phasor
 
 A parallel, factor-driven vectorized backtesting engine in Rust.
 
@@ -73,7 +73,7 @@ Factor expressions  →  factor panel (time × symbol)
 Parameters and symbols share a flat column axis. Columns are independent by
 default; cash-sharing groups combine symbols into portfolios, with parameter
 groups simulated in parallel. Python supports both orders and signals with
-account-level results; see [shared accounts](crates/barq-py/README.md#shared-accounts).
+account-level results; see [shared accounts](crates/phasor-py/README.md#shared-accounts).
 
 A second, event-driven tier (phase 2) will run Nautilus-style strategies. It
 takes a completely different execution path but emits the same records — so one
@@ -124,7 +124,7 @@ for what is planned and the known gaps.
 ## Try it
 
 ```bash
-python -m pip install -e crates/barq-py
+python -m pip install -e crates/phasor-py
 python examples/sweep.py
 ```
 
@@ -149,16 +149,16 @@ cash plus the symbols' market value. Prices are synthetic; no downloads needed.
 For Bars + funding + news from a catalog or standalone files:
 
 ```bash
-python -m pip install -e 'crates/barq-py[data]'
+python -m pip install -e 'crates/phasor-py[data]'
 python examples/multi_data.py --source catalog  # also parquet / csv
 python examples/crypto.py --demo
-# Full USD-M history from Binance Vision (writes ~/.cache/barq/catalog):
+# Full USD-M history from Binance Vision (writes ~/.cache/phasor/catalog):
 python examples/download_binance_vision.py
 ```
 
 The offline data example uses two complete `symbol.venue` identities and four
 parameter pairs. Prices stay `[T,2]`; signals are `[T,8]`, with `column_map`
-sharing prices across parameters. See the [data API](crates/barq-py/README.md#local-data-and-parameter-sweeps).
+sharing prices across parameters. See the [data API](crates/phasor-py/README.md#local-data-and-parameter-sweeps).
 
 ## Developing
 
@@ -166,10 +166,10 @@ sharing prices across parameters. See the [data API](crates/barq-py/README.md#lo
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
-pytest crates/barq-py/tests -q
+pytest crates/phasor-py/tests -q
 ```
 
-Local CSV/Parquet reading and alignment live in the optional `barq-data` Rust
+Local CSV/Parquet reading and alignment live in the optional `phasor-data` Rust
 crate. User Schemas decode Arrow batches before simulation; the compute crates
 remain independent of file I/O. Binance HTTP and cache writing live only in
 examples. Parallel account execution uses `std::thread::scope`.

@@ -11,7 +11,7 @@ import { KIND_LABEL, KIND_VAR } from "../lib/kinds";
 import { graphHref, navigate, pageHref } from "../lib/router";
 
 /** Pages shown as the chat feed in the hero window, in this order, when they exist. */
-const FEED = ["reading-roadmap", "system-map", "conventions", "barq-exec", "bar-loop", "pratt-parser", "research-protocol"];
+const FEED = ["reading-roadmap", "system-map", "conventions", "phasor-exec", "bar-loop", "pratt-parser", "research-protocol"];
 
 const STICKERS: { kind: Kind; style: React.CSSProperties }[] = [
   { kind: "crate", style: { top: -30, left: -26, transform: "rotate(-8deg)" } },
@@ -90,16 +90,16 @@ export function HomePage() {
   const indexBody = useMemo(() => (index ? { ...index, body: index.body.replace(/^#\s.*\n+/, "") } : null), [index]);
 
   useEffect(() => {
-    document.title = "barq 知识库";
+    document.title = "phasor 知识库";
   }, []);
 
   return (
     <>
       <section className="hero">
         <div>
-          <span className="tag tag--mono hero__kicker">● barq / 源码阅读</span>
+          <span className="tag tag--mono hero__kicker">● phasor / 源码阅读</span>
           <h1>
-            barq 源码
+            phasor 源码
             <br />
             <span className="marker">知识库</span>
           </h1>
@@ -125,7 +125,7 @@ export function HomePage() {
               <PixelAvatar kind={s.kind} size={50} />
             </div>
           ))}
-          <Window dotted icon="#" title="barq-wiki" subtitle={`${pages.length} 页 · ${wiki.edges.length} 条关系`}>
+          <Window dotted icon="#" title="phasor-wiki" subtitle={`${pages.length} 页 · ${wiki.edges.length} 条关系`}>
             <div className="tabs" role="tablist" aria-label="首页窗口">
               <button type="button" role="tab" aria-selected={tab === "feed"} onClick={() => setTab("feed")}>
                 # 从这里读起

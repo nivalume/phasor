@@ -79,7 +79,7 @@ function shortLabel(page: Page): string {
 
 /**
  * Where each page wants to sit in the global graph, so the picture reads like
- * the architecture: crates in columns by dependency depth (barq-core on the
+ * the architecture: crates in columns by dependency depth (phasor-core on the
  * left, the façades on the right), concepts and algorithms next to their crate,
  * guides along the top, reference and tooling pages along the bottom. Body
  * links and "related" edges are drawn but do not move nodes; with ~15 links

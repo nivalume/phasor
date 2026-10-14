@@ -151,7 +151,7 @@ export function GraphPage({ focus }: { focus: string | null }) {
   const graphRef = useRef<GraphHandle>(null);
 
   useEffect(() => {
-    document.title = "知识图谱 · barq 知识库";
+    document.title = "知识图谱 · phasor 知识库";
   }, []);
 
   useEffect(() => {

@@ -2,25 +2,25 @@
 title: 时间序列交叉验证
 kind: algorithm
 summary: rolling、expanding、purged_kfold 按时间切分行号，walk_forward 只凭训练分数选参，只记录被选参数的测试分数。
-parent: barq-py
+parent: phasor-py
 related: [ml-labels, overfitting-stats, research-harness, look-ahead, strategy-sweep]
 tags: [validation, python, overfitting]
 sources:
-  - crates/barq-py/python/barq/validation.py
-  - crates/barq-py/tests/test_validation.py
+  - crates/phasor-py/python/phasor/validation.py
+  - crates/phasor-py/tests/test_validation.py
 order: 1304
 ---
 
 # 时间序列交叉验证
 
-`barq.validation` 是纯 NumPy 的模块：它只产出行号切分（`Split(train, test)`），再用 `walk_forward` 把"在训练段选参数、在测试段打分"串起来。它不调用 Rust，所以 `test_validation.py` 按路径加载、不需要 Rust 构建。
+`phasor.validation` 是纯 NumPy 的模块：它只产出行号切分（`Split(train, test)`），再用 `walk_forward` 把"在训练段选参数、在测试段打分"串起来。它不调用 Rust，所以 `test_validation.py` 按路径加载、不需要 Rust 构建。
 
 ## 位置
 
-- `crates/barq-py/python/barq/validation.py:83`（`rolling`）
-- `crates/barq-py/python/barq/validation.py:130`（`expanding`）
-- `crates/barq-py/python/barq/validation.py:174`（`purged_kfold`）
-- `crates/barq-py/python/barq/validation.py:253`（`walk_forward`）
+- `crates/phasor-py/python/phasor/validation.py:83`（`rolling`）
+- `crates/phasor-py/python/phasor/validation.py:130`（`expanding`）
+- `crates/phasor-py/python/phasor/validation.py:174`（`purged_kfold`）
+- `crates/phasor-py/python/phasor/validation.py:253`（`walk_forward`）
 
 ## 四个函数
 
@@ -46,9 +46,9 @@ walk_forward(fn, n, splits, *, select=argmax):
 
 ## 相关
 
-- [barq-py：Python 层](../crates/barq-py.md)：`barq.validation` 是 Python 包的一部分。
+- [phasor-py：Python 层](../crates/phasor-py.md)：`phasor.validation` 是 Python 包的一部分。
 - [机器学习标签](../algorithms/ml-labels.md)：`triple_barrier` 的决定行决定 `purge` 取多大。
 - [过拟合检验：PSR、DSR、PBO](../algorithms/overfitting-stats.md)：同一个"选中的参数被高估"问题的统计量一侧。
 - [评估框架与合同检查](../algorithms/research-harness.md)：研究层自己的 walk-forward 组合。
 - [延迟与前视偏差](../concepts/look-ahead.md)：purge 与 embargo 防的是哪种泄露。
-- [@barq.strategy 的参数扫描](../algorithms/strategy-sweep.md)：`fn` 里通常跑的就是一次扫描。
+- [@phasor.strategy 的参数扫描](../algorithms/strategy-sweep.md)：`fn` 里通常跑的就是一次扫描。

@@ -1,8 +1,8 @@
-"""Example-only Binance download and CSV cache writer; never imported by barq."""
+"""Example-only Binance download and CSV cache writer; never imported by phasor."""
 
 from __future__ import annotations
 
-from barq import InstrumentId
+from phasor import InstrumentId
 
 import csv
 import json

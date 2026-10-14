@@ -2,26 +2,26 @@
 title: crossed_above 的交叉规则
 kind: algorithm
 summary: 两个状态变量、三条规则：必须严格从下方上穿，相等只重启计数，只有 NaN 清除"曾在下方"的记忆。
-parent: barq-generic
+parent: phasor-generic
 related: [strategy-sweep, float-tolerance, signal-generation, look-ahead]
 tags: [crossover, signals, nan]
 sources:
-  - crates/barq-generic/src/elementwise.rs:110-162
-  - crates/barq-py/src/expr.rs:15
-  - crates/barq-py/python/barq/strategy.py:45-57
+  - crates/phasor-generic/src/elementwise.rs:110-162
+  - crates/phasor-py/src/expr.rs:15
+  - crates/phasor-py/python/phasor/strategy.py:45-57
 order: 302
 ---
 
 # crossed_above 的交叉规则
 
-`crossed_above_1d` 在 [barq-generic](../crates/barq-generic.md) 的 `elementwise.rs` 里，也是 Python `barq.crossed_above` 背后的实现（[`@barq.strategy` 的参数扫描](../algorithms/strategy-sweep.md) 的示例用它把两条均线变成进出场）。文档里的三条规则就是整个函数。
+`crossed_above_1d` 在 [phasor-generic](../crates/phasor-generic.md) 的 `elementwise.rs` 里，也是 Python `phasor.crossed_above` 背后的实现（[`@phasor.strategy` 的参数扫描](../algorithms/strategy-sweep.md) 的示例用它把两条均线变成进出场）。文档里的三条规则就是整个函数。
 
 ## 位置
 
-- `crates/barq-generic/src/elementwise.rs:110-156`（文档与 `crossed_above_1d`）
-- `crates/barq-generic/src/elementwise.rs:158-162`（`crossed_below_1d`：交换两个参数）
-- `crates/barq-py/src/expr.rs:15`（Python 绑定：逐列调用 `crossed_above_1d`，`wait = 0`）
-- `crates/barq-py/python/barq/strategy.py:45-57`（`barq.crossed_above`）
+- `crates/phasor-generic/src/elementwise.rs:110-156`（文档与 `crossed_above_1d`）
+- `crates/phasor-generic/src/elementwise.rs:158-162`（`crossed_below_1d`：交换两个参数）
+- `crates/phasor-py/src/expr.rs:15`（Python 绑定：逐列调用 `crossed_above_1d`，`wait = 0`）
+- `crates/phasor-py/python/phasor/strategy.py:45-57`（`phasor.crossed_above`）
 
 ## 状态与三条规则
 
@@ -48,8 +48,8 @@ stateDiagram-v2
 
 ## 相关
 
-- [barq-generic：通用窗口算子](../crates/barq-generic.md)：所属 crate；`clippy::float_cmp` 的精确相等守卫是它的阅读陷阱之一。
-- [@barq.strategy 的参数扫描](../algorithms/strategy-sweep.md)：`crossed_above` 在 Python 里的用法，以及信号如何再延迟一根。
+- [phasor-generic：通用窗口算子](../crates/phasor-generic.md)：所属 crate；`clippy::float_cmp` 的精确相等守卫是它的阅读陷阱之一。
+- [@phasor.strategy 的参数扫描](../algorithms/strategy-sweep.md)：`crossed_above` 在 Python 里的用法，以及信号如何再延迟一根。
 - [浮点容差与零钉](../concepts/float-tolerance.md)：全仓库为什么禁止浮点 `==`，以及这里为什么是例外。
 - [信号清洗与出场生成](../algorithms/signal-generation.md)：交叉产生的进出场进入模拟前可以用 `clean_enex` 整理成严格交替。
 - [延迟与前视偏差](../concepts/look-ahead.md)：交叉本身是因果的，但用收盘价算出的交叉仍要延迟一根再交易。

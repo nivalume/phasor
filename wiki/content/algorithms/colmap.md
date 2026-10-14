@@ -2,14 +2,14 @@
 title: ColMap 稳定计数排序与 MappedArray
 kind: algorithm
 summary: ColMap::build 用三趟稳定计数排序按列分组记录，连续时零拷贝；MappedArray 的归约逐位复刻参考实现的 NaN 与平局规则。
-parent: barq-records
+parent: phasor-records
 related: [record-merge, trade-views, column-axis, parity-testing, order-statistics]
 tags: [records, sorting, reduction]
 sources:
-  - crates/barq-records/src/mapped.rs:72-110
-  - crates/barq-records/src/mapped.rs:175-181
-  - crates/barq-records/src/mapped.rs:240-269
-  - crates/barq-records/tests/parity_mapped.rs
+  - crates/phasor-records/src/mapped.rs:72-110
+  - crates/phasor-records/src/mapped.rs:175-181
+  - crates/phasor-records/src/mapped.rs:240-269
+  - crates/phasor-records/tests/parity_mapped.rs
 order: 902
 ---
 
@@ -19,9 +19,9 @@ order: 902
 
 ## 位置
 
-- `crates/barq-records/src/mapped.rs:72-110`（`ColMap::build`）
-- `crates/barq-records/src/mapped.rs:175-181`（`ranges`）
-- `crates/barq-records/src/mapped.rs:240-269`（`MappedArray::for_each_column`、`reduce`）
+- `crates/phasor-records/src/mapped.rs:72-110`（`ColMap::build`）
+- `crates/phasor-records/src/mapped.rs:175-181`（`ranges`）
+- `crates/phasor-records/src/mapped.rs:240-269`（`MappedArray::for_each_column`、`reduce`）
 
 ## ColMap::build：三趟稳定计数排序
 
@@ -43,7 +43,7 @@ O(n + n_cols)。`ranges()` 只在 `contiguous` 时返回 `Some`，此时 `for_ea
 
 ## 相关
 
-- [barq-records：记录与派生视图](../crates/barq-records.md)：所属 crate；`ColMap` 与 `MappedArray` 在类图里的位置。
+- [phasor-records：记录与派生视图](../crates/phasor-records.md)：所属 crate；`ColMap` 与 `MappedArray` 在类图里的位置。
 - [合并每线程缓冲与 order_id 重基](../algorithms/record-merge.md)：合并产生的记录是慢路径的来源之一。
 - [三种交易视图](../algorithms/trade-views.md)：`column_ranges` 要求 `ColMap` 连续，否则 `Err`。
 - [列轴与列主序](../concepts/column-axis.md)：为什么引擎按构造列主序发出、快路径几乎总能走。

@@ -2,13 +2,13 @@
 title: 回撤段识别
 kind: algorithm
 summary: find_drawdowns 逐列扫描净值，用峰、谷两个游标切出回撤段，Recovered 与 Active 两种状态用不同的时长规则。
-parent: barq-records
+parent: phasor-records
 related: [trade-views, metrics, rebuild-chain, excursions]
 tags: [drawdowns, records, risk]
 sources:
-  - crates/barq-records/src/drawdowns.rs:247-324
-  - crates/barq-records/src/drawdowns.rs:137-206
-  - crates/barq-records/tests/parity_drawdowns.rs
+  - crates/phasor-records/src/drawdowns.rs:247-324
+  - crates/phasor-records/src/drawdowns.rs:137-206
+  - crates/phasor-records/tests/parity_drawdowns.rs
 order: 904
 ---
 
@@ -18,8 +18,8 @@ order: 904
 
 ## 位置
 
-- `crates/barq-records/src/drawdowns.rs:247-324`（`find_drawdowns`）
-- `crates/barq-records/src/drawdowns.rs:137-206`（访问器：`duration`、`drawdown` 等）
+- `crates/phasor-records/src/drawdowns.rs:247-324`（`find_drawdowns`）
+- `crates/phasor-records/src/drawdowns.rs:137-206`（访问器：`duration`、`drawdown` 等）
 
 ## 扫描
 
@@ -41,7 +41,7 @@ order: 904
 
 ## 相关
 
-- [barq-records：记录与派生视图](../crates/barq-records.md)：所属 crate；`DrawdownRecords` 的字段与 `generic/nb.py::drawdowns_nb` 的对应。
+- [phasor-records：记录与派生视图](../crates/phasor-records.md)：所属 crate；`DrawdownRecords` 的字段与 `generic/nb.py::drawdowns_nb` 的对应。
 - [指标公式表](../reference/metrics.md)：最大回撤、回撤时长等指标从这些记录取值。
 - [从记录重建净值](../algorithms/rebuild-chain.md)：通常输入的那条净值曲线。
 - [三种交易视图](../algorithms/trade-views.md)：同一 crate 里另一类派生记录，同样遵守"id 就是下标"。

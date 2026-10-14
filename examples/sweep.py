@@ -1,19 +1,19 @@
 """A synthetic moving-average parameter sweep through the Python API."""
 
-import barq
+import phasor
 import numpy as np
 
 
-@barq.strategy
+@phasor.strategy
 def ma_cross(data, fast=5, slow=20):
-    values = barq.factors(
+    values = phasor.factors(
         data,
         fast=f"Mean($close, {fast})",
         slow=f"Mean($close, {slow})",
     )
     return (
-        barq.crossed_above(values["fast"], values["slow"]),
-        barq.crossed_above(values["slow"], values["fast"]),
+        phasor.crossed_above(values["fast"], values["slow"]),
+        phasor.crossed_above(values["slow"], values["fast"]),
     )
 
 

@@ -4,7 +4,7 @@ import { graphHref, pageHref } from "../lib/router";
 
 export function NotFound({ what }: { what: string }) {
   useEffect(() => {
-    document.title = "找不到页面 · barq 知识库";
+    document.title = "找不到页面 · phasor 知识库";
   }, []);
   return (
     <div className="empty-state">

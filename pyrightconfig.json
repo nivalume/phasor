@@ -1,5 +1,5 @@
 {
-  "include": ["examples", "research", "crates/barq-py/python"],
+  "include": ["examples", "research", "crates/phasor-py/python"],
   "exclude": [".venv", "target", "research/tests"],
   "venvPath": ".",
   "venv": ".venv",
@@ -8,11 +8,11 @@
   "executionEnvironments": [
     {
       "root": "examples",
-      "extraPaths": ["crates/barq-py/python"]
+      "extraPaths": ["crates/phasor-py/python"]
     },
     {
       "root": "research",
-      "extraPaths": ["crates/barq-py/python"]
+      "extraPaths": ["crates/phasor-py/python"]
     }
   ]
 }

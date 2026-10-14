@@ -28,7 +28,7 @@ order: 40
 
 | 术语 | 含义 | 详见 |
 |---|---|---|
-| 成交 | 一笔已执行的订单，即 `OrderRecords` 里的一行。 | [barq-records：记录与派生视图](../crates/barq-records.md) |
+| 成交 | 一笔已执行的订单，即 `OrderRecords` 里的一行。 | [phasor-records：记录与派生视图](../crates/phasor-records.md) |
 | 拒单 | 无法成交的订单，以 `Rejected` / `Ignored` 状态返回而不是错误；`Err` 只表示不变量被破坏、整个运行停止。 | [错误与拒单](../concepts/errors-vs-rejections.md) |
 | `StatusInfo` | 订单被拒绝或忽略的原因，共 14 种，判别值与 vectorbt 一一对应。 | [拒单原因 StatusInfo](../reference/status-info.md) |
 | 容差比较 | `is_close` 按 PEP 485 比较（相对 1e-9、绝对 1e-12），但 `inf` 永远不"接近"任何值，因为 `size = +inf`、`price = +inf` 是活的哨兵。 | [浮点容差与零钉](../concepts/float-tolerance.md) |
@@ -43,7 +43,7 @@ order: 40
 
 | 术语 | 含义 | 详见 |
 |---|---|---|
-| 账户 / 组 | 共享现金的相邻列（`group_lens` 给出每组列数），不分组即每列一个账户，账户组也是并行的单位。 | [barq-sim：模拟循环](../crates/barq-sim.md) |
+| 账户 / 组 | 共享现金的相邻列（`group_lens` 给出每组列数），不分组即每列一个账户，账户组也是并行的单位。 | [phasor-sim：模拟循环](../crates/phasor-sim.md) |
 | 调用顺序（`call_seq`） | 共享账户内各列在一根 K 线里的执行顺序，`Auto` 按估算的订单金额升序排，让卖单先释放现金。 | [call_seq=auto：共享账户内的执行顺序](../algorithms/call-seq-auto.md) |
 | 止损锚 | 止损价位的基准（`level = anchor × (1 ∓ stop)`），新开仓或反向时按 `stop_entry_price`（`ValPrice` / `Price` / `FillPrice` / `Close`）重设。 | [止损引擎：触发、跟踪与重新布防](../algorithms/stop-engine.md) |
 | trail | `sl_trail` 打开时止损锚跟着持仓期间的极值走（多头取 high、空头取 low），并且在本根止损测试之后才更新。 | [止损引擎：触发、跟踪与重新布防](../algorithms/stop-engine.md) |
@@ -56,8 +56,8 @@ order: 40
 
 | 术语 | 含义 | 详见 |
 |---|---|---|
-| 记录 | 结构体数组（SoA）形式的成交（`OrderRecords`，含 `CashRecords`）和日志（`LogRecords`），是分析层唯一的数据来源。 | [barq-records：记录与派生视图](../crates/barq-records.md) |
-| 日志行 | 一笔被考虑的订单，含执行前后的状态、请求、结果和 `order_id`（没有成交时为 −1）。 | [barq-records：记录与派生视图](../crates/barq-records.md) |
+| 记录 | 结构体数组（SoA）形式的成交（`OrderRecords`，含 `CashRecords`）和日志（`LogRecords`），是分析层唯一的数据来源。 | [phasor-records：记录与派生视图](../crates/phasor-records.md) |
+| 日志行 | 一笔被考虑的订单，含执行前后的状态、请求、结果和 `order_id`（没有成交时为 −1）。 | [phasor-records：记录与派生视图](../crates/phasor-records.md) |
 | 三种交易视图 | 同一组成交的三种口径：`entry_trades` 一笔进场一条、`exit_trades` 一笔出场一条、`positions` 一个仓位一条，三者只在 Σ pnl 上一致。 | [三种交易视图](../algorithms/trade-views.md) |
 | 回撤段 | 净值从峰值跌下，到回到峰值（`Recovered`）或到最后一根仍在水下（`Active`）为止的一段，深度是 `(valley − peak)/peak`。 | [回撤段识别](../algorithms/drawdowns.md) |
 | MAE / MFE | 每笔交易持仓期间相对进场价的最大不利 / 最大有利偏移，`edge_ratio = mean(mfe_ret) / mean(abs(mae_ret))`。 | [MAE / MFE 与 edge ratio](../algorithms/excursions.md) |
@@ -73,7 +73,7 @@ order: 40
 
 | 术语 | 含义 | 详见 |
 |---|---|---|
-| 因子 | 产生"时间 × 标的"矩阵的具名表达式。 | [barq-expr：因子表达式引擎](../crates/barq-expr.md) |
+| 因子 | 产生"时间 × 标的"矩阵的具名表达式。 | [phasor-expr：因子表达式引擎](../crates/phasor-expr.md) |
 | Pratt 解析器 | 每个二元算子带一对绑定力 `(left_bp, right_bp)`，遇到 `left_bp < min_bp` 就停，以此处理优先级和右结合的 `**`。 | [Pratt 解析器](../algorithms/pratt-parser.md) |
 | 节点 / 槽位 | 依赖图中去重后的运算 / 可复用的暂存序列，节点的最后一个读者算完后槽位就还回空闲栈。 | [依赖图编译：哈希合并、Ref 视图与槽位调度](../algorithms/factor-graph.md) |
 | 哈希合并 | 以 `(Op, 输入节点 id)` 为键 intern 节点，结构相同的子表达式就是同一个节点，只算一次。 | [依赖图编译：哈希合并、Ref 视图与槽位调度](../algorithms/factor-graph.md) |
@@ -98,7 +98,7 @@ order: 40
 | 术语 | 含义 | 详见 |
 |---|---|---|
 | 前视偏差 | 在 `t` 收盘才知道的值在 `t` 就拿来交易；信号工具因此默认延迟一根 K 线，或把延迟当参数。 | [延迟与前视偏差](../concepts/look-ahead.md) |
-| 预注册 | 先把假设和规格写进账本并审批（`registered`），再一次性运行，失败的运行也计入试验数 N。 | [研究协议 barq_lab](../tooling/research-protocol.md) |
+| 预注册 | 先把假设和规格写进账本并审批（`registered`），再一次性运行，失败的运行也计入试验数 N。 | [研究协议 phasor_lab](../tooling/research-protocol.md) |
 | 哈希链账本 | `ledger.jsonl` 的每条记录带上一条的 hash，打开时逐行校验，被篡改就报 `LedgerError`。 | [哈希链账本](../algorithms/hash-chain-ledger.md) |
 | 合同检查 | `contract_check` 在合成面板上比较前缀计算与全长计算的前段，加了后面的 K 线会改变前面的值就是前视。 | [评估框架与合同检查](../algorithms/research-harness.md) |
 | Bonferroni 门槛 | t 统计量门槛随试验数 N 上调，双侧为 `Φ⁻¹(1 − α/(2N))`。 | [门槛、多重比较与原创性检查](../algorithms/research-gates.md) |

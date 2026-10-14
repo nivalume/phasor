@@ -2,12 +2,12 @@
 title: 信号冲突解析链与 signals_to_size
 kind: algorithm
 summary: signals.rs 里顺序固定的纯函数先解止损、进出与方向冲突，再由 signals_to_size 把幸存信号变成有符号数量。
-parent: barq-sim
+parent: phasor-sim
 related: [prepare-order, stop-engine, size-cascade, parity-testing, short-margin]
 tags: [signals, conflicts, sizing]
 sources:
-  - crates/barq-sim/src/signals.rs:1-401
-  - crates/barq-sim/tests/parity_signals.rs
+  - crates/phasor-sim/src/signals.rs:1-401
+  - crates/phasor-sim/tests/parity_signals.rs
   - tests/fixtures/signals.tsv
 order: 1005
 ---
@@ -18,11 +18,11 @@ order: 1005
 
 ## 位置
 
-- `crates/barq-sim/src/signals.rs:85-120`（`from_stop`）
-- `crates/barq-sim/src/signals.rs:129-172`（`resolve_signal_conflict`）
-- `crates/barq-sim/src/signals.rs:176-208`（`resolve_dir_conflict`）
-- `crates/barq-sim/src/signals.rs:217-258`（`resolve_opposite_entry`）
-- `crates/barq-sim/src/signals.rs:290-401`（`signals_to_size`）
+- `crates/phasor-sim/src/signals.rs:85-120`（`from_stop`）
+- `crates/phasor-sim/src/signals.rs:129-172`（`resolve_signal_conflict`）
+- `crates/phasor-sim/src/signals.rs:176-208`（`resolve_dir_conflict`）
+- `crates/phasor-sim/src/signals.rs:217-258`（`resolve_opposite_entry`）
+- `crates/phasor-sim/src/signals.rs:290-401`（`signals_to_size`）
 
 ## 解析链
 
@@ -55,7 +55,7 @@ order: 1005
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate；这些函数与 vectorbt `*_nb` 函数的逐一对应。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate；这些函数与 vectorbt `*_nb` 函数的逐一对应。
 - [from_signals 的决策顺序](../algorithms/prepare-order.md)：解析链在流程图里的位置与调用条件。
 - [止损引擎：触发、跟踪与重新布防](../algorithms/stop-engine.md)：阶段 1 `from_stop` 的输入从哪来。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：`signals_to_size` 产出的 `Amount`/`Value`/`Percent` 在内核里怎样换算。

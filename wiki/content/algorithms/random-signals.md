@@ -2,11 +2,11 @@
 title: 带种子的随机信号
 kind: algorithm
 summary: 每个抽样只由 (seed, row, col) 决定；random_n 用部分 Fisher–Yates，恰好 n 个、无放回，且 random_n(n) 是 random_n(m) 的前缀。
-parent: barq-signals
+parent: phasor-signals
 related: [stateless-rng, synthetic-prices, signal-generation, research-gates]
 tags: [random, signals, seed]
 sources:
-  - crates/barq-signals/src/random.rs
+  - crates/phasor-signals/src/random.rs
 order: 403
 ---
 
@@ -16,11 +16,11 @@ order: 403
 
 ## 位置
 
-- `crates/barq-signals/src/random.rs:20-35`（`mix`、`uniform`，落在 `[0,1)`）
-- `crates/barq-signals/src/random.rs:48-56`（`pick_rows`：部分 Fisher–Yates）
-- `crates/barq-signals/src/random.rs:66`（`random_by_prob`）
-- `crates/barq-signals/src/random.rs:87`（`random_n`）
-- `crates/barq-signals/src/random.rs:114`（`random_entries_exits`）
+- `crates/phasor-signals/src/random.rs:20-35`（`mix`、`uniform`，落在 `[0,1)`）
+- `crates/phasor-signals/src/random.rs:48-56`（`pick_rows`：部分 Fisher–Yates）
+- `crates/phasor-signals/src/random.rs:66`（`random_by_prob`）
+- `crates/phasor-signals/src/random.rs:87`（`random_n`）
+- `crates/phasor-signals/src/random.rs:114`（`random_entries_exits`）
 
 ## 三个生成器
 
@@ -30,8 +30,8 @@ order: 403
 
 ## 相关
 
-- [barq-signals：信号工具箱](../crates/barq-signals.md)：所属 crate；三份 SplitMix64 副本待合并（P3）是它的阅读陷阱之一。
+- [phasor-signals：信号工具箱](../crates/phasor-signals.md)：所属 crate；三份 SplitMix64 副本待合并（P3）是它的阅读陷阱之一。
 - [无状态随机数 SplitMix64](../concepts/stateless-rng.md)：模拟器里的同一个思路，以及为什么随机数不能依赖线程或分组。
-- [带种子的合成价格](../algorithms/synthetic-prices.md)：`barq-generic` 里带 salt 的另一份副本。
+- [带种子的合成价格](../algorithms/synthetic-prices.md)：`phasor-generic` 里带 salt 的另一份副本。
 - [信号清洗与出场生成](../algorithms/signal-generation.md)：`random_entries_exits` 的输出已经严格交替，与 `clean_enex` 的结果形状相同。
 - [门槛、多重比较与原创性检查](../algorithms/research-gates.md)：研究协议的负对照（随机因子、置换、泄露）必须被门槛拒绝，与这里的零模型是同一个思路。

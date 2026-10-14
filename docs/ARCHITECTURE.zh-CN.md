@@ -1,8 +1,8 @@
-# barq 架构
+# phasor 架构
 
 [English](ARCHITECTURE.md)
 
-唯一的架构文档，自顶向下：barq 为什么存在、系统全貌、按数据流顺序讲每个阶段、横切问题，最后是计划。中英文章节编号一致，代码注释里的 `docs/ARCHITECTURE.md §7.3` 对两个版本都成立。
+唯一的架构文档，自顶向下：phasor 为什么存在、系统全貌、按数据流顺序讲每个阶段、横切问题，最后是计划。中英文章节编号一致，代码注释里的 `docs/ARCHITECTURE.md §7.3` 对两个版本都成立。
 
 以代码为准，本文对照提交 `be1f38c` 核对过。实测数字是特定机器上的观测，不是保证。图由 `python docs/img/generate.py` 生成。
 配套的源码知识库（阅读顺序、各模块核心算法、类图与时序图、练习、延伸资料）在 [`wiki/`](../wiki/content/index.md)。
@@ -14,17 +14,17 @@
 0. [约定](#0-约定)
 1. [目标与动机](#1-目标与动机)
 2. [系统总览](#2-系统总览)
-3. [基础层 barq-core 与 barq-model](#3-基础层-barq-core-与-barq-model)
-4. [数据层 barq-data 与 barq.data](#4-数据层-barq-data-与-barqdata)
-5. [因子表达式 barq-expr](#5-因子表达式-barq-expr)
+3. [基础层 phasor-core 与 phasor-model](#3-基础层-phasor-core-与-phasor-model)
+4. [数据层 phasor-data 与 phasor.data](#4-数据层-phasor-data-与-phasordata)
+5. [因子表达式 phasor-expr](#5-因子表达式-phasor-expr)
 6. [信号](#6-信号)
-7. [撮合内核 barq-exec](#7-撮合内核-barq-exec)
-8. [模拟循环 barq-sim](#8-模拟循环-barq-sim)
-9. [记录 barq-records](#9-记录-barq-records)
-10. [分析 barq-analysis](#10-分析-barq-analysis)
+7. [撮合内核 phasor-exec](#7-撮合内核-phasor-exec)
+8. [模拟循环 phasor-sim](#8-模拟循环-phasor-sim)
+9. [记录 phasor-records](#9-记录-phasor-records)
+10. [分析 phasor-analysis](#10-分析-phasor-analysis)
 11. [并行](#11-并行)
-12. [Python 层 barq-py](#12-python-层-barq-py)
-13. [研究层 research/barq_lab](#13-研究层-researchbarq_lab)
+12. [Python 层 phasor-py](#12-python-层-phasor-py)
+13. [研究层 research/phasor_lab](#13-研究层-researchphasor_lab)
 14. [验证](#14-验证)
 15. [基准测试与性能](#15-基准测试与性能)
 16. [开发流程](#16-开发流程)
@@ -49,7 +49,7 @@
 
 ## 1. 目标与动机
 
-### 1.1 barq 用来做什么
+### 1.1 phasor 用来做什么
 
 1. **并行参数扫描**：成千上万组参数作为同一次运行里相互独立的列。
 2. **跨标的或多资产账户的并行回测**：共享账户是一组相邻的列（§8.3）。
@@ -61,12 +61,12 @@
 
 | 发现 | 依据 | 结论 |
 |---|---|---|
-| 把分支密集的循环改写成 Rust 并不会更快 | vectorbt 自带的 Rust 后端：`simulate_from_orders` 相对 Numba **0.73×–1.15×**，但可向量化的操作（1000×100 上的 `diff`、`pct_change`、平移）**6–10×**；barq 的基准复现了 0.74×–0.82×（§15.1） | 速度要靠设计，不靠编译器 |
+| 把分支密集的循环改写成 Rust 并不会更快 | vectorbt 自带的 Rust 后端：`simulate_from_orders` 相对 Numba **0.73×–1.15×**，但可向量化的操作（1000×100 上的 `diff`、`pct_change`、平移）**6–10×**；phasor 的基准复现了 0.74×–0.82×（§15.1） | 速度要靠设计，不靠编译器 |
 | 事件驱动的参考实现在结构上无法并行扫描 | NautilusTrader 的 `BacktestNode::run()` 是顺序 `for`；状态是全局消息总线后面的 `Rc<RefCell<..>>`；每个事件约 1.2–1.9 µs | 并行就是机会所在 |
 
 结果（§15.1）：单线程比 vectorbt 的 Numba 循环快 2.6×–3.3×，4 线程快 9.7×–12.1×。各项设计（列主序扫描、栈上状态、`FlexArray` 标量快路径、多线程）分别贡献多少，尚未测量。
 
-### 1.3 barq 不是什么
+### 1.3 phasor 不是什么
 
 - 暂时不是事件驱动引擎：没有订单簿、tick 和延迟模型，按 K 线撮合。
 - 不是数据供应商：库 crate 从不下载或写数据，网络代码只在 `examples/`。
@@ -86,10 +86,10 @@
 
 ```mermaid
 flowchart LR
-  A["A 层（阶段 1）<br/>向量化：输入数组"] --> K["barq_exec::execute_order"]
+  A["A 层（阶段 1）<br/>向量化：输入数组"] --> K["phasor_exec::execute_order"]
   B["B 层（阶段 2，计划中）<br/>事件驱动 Strategy"] -.-> K
   K --> R["RecordSink → 相同的记录格式"]
-  R --> P["barq-analysis（只写一次）"]
+  R --> P["phasor-analysis（只写一次）"]
 ```
 
 向量化层每列每根 K 线是纳秒级，事件驱动层每个事件是微秒级：前者做不到逼真，后者做不到快。两层改为共享输出和内核，于是一次扫描可以和一次回放逐列对照。所以阶段 1 保留两条约束：内核能对单根 K 线独立调用；记录通过 `RecordSink` trait 写出（§9.3）。
@@ -98,25 +98,25 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 ### 2.3 Crate 划分
 
-![Crate 依赖图：barq-core 在最底层；其上是 model、generic、signals；再上是 exec、data、expr、indicators；然后 records、sim；analysis 在顶层；barq 和 barq-py 是门面](img/zh/crates.svg)
+![Crate 依赖图：phasor-core 在最底层；其上是 model、generic、signals；再上是 exec、data、expr、indicators；然后 records、sim；analysis 在顶层；phasor 和 phasor-py 是门面](img/zh/crates.svg)
 
 | Crate | 职责 |
 |---|---|
-| `barq-core` | `Matrix`、`FlexArray`、列标签、浮点容差、`Error`（§3）；无外部依赖 |
-| `barq-model` | 撮合枚举、id、`BarType`、`OhlcvPanel`、定点 `Price`/`Quantity`（§3.6） |
-| `barq-generic` | 滚动 / 扩展 / EWM 窗口、平移、填充、交叉；带种子的合成价格（`random_walk`、`gbm`、`ohlc_from_close`） |
-| `barq-signals` | 信号清洗、生成离场、排名、区间（§6.2） |
-| `barq-indicators` | MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV 及参数扫描（§6.4） |
-| `barq-expr` | 表达式解析、图编译、原生与 Polars 后端、Alpha158/360（§5） |
-| `barq-exec` | 下单撮合内核（§7） |
-| `barq-records` | 记录格式、sink、成交、回撤、mapped array（§9） |
-| `barq-sim` | `from_orders` / `from_signals` 循环、止损止盈、分组、并行执行（§8） |
-| `barq-analysis` | `Portfolio`、净值/收益链、指标、统计、汇总（§10） |
-| `barq-data` | CSV / Parquet / catalog → Arrow → 面板，按时点对齐（§4） |
-| `barq` | 门面、`prelude`、`SignalSweep`（§6.1）；`data` feature 引入 barq-data |
-| `barq-py` | PyO3 扩展 `barq._barq` + Python 包 `barq`（§12） |
+| `phasor-core` | `Matrix`、`FlexArray`、列标签、浮点容差、`Error`（§3）；无外部依赖 |
+| `phasor-model` | 撮合枚举、id、`BarType`、`OhlcvPanel`、定点 `Price`/`Quantity`（§3.6） |
+| `phasor-generic` | 滚动 / 扩展 / EWM 窗口、平移、填充、交叉；带种子的合成价格（`random_walk`、`gbm`、`ohlc_from_close`） |
+| `phasor-signals` | 信号清洗、生成离场、排名、区间（§6.2） |
+| `phasor-indicators` | MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV 及参数扫描（§6.4） |
+| `phasor-expr` | 表达式解析、图编译、原生与 Polars 后端、Alpha158/360（§5） |
+| `phasor-exec` | 下单撮合内核（§7） |
+| `phasor-records` | 记录格式、sink、成交、回撤、mapped array（§9） |
+| `phasor-sim` | `from_orders` / `from_signals` 循环、止损止盈、分组、并行执行（§8） |
+| `phasor-analysis` | `Portfolio`、净值/收益链、指标、统计、汇总（§10） |
+| `phasor-data` | CSV / Parquet / catalog → Arrow → 面板，按时点对齐（§4） |
+| `phasor` | 门面、`prelude`、`SignalSweep`（§6.1）；`data` feature 引入 phasor-data |
+| `phasor-py` | PyO3 扩展 `phasor._phasor` + Python 包 `phasor`（§12） |
 
-外部运行时依赖：`rayon`（barq-expr）、可选 `polars` 0.46（barq-expr）、`arrow-*`/`parquet` 59 + `csv`（barq-data）、`pyo3`/`numpy` 0.29（barq-py）。barq-sim 只用 `std::thread::scope`。
+外部运行时依赖：`rayon`（phasor-expr）、可选 `polars` 0.46（phasor-expr）、`arrow-*`/`parquet` 59 + `csv`（phasor-data）、`pyo3`/`numpy` 0.29（phasor-py）。phasor-sim 只用 `std::thread::scope`。
 
 ### 2.4 范围决策
 
@@ -131,15 +131,15 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 ---
 
-## 3. 基础层 barq-core 与 barq-model
+## 3. 基础层 phasor-core 与 phasor-model
 
 ### 3.1 列轴
 
 ![列轴：col = param_idx × n_symbols + symbol_idx；参数重复、标的平铺；每个账户是一段相邻的列；内存中每列是连续的一段](img/zh/columns.svg)
 
-- 参数标签**重复**（`Level::repeat`），标的标签**平铺**（`Level::tile`），见 `crates/barq-core/src/columns.rs`。
+- 参数标签**重复**（`Level::repeat`），标的标签**平铺**（`Level::tile`），见 `crates/phasor-core/src/columns.rs`。
 - **相邻性**：一组参数占相邻的列，所以共享账户就是一个切片（`group_lens=[2,2,2]`）。模拟器只需要形状和分组长度。
-- 这个布局是构造函数的约定（`Level`、`column_of`、`SignalSweep`、`barq.strategy.sweep`），由 `one_parameter_combination_occupies_contiguous_columns` 测试固定，运行时不检查。
+- 这个布局是构造函数的约定（`Level`、`column_of`、`SignalSweep`、`phasor.strategy.sweep`），由 `one_parameter_combination_occupies_contiguous_columns` 测试固定，运行时不检查。
 - **标签**：`Columns { levels, n_cols }`；`Label = Int | Float | Str | Bool`（浮点按位比较）。`group_indices(level)` 支撑按参数汇总（§10.5）。
 
 ### 3.2 内存布局
@@ -165,7 +165,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 ### 3.4 浮点容差层
 
-`crates/barq-core/src/math.rs`：
+`crates/phasor-core/src/math.rs`：
 
 | 项 | 规则 |
 |---|---|
@@ -180,7 +180,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 - `Err(Error::{Broadcast, FlexLen, UnknownLevel, LevelWidth, Invariant})` 表示不变量被破坏（负现金、非法参数），运行停止。
 - **拒单从来不是 `Err`**：它是 `OrderResult`，`status = Ignored | Rejected`，`status_info` 给出原因（§7.6），并记录在日志中（§9.4）。
 
-### 3.6 领域模型（barq-model）
+### 3.6 领域模型（phasor-model）
 
 | 项 | 说明 |
 |---|---|
@@ -193,7 +193,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 ---
 
-## 4. 数据层 barq-data 与 barq.data
+## 4. 数据层 phasor-data 与 phasor.data
 
 ```mermaid
 flowchart LR
@@ -205,11 +205,11 @@ flowchart LR
   W --> A["align → T × 标的"]
 ```
 
-`crates/barq-data/src/lib.rs` 从不下载也从不写入；下载代码在 `examples/`（`binance.py`、`fetch.py`、`download_binance_vision.py`）。
+`crates/phasor-data/src/lib.rs` 从不下载也从不写入；下载代码在 `examples/`（`binance.py`、`fetch.py`、`download_binance_vision.py`）。
 
 ### 4.1 Catalog 目录布局
 
-`<root>/data/<name>/<key>/*.csv | *.parquet`。`name` 是数据集（`bars`、`funding`、`news`）；`key` 对 K 线是 `BarType`，其他数据是 `InstrumentId`。`catalog(root, name, keys)` 返回排好序的文件。Python 默认根目录是 `~/.cache/barq/catalog`。
+`<root>/data/<name>/<key>/*.csv | *.parquet`。`name` 是数据集（`bars`、`funding`、`news`）；`key` 对 K 线是 `BarType`，其他数据是 `InstrumentId`。`catalog(root, name, keys)` 返回排好序的文件。Python 默认根目录是 `~/.cache/phasor/catalog`。
 
 ### 4.2 Schema 与加载
 
@@ -240,11 +240,11 @@ flowchart LR
 
 ### 4.5 Python 数据 API
 
-`crates/barq-py/python/barq/data.py`：`DataSchema(...)`、`files({key: path})`、`Catalog(root, schemas).source(name, keys)` → `.load(start, end)` / `.prepare()`。`BarPanel` 提供 `(T, S)` 的 Fortran 数组、`instruments`、`coverage()`。加载、`prepare` 和 `align` 会释放 GIL；Python 解码器每批重新获取。
+`crates/phasor-py/python/phasor/data.py`：`DataSchema(...)`、`files({key: path})`、`Catalog(root, schemas).source(name, keys)` → `.load(start, end)` / `.prepare()`。`BarPanel` 提供 `(T, S)` 的 Fortran 数组、`instruments`、`coverage()`。加载、`prepare` 和 `align` 会释放 GIL；Python 解码器每批重新获取。
 
 ---
 
-## 5. 因子表达式 barq-expr
+## 5. 因子表达式 phasor-expr
 
 ```rust
 let factors = FactorSet::compile([("trend", "$close / Mean($close, 20) - 1")])?;
@@ -308,7 +308,7 @@ Alpha158 → 357 个节点、17 个槽位、148 个直接写输出；Alpha360 �
 
 | 算子 | 实现 | 每行代价 |
 |---|---|---|
-| `Mean` | 前缀和（`barq_generic::rolling`） | O(1) |
+| `Mean` | 前缀和（`phasor_generic::rolling`） | O(1) |
 | `Max Min` | 单调双端队列 | 均摊 O(1) |
 | `Sum Std Var Skew Kurt WMA Slope Rsquare Resi Corr Cov` | 增量累加器（`window.rs`） | O(1) |
 | `Quantile Med Rank Mad` | 窗口 ≤ 256 用有序环缓冲，否则用基于排序位置的树状数组（`order.rs`） | O(window) 移位 / O(log n) |
@@ -346,23 +346,23 @@ Alpha158 → 357 个节点、17 个槽位、148 个直接写输出；Alpha360 �
 
 ## 6. 信号
 
-**唯一关键的规则：延迟。** 用第 `t` 根 K 线收盘价算出的因子，要等第 `t` 根收盘后才知道；在 `t` 上用它交易就是未来函数。所有辅助函数都默认延迟，或者把延迟作为参数（`crates/barq/tests/factor_path.rs`）。
+**唯一关键的规则：延迟。** 用第 `t` 根 K 线收盘价算出的因子，要等第 `t` 根收盘后才知道；在 `t` 上用它交易就是未来函数。所有辅助函数都默认延迟，或者把延迟作为参数（`crates/phasor/tests/factor_path.rs`）。
 
 ### 6.1 `SignalSweep`（Rust）
 
-`barq::sweep::SignalSweep::from_factor((name, &Matrix), symbols, cases, delay, rule)`：对每个 case × 标的调用 `rule(factor[row - delay, symbol], &params) -> (entry, exit)`；前 `delay` 行和非有限分数不产生信号；列标签为 `factor`/`case`（重复）× `symbol`（平铺）。`args(&swept_close)` 返回填好的 `FromSignals`。示例：`crates/barq/examples/factor_sweep.rs`。
+`phasor::sweep::SignalSweep::from_factor((name, &Matrix), symbols, cases, delay, rule)`：对每个 case × 标的调用 `rule(factor[row - delay, symbol], &params) -> (entry, exit)`；前 `delay` 行和非有限分数不产生信号；列标签为 `factor`/`case`（重复）× `symbol`（平铺）。`args(&swept_close)` 返回填好的 `FromSignals`。示例：`crates/phasor/examples/factor_sweep.rs`。
 
-### 6.2 barq-signals
+### 6.2 phasor-signals
 
 列主序 `&[bool]` 工具：`clean_enex`（严格交替）、`generate_exits`、`exit_after`、`exit_on`、`generate_alternating`、排名（`signal_rank`、`partition_rank` 等）、区间 → `RangeRecords`；带种子的随机信号（`random_by_prob`、`random_n`、`random_entries_exits`），每个随机数只由 `(seed, row, col)` 决定；`labels` 里是机器学习标签（`fixed_horizon_returns`、`trend_labels`、`triple_barrier`、`pivot_labels`），它们读取未来数据，不能当作信号。
 
 ### 6.3 Python 函数式策略
 
 ```python
-@barq.strategy
+@phasor.strategy
 def ma_cross(data, fast, slow):
-    f = barq.factors(data, fast=f"Mean($close, {fast})", slow=f"Mean($close, {slow})")
-    return barq.crossed_above(f["fast"], f["slow"]), barq.crossed_above(f["slow"], f["fast"])
+    f = phasor.factors(data, fast=f"Mean($close, {fast})", slow=f"Mean($close, {slow})")
+    return phasor.crossed_above(f["fast"], f["slow"]), phasor.crossed_above(f["slow"], f["fast"])
 
 pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 ```
@@ -371,13 +371,13 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 6.4 技术指标
 
-`barq-indicators`：`ma mstd bbands rsi stoch macd true_range/atr obv`，在参数网格上计算，列布局同 §3.1（`column_of = comb * n_input + input_col`），共享中间结果有缓存。只有 Rust 接口，单线程。
+`phasor-indicators`：`ma mstd bbands rsi stoch macd true_range/atr obv`，在参数网格上计算，列布局同 §3.1（`column_of = comb * n_input + input_col`），共享中间结果有缓存。只有 Rust 接口，单线程。
 
 ---
 
-## 7. 撮合内核 barq-exec
+## 7. 撮合内核 phasor-exec
 
-`crates/barq-exec/src/kernel.rs` 中的 `execute_order(state, order, reject_draw)` 在一根 K 线上对一个账户执行一笔订单。两个模拟循环都调用它，阶段 2 也会。
+`crates/phasor-exec/src/kernel.rs` 中的 `execute_order(state, order, reject_draw)` 在一根 K 线上对一个账户执行一笔订单。两个模拟循环都调用它，阶段 2 也会。
 
 ### 7.1 状态与请求
 
@@ -421,11 +421,11 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 7.6 结果与拒单原因
 
-`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数。两个循环用 SplitMix64 从 `(seed, row, col)` 算出这个数（`crates/barq-sim/src/random.rs`），只在概率不为 0 时计算，所以结果和线程数、分组都无关。`cash_limit`（参考实现没有，也不在日志格式里）限制一笔买单最多花多少现金，在 `percent` 之前生效；卖单和做空不受影响。
+`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数。两个循环用 SplitMix64 从 `(seed, row, col)` 算出这个数（`crates/phasor-sim/src/random.rs`），只在概率不为 0 时计算，所以结果和线程数、分组都无关。`cash_limit`（参考实现没有，也不在日志格式里）限制一笔买单最多花多少现金，在 `percent` 之前生效；卖单和做空不受影响。
 
 ---
 
-## 8. 模拟循环 barq-sim
+## 8. 模拟循环 phasor-sim
 
 两个循环（订单、信号），各有普通 / 带日志 / 串行 / 并行版本。
 
@@ -463,7 +463,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 8.5 成交之外的现金流
 
-两个循环都接受 `cash_deposits`、`cash_dividends` 和 `cash_earnings`（`crates/barq-sim/src/cash.rs`）。默认值是标量 0，每个账户组只判断一次，不用时每根 K 线没有额外开销。
+两个循环都接受 `cash_deposits`、`cash_dividends` 和 `cash_earnings`（`crates/phasor-sim/src/cash.rs`）。默认值是标量 0，每个账户组只判断一次，不用时每根 K 线没有额外开销。
 
 | 输入 | 入账时点 | 读取位置 | 记录类型 |
 |---|---|---|---|
@@ -474,11 +474,11 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - 入金计入当根 K 线的估值，所以同一根 K 线上按目标仓位下的单会把它投进去。
 - 负数金额最多扣到 `max(free_cash, 0)`，现金不会变成负数；记录里存的是实际入账的金额。
 - `NaN` 表示没有现金流；`±inf` 报错。
-- vectorbt 1.1.0 没有对应功能，所以没有 fixture。`crates/barq-analysis/tests/cash_flows.rs` 检查手算的账户；检查每一条订单日志里的现金和可用现金，等于从记录重建出来的余额（§10.2），覆盖独立账户和共享账户；并检查线程数不影响结果。
+- vectorbt 1.1.0 没有对应功能，所以没有 fixture。`crates/phasor-analysis/tests/cash_flows.rs` 检查手算的账户；检查每一条订单日志里的现金和可用现金，等于从记录重建出来的余额（§10.2），覆盖独立账户和共享账户；并检查线程数不影响结果。
 
 ---
 
-## 9. 记录 barq-records
+## 9. 记录 phasor-records
 
 模拟与分析之间、两层之间的契约。全部是数组结构体。
 
@@ -490,7 +490,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 | `LogRecords` | 37 个：执行前状态、`req_*`、`new_*`、`res_*`、`order_id` | 一笔被考虑的订单 |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | 推导得出（§9.5） |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | 推导得出（§9.6） |
-| `RangeRecords` | start / end / status | barq-signals 的区间 |
+| `RangeRecords` | start / end / status | phasor-signals 的区间 |
 | `CashRecords` | `col, idx, amount, kind` | 一笔不是成交的现金流（§8.5） |
 
 `CashRecords` 作为 `OrderRecords` 的 `cash` 字段存放，所以 sink（`RecordSink::push_cash`）、合并、排序和 `Portfolio` 的构造函数不用新增接口就会带上它；`len()` 和 `ids()` 只数成交。
@@ -529,7 +529,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 
 ---
 
-## 10. 分析 barq-analysis
+## 10. 分析 phasor-analysis
 
 ### 10.1 `Portfolio`
 
@@ -561,7 +561,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 
 ### 10.5 扫描结果汇总
 
-- `traded_only(values)` 把从未交易的账户置为 NaN。**陷阱：**零波动率可能得到 `+inf` 的夏普，简单的 argmax 会选中它（`crates/barq/tests/sweep.rs`）。
+- `traded_only(values)` 把从未交易的账户置为 NaN。**陷阱：**零波动率可能得到 `+inf` 的夏普，简单的 argmax 会选中它（`crates/phasor/tests/sweep.rs`）。
 - `group_by(columns, level, values, Reduce::…)` 按标签汇总；`best_column` 给出胜出者（`window=20, symbol=BTC`）。
 
 ---
@@ -572,10 +572,10 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 
 | 位置 | 机制 | 单位 |
 |---|---|---|
-| barq-sim `simulate_into_parallel` | `std::thread::scope`，连续分块 | 账户组 |
-| barq-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | 一个标的跑完整张图 |
-| barq-expr Polars 后端 | Polars 线程池 | lazy frame |
-| barq-py `lib.rs`、`expr.rs`、`data.rs` | `py.detach`（释放 GIL） | — |
+| phasor-sim `simulate_into_parallel` | `std::thread::scope`，连续分块 | 账户组 |
+| phasor-expr `eval.rs:evaluate` | rayon `into_par_iter().for_each_init` | 一个标的跑完整张图 |
+| phasor-expr Polars 后端 | Polars 线程池 | lazy frame |
+| phasor-py `lib.rs`、`expr.rs`、`data.rs` | `py.detach`（释放 GIL） | — |
 
 其余都是单线程。
 
@@ -588,7 +588,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 - 串行与多线程输出逐位一致（有测试）；多个块出错时取序号最小的块。
 - 用作用域线程而不是线程池：它强制输入为 `Sync`、状态局部于列；单个任务 10⁴–10⁶ 次迭代，调度开销可以忽略。
 
-`cargo run --release --example scaling -p barq-sim`（20,000 × 256，4 核 Xeon）：
+`cargo run --release --example scaling -p phasor-sim`（20,000 × 256，4 核 Xeon）：
 
 | 负载 | 1 线程 | 4 线程 | 加速 |
 |---|---:|---:|---:|
@@ -614,11 +614,11 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ---
 
-## 12. Python 层 barq-py
+## 12. Python 层 phasor-py
 
 ### 12.1 打包
 
-一个 wheel：Rust 扩展 `barq._barq`（PyO3 0.29、`abi3-py39`、maturin）+ Python 包 `crates/barq-py/python/barq/`。可选依赖：`data`（pyarrow）、`test`（pytest、vectorbt 1.1.0）。
+一个 wheel：Rust 扩展 `phasor._phasor`（PyO3 0.29、`abi3-py39`、maturin）+ Python 包 `crates/phasor-py/python/phasor/`。可选依赖：`data`（pyarrow）、`test`（pytest、vectorbt 1.1.0）。
 
 ### 12.2 数组不复制地传递——并且必须是 Fortran 序
 
@@ -626,26 +626,26 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 12.3 模拟入口
 
-`barq.from_signals(close, entries, exits, *, …)` 和 `barq.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。`cash_deposits` 和 `cash_earnings` 的一维数组表示每根 K 线一个值；共享账户的 `cash_deposits` 矩阵是 `(T, n_groups)`，不复制，直接映射到各列。`Portfolio.cash_records()` 返回实际入账的金额。
+`phasor.from_signals(close, entries, exits, *, …)` 和 `phasor.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。`cash_deposits` 和 `cash_earnings` 的一维数组表示每根 K 线一个值；共享账户的 `cash_deposits` 矩阵是 `(T, n_groups)`，不复制，直接映射到各列。`Portfolio.cash_records()` 返回实际入账的金额。
 
 ### 12.4 其他绑定
 
-`barq.FactorSet`（`compile`、`evaluate`、`required_fields`、`uses_future`）、`barq.Expression`、`alpha158()`、`alpha360()`（只有原生后端）；`crossed_above`、`factors`、`@barq.strategy`；`barq.data`（解码器通过 Arrow C Data Interface 拿到 `pyarrow.RecordBatch`，即 `arrow.rs`，唯一的 `unsafe`）；`InstrumentId`、`BarType`；`barq.validation`（纯 NumPy：`rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`，以及在训练集上选参、报告所选参数测试集得分的 `walk_forward`）。
+`phasor.FactorSet`（`compile`、`evaluate`、`required_fields`、`uses_future`）、`phasor.Expression`、`alpha158()`、`alpha360()`（只有原生后端）；`crossed_above`、`factors`、`@phasor.strategy`；`phasor.data`（解码器通过 Arrow C Data Interface 拿到 `pyarrow.RecordBatch`，即 `arrow.rs`，唯一的 `unsafe`）；`InstrumentId`、`BarType`；`phasor.validation`（纯 NumPy：`rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`，以及在训练集上选参、报告所选参数测试集得分的 `walk_forward`）。
 
-### 12.5 `barq.Portfolio` 与 GIL
+### 12.5 `phasor.Portfolio` 与 GIL
 
-- 持有记录（共享组时只排序一次）、源宽度的收盘价、列映射、分组、评分设置，以及一个 `barq_analysis::Cache`：每个方法借用的 Rust `Portfolio`（`Portfolio::from_borrowed`）读写它，一次调用算出的净值曲线下次直接用；`clear_cache()` 释放。
+- 持有记录（共享组时只排序一次）、源宽度的收盘价、列映射、分组、评分设置，以及一个 `phasor_analysis::Cache`：每个方法借用的 Rust `Portfolio`（`Portfolio::from_borrowed`）读写它，一次调用算出的净值曲线下次直接用；`clear_cache()` 释放。
 - 记录以 NumPy 数组组成的 dict 返回（`orders()`、`trades()`、`logs()`、`reason_counts(col)`）。
 - **GIL**：因子求值、数据加载、`from_signals` / `from_orders` 和所有 `Portfolio` 推导都释放（`py.detach`）；只有 NumPy 转换持有。
-- 未公开：滚动指标、回撤记录、技术指标、barq-signals、`CallSeq::Explicit`、Polars。
+- 未公开：滚动指标、回撤记录、技术指标、phasor-signals、`CallSeq::Explicit`、Polars。
 
 ---
 
-## 13. 研究层 research/barq_lab
+## 13. 研究层 research/phasor_lab
 
 ![预注册协议：LLM 提出，人工审阅，契约检查后批准，然后样本内只跑一次、样本外最多 3 批且间隔 90 天、前向影子跟踪；每一步都追加到哈希链账本；LLM 永远看不到结果](img/zh/research.svg)
 
-独立的包（`barq-lab`）。模型写假设和规格，由固定的协议裁决。模型看不到任何结果，所以无法拟合数据；健康的流程大多数时候是拒绝。
+独立的包（`phasor-lab`）。模型写假设和规格，由固定的协议裁决。模型看不到任何结果，所以无法拟合数据；健康的流程大多数时候是拒绝。
 
 ### 13.1 组成部分
 
@@ -660,9 +660,9 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 `propose`（只看得到以往尝试的标题）→ `review` → `approve`（契约检查：能编译、不被 NaN 主导、**前缀一致** = 无未来函数、冒烟回测）→ `run`（样本内只跑一次；失败也计入 N）→ `oos` → `forward`（z < −2 时淘汰）→ `report`。`calibrate` 运行阴性对照，包括一个必须被拒绝的故意泄露未来的样本。
 
-### 13.3 评估框架及其对 barq 的使用
+### 13.3 评估框架及其对 phasor 的使用
 
-`types/factor_ts/harness.py`：`FactorSet.compile`，拒绝 `uses_future`，量化目标权重在 `t` 决定、`t + 1` 执行，然后**一次** `barq.from_orders(..., size_type="targetpercent", cash_sharing=True, call_seq="auto", column_map=…, threads=4)` 覆盖所有成员 × 成本倍数（0×、1×、2×）。门槛：t 统计量超过 Bonferroni 界 `Φ⁻¹(1 − α/2N)`，t ≤ 8（否则怀疑未来函数），2 倍成本下夏普为正，成员和资产之间一致。
+`types/factor_ts/harness.py`：`FactorSet.compile`，拒绝 `uses_future`，量化目标权重在 `t` 决定、`t + 1` 执行，然后**一次** `phasor.from_orders(..., size_type="targetpercent", cash_sharing=True, call_seq="auto", column_map=…, threads=4)` 覆盖所有成员 × 成本倍数（0×、1×、2×）。门槛：t 统计量超过 Bonferroni 界 `Φ⁻¹(1 − α/2N)`，t ≤ 8（否则怀疑未来函数），2 倍成本下夏普为正，成员和资产之间一致。
 
 ---
 
@@ -680,32 +680,32 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 | 测试 | 能发现 |
 |---|---|
-| `barq-exec/tests/parity.rs` | 单次内核调用 → 指出是换算链哪一步坏了 |
-| `barq-exec/tests/parity_sequence.rs` | 串联调用，用自己的输出往下传 → 状态传递、残差 |
-| `barq-analysis/tests/parity_analysis.rs` | 订单 → 净值 → 指标端到端（无法定位） |
+| `phasor-exec/tests/parity.rs` | 单次内核调用 → 指出是换算链哪一步坏了 |
+| `phasor-exec/tests/parity_sequence.rs` | 串联调用，用自己的输出往下传 → 状态传递、残差 |
+| `phasor-analysis/tests/parity_analysis.rs` | 订单 → 净值 → 指标端到端（无法定位） |
 
 ### 14.3 各层的一致性测试
 
 | 测试 | 夹具（行数） | 容差 |
 |---|---|---|
-| `barq-exec/tests/parity.rs` | `execute_order.tsv`（474） | `agree` |
-| `barq-exec/tests/parity_sequence.rs` | `order_sequence.tsv`（1,504 步） | `agree` |
-| `barq-sim/tests/parity_from_orders.rs` | `from_orders.tsv`（290） | `agree`，逐字段 |
-| `barq-sim/tests/parity_from_signals.rs` | `from_signals.tsv`（181） | `agree` |
-| `barq-sim/tests/parity_signals.rs` | `signals.tsv`（5,088，穷举） | `is_close` |
-| `barq-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv`（48） | 相对 1e-9 |
-| `barq-records/tests/parity_trades.rs` | `trades.tsv`（267） | `is_close`，整数精确 |
-| `barq-records/tests/parity_drawdowns.rs` | `drawdowns.tsv`（998） | 相对 1e-12 |
-| `barq-records/tests/parity_mapped.rs` | `mapped.tsv`（28,367） | 相对 1e-12 |
-| `barq-generic/tests/parity_generic.rs` | `generic.tsv`（1,650） | `is_close` |
-| `barq-indicators/tests/parity_indicators.rs` | `indicators.tsv`（480） | `is_close`；扫描逐位一致 |
-| `barq-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv`（5,782） | 精确 / 1e-12 |
-| `barq-analysis/tests/parity_analysis.rs` | `analysis.tsv`（37） | `is_close` |
-| `barq-analysis/tests/parity_metrics.rs` | `metrics.tsv`（2,047） | 相对 1e-9 |
-| `barq-analysis/tests/parity_stats.rs` | `stats.tsv`（72） | 相对 1e-9；标题精确 |
-| `barq-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv`（240）、`qlib_alpha360.tsv`（64） | 1e-6（`CORR*/CORD*` 为 1e-4）；两个后端 |
+| `phasor-exec/tests/parity.rs` | `execute_order.tsv`（474） | `agree` |
+| `phasor-exec/tests/parity_sequence.rs` | `order_sequence.tsv`（1,504 步） | `agree` |
+| `phasor-sim/tests/parity_from_orders.rs` | `from_orders.tsv`（290） | `agree`，逐字段 |
+| `phasor-sim/tests/parity_from_signals.rs` | `from_signals.tsv`（181） | `agree` |
+| `phasor-sim/tests/parity_signals.rs` | `signals.tsv`（5,088，穷举） | `is_close` |
+| `phasor-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv`（48） | 相对 1e-9 |
+| `phasor-records/tests/parity_trades.rs` | `trades.tsv`（267） | `is_close`，整数精确 |
+| `phasor-records/tests/parity_drawdowns.rs` | `drawdowns.tsv`（998） | 相对 1e-12 |
+| `phasor-records/tests/parity_mapped.rs` | `mapped.tsv`（28,367） | 相对 1e-12 |
+| `phasor-generic/tests/parity_generic.rs` | `generic.tsv`（1,650） | `is_close` |
+| `phasor-indicators/tests/parity_indicators.rs` | `indicators.tsv`（480） | `is_close`；扫描逐位一致 |
+| `phasor-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv`（5,782） | 精确 / 1e-12 |
+| `phasor-analysis/tests/parity_analysis.rs` | `analysis.tsv`（37） | `is_close` |
+| `phasor-analysis/tests/parity_metrics.rs` | `metrics.tsv`（2,047） | 相对 1e-9 |
+| `phasor-analysis/tests/parity_stats.rs` | `stats.tsv`（72） | 相对 1e-9；标题精确 |
+| `phasor-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv`（240）、`qlib_alpha360.tsv`（64） | 1e-6（`CORR*/CORD*` 为 1e-4）；两个后端 |
 
-结构性测试：`crates/barq/tests/{sweep,factor_sweep,factor_path}.rs`、`crates/barq-analysis/tests/shared_accounts.rs`、barq-expr 单元测试（§5.5）。
+结构性测试：`crates/phasor/tests/{sweep,factor_sweep,factor_path}.rs`、`crates/phasor-analysis/tests/shared_accounts.rs`、phasor-expr 单元测试（§5.5）。
 
 ### 14.4 变异测试
 
@@ -713,7 +713,7 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 14.5 Python 测试
 
-`crates/barq-py/tests/`：`test_bindings.py`（与在线 vectorbt 的差分测试 + 结构性测试：线程确定性、拒绝 C 序、不写借用的数组），`test_shared_accounts.py`（48 个已提交用例，也在 3 线程下跑），以及 `test_column_map`、`test_data`、`test_examples`、`test_expressions`、`test_strategy`。依赖 vectorbt 的测试在未安装时跳过；安装 `crates/barq-py[test]` 后才能运行。
+`crates/phasor-py/tests/`：`test_bindings.py`（与在线 vectorbt 的差分测试 + 结构性测试：线程确定性、拒绝 C 序、不写借用的数组），`test_shared_accounts.py`（48 个已提交用例，也在 3 线程下跑），以及 `test_column_map`、`test_data`、`test_examples`、`test_expressions`、`test_strategy`。依赖 vectorbt 的测试在未安装时跳过；安装 `crates/phasor-py[test]` 后才能运行。
 
 ### 14.6 重新生成测试夹具
 
@@ -733,7 +733,7 @@ Qlib 生成器在 Qlib 的 conda 环境中运行，用确定性的假数据源�
 ### 15.1 模拟循环对比 vectorbt
 
 ```bash
-cargo run --release --example bench -p barq-sim      # → benchmarks/results/barq.tsv
+cargo run --release --example bench -p phasor-sim      # → benchmarks/results/phasor.tsv
 .venv-parity/bin/python benchmarks/bench_vectorbt.py  # → benchmarks/results/vectorbt.tsv
 python benchmarks/compare.py [--check-baseline]
 ```
@@ -748,22 +748,22 @@ python benchmarks/compare.py [--check-baseline]
 
 | 对比（4 核 Xeon 2.1 GHz，3 次测量） | 中位数范围 |
 |---|---|
-| barq 对 vectorbt Numba | 2.6×–3.3× |
-| barq 对 vectorbt Rust | 3.5×–4.9× |
-| barq 4 线程对 vectorbt Numba | 9.7×–12.1× |
+| phasor 对 vectorbt Numba | 2.6×–3.3× |
+| phasor 对 vectorbt Rust | 3.5×–4.9× |
+| phasor 4 线程对 vectorbt Numba | 9.7×–12.1× |
 | vectorbt Rust 对 vectorbt Numba | 0.74×–0.82× |
 
-给出范围，是因为机器繁忙时 Numba 循环比 barq 损失更多。
+给出范围，是因为机器繁忙时 Numba 循环比 phasor 损失更多。
 
 ### 15.2 其他性能工具
 
 | 命令 | 测量内容 |
 |---|---|
-| `cargo run --release --example bench -p barq-sim` | `from_orders` 与 `from_signals` 负载，供回归门禁 |
+| `cargo run --release --example bench -p phasor-sim` | `from_orders` 与 `from_signals` 负载，供回归门禁 |
 | `uv run python benchmarks/bench_python.py` | Python 层：信号构造、sweep 包装、`Portfolio` 读取 |
-| `cargo run --release --example scaling -p barq-sim` | 线程扩展性（§11.2） |
-| `cargo run --release --example scale -p barq-expr -- <rows> <cols> [ops\|sets]` | 各算子、Alpha158 与 Alpha360 的耗时及峰值 RSS |
-| `cargo bench -p barq-expr --features polars` | 原生对 Polars（§5.6） |
+| `cargo run --release --example scaling -p phasor-sim` | 线程扩展性（§11.2） |
+| `cargo run --release --example scale -p phasor-expr -- <rows> <cols> [ops\|sets]` | 各算子、Alpha158 与 Alpha360 的耗时及峰值 RSS |
+| `cargo bench -p phasor-expr --features polars` | 原生对 Polars（§5.6） |
 
 ### 15.3 因子引擎的演进
 
@@ -785,8 +785,8 @@ python benchmarks/compare.py [--check-baseline]
 |---|---|
 | `mise.toml` | Rust 1.96.0、Python 3.14.6、uv 0.11.33 |
 | `Cargo.toml` | edition 2024、`rust-version = 1.85`；lint `unsafe_code = deny`、`clippy::float_cmp = deny`；release 开 `lto`、`codegen-units = 1` |
-| Feature | `barq-expr/polars`；`barq/data`、`barq/polars` |
-| Python | uv 工作区 `barq-dev`（可编辑安装 `barq[data]`），ruff，pyright |
+| Feature | `phasor-expr/polars`；`phasor/data`、`phasor/polars` |
+| Python | uv 工作区 `phasor-dev`（可编辑安装 `phasor[data]`），ruff，pyright |
 
 ### 16.2 常用命令
 
@@ -794,9 +794,9 @@ python benchmarks/compare.py [--check-baseline]
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
-cargo test -p barq-expr --features polars
-uv sync                                   # 构建并把 barq 安装进 .venv
-uv run --with pytest python -m pytest crates/barq-py/tests -q
+cargo test -p phasor-expr --features polars
+uv sync                                   # 构建并把 phasor 安装进 .venv
+uv run --with pytest python -m pytest crates/phasor-py/tests -q
 python docs/img/generate.py               # 重新生成本文的图
 ```
 
@@ -806,12 +806,12 @@ python docs/img/generate.py               # 重新生成本文的图
 
 | 示例 | 演示内容 |
 |---|---|
-| `examples/sweep.py` | `@barq.strategy` 均线交叉，7 组参数 × 4 个标的，4 线程 |
+| `examples/sweep.py` | `@phasor.strategy` 均线交叉，7 组参数 × 4 个标的，4 线程 |
 | `examples/portfolio.py` | 共享现金再平衡；每组参数一个共享账户 |
 | `examples/multi_data.py` | K 线 + 资金费率 + 新闻，as-of / 窗口对齐，`column_map` |
 | `examples/crypto.py` | 自定义解码器读取 Binance K 线做均线扫描 |
 | `examples/fetch.py`、`binance.py`、`download_binance_vision.py` | 仅示例用的下载器 |
-| `crates/barq/examples/factor_sweep.rs` | Rust：因子 → `SignalSweep` → `from_signals` |
+| `crates/phasor/examples/factor_sweep.rs` | Rust：因子 → `SignalSweep` → `from_signals` |
 
 ---
 
@@ -825,7 +825,7 @@ python docs/img/generate.py               # 重新生成本文的图
 |---|---|
 | 兼容性 | 源码级：改 import，保留名字和签名，不链接（附录 A） |
 | 目标版本 | NautilusTrader **v2**（`on_quote`、`on_trade`、`on_book*`、拆分的 `on_*_event`、`publish_message`、`BarType` 枚举） |
-| 形状 | 持有 `core: StrategyCore` + 用户状态的结构体，`barq_strategy!` 宏，实现 `DataActor` 的 `on_start` / `on_bar` |
+| 形状 | 持有 `core: StrategyCore` + 用户状态的结构体，`phasor_strategy!` 宏，实现 `DataActor` 的 `on_start` / `on_bar` |
 | 最小接口 | `Strategy::new`、`cache.instrument()`、`order_factory.market()`、`submit_order`、`close_all_positions`、`portfolio.is_net_*`、`subscribe_bars`、指标、`on_start/on_bar/on_stop` |
 | 扫描 API | `ParamGrid::new().sweep(…).per_instrument([...])`；`Portfolio::from_strategy::<S>(&data, grid).run()` 返回同样的 `Portfolio` |
 | K 线撮合 | L1 订单簿；每根 K 线拆成 O → H → L → C 四个 tick（离开盘价近的极值在前） |
@@ -851,7 +851,7 @@ python docs/img/generate.py               # 重新生成本文的图
 |---|---|
 | `CallSeq::Explicit` 未公开给 Python | §12.3 |
 | `Symbol` / `Venue` 未驻留，但模块注释说已驻留 | §3.6 |
-| 过时注释：barq-analysis 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程 | crate 文档 |
+| 过时注释：phasor-analysis 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程 | crate 文档 |
 | `propose.py` 引用 `tests/test_propose.py`，实际检查在 `research/tests/test_pipeline.py::test_proposals_never_see_results` | research |
 | 两个 Qlib 夹具使用了不同版本的 Qlib/NumPy/pandas | 夹具文件头 |
 
@@ -859,7 +859,7 @@ python docs/img/generate.py               # 重新生成本文的图
 
 ## 附录 A 许可与代码来源
 
-barq 采用 Apache-2.0。两个参考实现只作为规格和测试预言机；**没有复制任何代码**。
+phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机；**没有复制任何代码**。
 
 | 参考 | 许可 | 结果 |
 |---|---|---|
@@ -888,17 +888,17 @@ barq 采用 Apache-2.0。两个参考实现只作为规格和测试预言机；*
 
 | 主题 | 文件 | 章节 |
 |---|---|---|
-| 矩阵、广播、标签、容差、错误 | `crates/barq-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
-| 枚举、id、K 线、定点数 | `crates/barq-model/src/{enums,ids,bar,types}.rs` | §3.6 |
-| 数据加载与对齐 | `crates/barq-data/src/lib.rs`、`crates/barq-py/python/barq/data.py` | §4 |
-| 表达式 | `crates/barq-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
-| 信号、扫描、指标 | `crates/barq/src/sweep.rs`、`crates/barq-signals/src`、`crates/barq-indicators/src`、`crates/barq-py/python/barq/strategy.py` | §6 |
-| 撮合内核 | `crates/barq-exec/src/{types,kernel}.rs` | §7 |
-| 模拟 | `crates/barq-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
-| 记录 | `crates/barq-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
-| 分析 | `crates/barq-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python 绑定 | `crates/barq-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/barq-py/python/barq/` | §12 |
-| 研究协议 | `research/barq_lab/` | §13 |
+| 矩阵、广播、标签、容差、错误 | `crates/phasor-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
+| 枚举、id、K 线、定点数 | `crates/phasor-model/src/{enums,ids,bar,types}.rs` | §3.6 |
+| 数据加载与对齐 | `crates/phasor-data/src/lib.rs`、`crates/phasor-py/python/phasor/data.py` | §4 |
+| 表达式 | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
+| 信号、扫描、指标 | `crates/phasor/src/sweep.rs`、`crates/phasor-signals/src`、`crates/phasor-indicators/src`、`crates/phasor-py/python/phasor/strategy.py` | §6 |
+| 撮合内核 | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
+| 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
+| 记录 | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
+| 分析 | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
+| Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/` | §12 |
+| 研究协议 | `research/phasor_lab/` | §13 |
 | 一致性测试框架 | `tests/parity/`、`tests/fixtures/`、`crates/*/tests/` | §14 |
-| 基准测试 | `benchmarks/`、`crates/barq-sim/examples/{bench,scaling}.rs`、`crates/barq-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
+| 基准测试 | `benchmarks/`、`crates/phasor-sim/examples/{bench,scaling}.rs`、`crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
 | 图 | `docs/img/generate.py` → `docs/img/{en,zh}/*.svg` | — |

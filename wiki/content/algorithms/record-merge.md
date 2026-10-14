@@ -2,12 +2,12 @@
 title: 合并每线程缓冲与 order_id 重基
 kind: algorithm
 summary: OrderRecords::concat 按块顺序拼接每线程缓冲，大时用 split_at_mut 并行拷贝；Journal::extend 是唯一给日志 order_id 加偏移的地方。
-parent: barq-records
-related: [parallel-simulation, colmap, barq-sim, rebuild-chain]
+parent: phasor-records
+related: [parallel-simulation, colmap, phasor-sim, rebuild-chain]
 tags: [records, merge, parallel]
 sources:
-  - crates/barq-records/src/lib.rs:252-305
-  - crates/barq-records/src/logs.rs:464-484
+  - crates/phasor-records/src/lib.rs:252-305
+  - crates/phasor-records/src/logs.rs:464-484
 order: 901
 ---
 
@@ -17,8 +17,8 @@ order: 901
 
 ## 位置
 
-- `crates/barq-records/src/lib.rs:252-305`（`OrderRecords::concat`）
-- `crates/barq-records/src/logs.rs:464-484`（`Journal::extend`、`Journal::concat`）
+- `crates/phasor-records/src/lib.rs:252-305`（`OrderRecords::concat`）
+- `crates/phasor-records/src/logs.rs:464-484`（`Journal::extend`、`Journal::concat`）
 
 ## 算法
 
@@ -39,7 +39,7 @@ Journal::extend(other):
 
 ## 相关
 
-- [barq-records：记录与派生视图](../crates/barq-records.md)：所属 crate；`SinkBuffer::merge` 与"id 就是下标"的契约。
+- [phasor-records：记录与派生视图](../crates/phasor-records.md)：所属 crate；`SinkBuffer::merge` 与"id 就是下标"的契约。
 - [按账户组并行与确定性合并](../algorithms/parallel-simulation.md)：调用这里的并行驱动，以及合并后逐位一致的理由。
 - [ColMap 稳定计数排序与 MappedArray](../algorithms/colmap.md)：合并过的记录不再连续时走的慢路径。
-- [barq-sim：模拟循环](../crates/barq-sim.md)：共享组记录是执行顺序、排序后 `Journal.order_id` 指向排序前下标的陷阱。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：共享组记录是执行顺序、排序后 `Journal.order_id` 指向排序前下标的陷阱。

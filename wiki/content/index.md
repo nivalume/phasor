@@ -1,20 +1,20 @@
 ---
-title: barq 知识库
+title: phasor 知识库
 kind: guide
-summary: barq 源码知识库的首页：页面怎么组织、按角色从哪里读起、全部 crate、指南、参考与工具链页面的入口。
+summary: phasor 源码知识库的首页：页面怎么组织、按角色从哪里读起、全部 crate、指南、参考与工具链页面的入口。
 related: [system-map, conventions, reading-roadmap, algorithm-index, glossary]
 tags: [index, reading]
 order: 0
 ---
 
-# barq 知识库
+# phasor 知识库
 
 > 这是一份"怎么读"的文档，不是"是什么"的文档。
 > "是什么"在 [`docs/ARCHITECTURE.zh-CN.md`](../../docs/ARCHITECTURE.zh-CN.md)（设计与决策，自上而下）；
 > 本知识库回答三个问题：**按什么顺序读、每段代码的核心算法是什么、看不懂时去哪里补课**。
 > 代码以分支 `claude/kind-mayer-lp439i`（提交 `cffa4f1`）为准，所有 `path:line` 都指向这个版本。
 
-barq 是一个用 Rust 写的并行、因子驱动的向量化回测引擎，带一个 Python 包。项目介绍在 [README.md](../../README.md)。
+phasor 是一个用 Rust 写的并行、因子驱动的向量化回测引擎，带一个 Python 包。项目介绍在 [README.md](../../README.md)。
 
 ## 知识库怎么组织
 
@@ -44,13 +44,13 @@ crate 页的结构固定：**定位 → 文件与阅读顺序 → 类图 → 核
 
 ## 从哪里读起
 
-- **第一次读**：先看 [系统全景](guides/system-map.md)，记住 [贯穿全仓库的约定](guides/conventions.md)，再照 [阅读路线](guides/reading-roadmap.md) 从 [barq-core](crates/barq-core.md) 往上读。
-- **读模拟器**：[barq-exec](crates/barq-exec.md) → [barq-sim](crates/barq-sim.md) → [barq-records](crates/barq-records.md) → [barq-analysis](crates/barq-analysis.md)。
+- **第一次读**：先看 [系统全景](guides/system-map.md)，记住 [贯穿全仓库的约定](guides/conventions.md)，再照 [阅读路线](guides/reading-roadmap.md) 从 [phasor-core](crates/phasor-core.md) 往上读。
+- **读模拟器**：[phasor-exec](crates/phasor-exec.md) → [phasor-sim](crates/phasor-sim.md) → [phasor-records](crates/phasor-records.md) → [phasor-analysis](crates/phasor-analysis.md)。
   核心是 [execute_order 的固定顺序](algorithms/execute-order-pipeline.md)、[数量换算链](algorithms/size-cascade.md)、[一根 K 线](algorithms/bar-loop.md)、[止损引擎](algorithms/stop-engine.md) 和 [从记录重建净值](algorithms/rebuild-chain.md)。
-- **读因子引擎**：[barq-expr](crates/barq-expr.md)。顺着 [Pratt 解析器](algorithms/pratt-parser.md) → [依赖图编译](algorithms/factor-graph.md) → [原生求值](algorithms/native-evaluation.md) → [滚动累加器](algorithms/rolling-accumulators.md) 读。
-  因子变成信号在 [barq-signals](crates/barq-signals.md) 和 [SignalSweep](algorithms/signal-sweep.md)。
-- **写 Python**：[barq-py](crates/barq-py.md)。先读 [Python 边界](concepts/python-boundary.md)：数组为什么必须是 F 序。
-  再读 [跨调用缓存与 GIL](concepts/portfolio-cache.md)、[@barq.strategy 的参数扫描](algorithms/strategy-sweep.md) 和 [时间序列交叉验证](algorithms/ts-cross-validation.md)。数据从 [barq-data](crates/barq-data.md) 进来。
+- **读因子引擎**：[phasor-expr](crates/phasor-expr.md)。顺着 [Pratt 解析器](algorithms/pratt-parser.md) → [依赖图编译](algorithms/factor-graph.md) → [原生求值](algorithms/native-evaluation.md) → [滚动累加器](algorithms/rolling-accumulators.md) 读。
+  因子变成信号在 [phasor-signals](crates/phasor-signals.md) 和 [SignalSweep](algorithms/signal-sweep.md)。
+- **写 Python**：[phasor-py](crates/phasor-py.md)。先读 [Python 边界](concepts/python-boundary.md)：数组为什么必须是 F 序。
+  再读 [跨调用缓存与 GIL](concepts/portfolio-cache.md)、[@phasor.strategy 的参数扫描](algorithms/strategy-sweep.md) 和 [时间序列交叉验证](algorithms/ts-cross-validation.md)。数据从 [phasor-data](crates/phasor-data.md) 进来。
 - **查一个算法或一个词**：[核心算法一览](guides/algorithm-index.md)、[术语表](reference/glossary.md)。
 
 ## 全部页面
@@ -66,19 +66,19 @@ crate 页的结构固定：**定位 → 文件与阅读顺序 → 类图 → 核
 
 ### Crate（按依赖顺序，被依赖的在前）
 
-- [barq-core：基础类型](crates/barq-core.md)：数组、广播、列标签、浮点容差、错误。
-- [barq-model：领域模型](crates/barq-model.md)：领域枚举与 Id，和 vectorbt / Nautilus 对齐。
-- [barq-generic：通用窗口算子](crates/barq-generic.md)：滚动 / 扩展 / EWM 窗口、合成价格。
-- [barq-signals：信号工具箱](crates/barq-signals.md)：清洗、生成、排名、随机、标签。
-- [barq-indicators：技术指标](crates/barq-indicators.md)：技术指标与参数网格。
-- [barq-data：数据层](crates/barq-data.md)：Arrow 读取、面板、按 `available_time` 对齐。
-- [barq-expr：因子表达式引擎](crates/barq-expr.md)：因子 DSL 全链路。
-- [barq-exec：撮合内核](crates/barq-exec.md)：一笔订单对一个账户在一根 K 线上的撮合。
-- [barq-records：记录与派生视图](crates/barq-records.md)：记录格式与派生视图。
-- [barq-sim：模拟循环](crates/barq-sim.md)：驱动内核的两条循环、止损、账户组、并行。
-- [barq-analysis：分析层](crates/barq-analysis.md)：从记录重建净值、全部指标。
-- [barq：门面 crate](crates/barq.md)：prelude 与 `SignalSweep`。
-- [barq-py：Python 层](crates/barq-py.md)：PyO3 扩展与 Python 包。
+- [phasor-core：基础类型](crates/phasor-core.md)：数组、广播、列标签、浮点容差、错误。
+- [phasor-model：领域模型](crates/phasor-model.md)：领域枚举与 Id，和 vectorbt / Nautilus 对齐。
+- [phasor-generic：通用窗口算子](crates/phasor-generic.md)：滚动 / 扩展 / EWM 窗口、合成价格。
+- [phasor-signals：信号工具箱](crates/phasor-signals.md)：清洗、生成、排名、随机、标签。
+- [phasor-indicators：技术指标](crates/phasor-indicators.md)：技术指标与参数网格。
+- [phasor-data：数据层](crates/phasor-data.md)：Arrow 读取、面板、按 `available_time` 对齐。
+- [phasor-expr：因子表达式引擎](crates/phasor-expr.md)：因子 DSL 全链路。
+- [phasor-exec：撮合内核](crates/phasor-exec.md)：一笔订单对一个账户在一根 K 线上的撮合。
+- [phasor-records：记录与派生视图](crates/phasor-records.md)：记录格式与派生视图。
+- [phasor-sim：模拟循环](crates/phasor-sim.md)：驱动内核的两条循环、止损、账户组、并行。
+- [phasor-analysis：分析层](crates/phasor-analysis.md)：从记录重建净值、全部指标。
+- [phasor：门面 crate](crates/phasor.md)：prelude 与 `SignalSweep`。
+- [phasor-py：Python 层](crates/phasor-py.md)：PyO3 扩展与 Python 包。
 
 ### 参考
 
@@ -90,7 +90,7 @@ crate 页的结构固定：**定位 → 文件与阅读顺序 → 类图 → 核
 
 ### 工具链
 
-- [研究协议 barq_lab](tooling/research-protocol.md)：预注册的因子研究协议，模型永远看不到结果。
+- [研究协议 phasor_lab](tooling/research-protocol.md)：预注册的因子研究协议，模型永远看不到结果。
 - [差分测试与 fixture](tooling/parity-testing.md)：参考实现在外部生成 TSV fixture，`cargo test` 重放。
 - [基准协议](tooling/benchmarks.md)：和 vectorbt 逐工作负载对比，同样的工作才比。
 

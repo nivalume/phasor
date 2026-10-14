@@ -10,7 +10,7 @@ Two jobs, and they need different things from the same measurements:
 ```bash
 # Our engine. Release only: a debug build of the execution kernel is ~50x
 # slower and the numbers mean nothing.
-cargo run --release --example bench -p barq-sim
+cargo run --release --example bench -p phasor-sim
 
 # vectorbt, both engines, both tiers. Needs the parity venv.
 .venv-parity/bin/python benchmarks/bench_vectorbt.py
@@ -45,7 +45,7 @@ measures two tiers:
 **The kernel tier is the comparison that means something**: loop against loop,
 with nobody's language bindings in the measurement. Comparing our raw Rust
 against their wrapped call would flatter us by exactly the wrapper's cost and
-say nothing about the loops. Our own Python layer (`barq-py`) is timed
+say nothing about the loops. Our own Python layer (`phasor-py`) is timed
 separately by `bench_python.py`, which covers what a caller pays around the
 loop — signal construction, the sweep wrapper, `Portfolio` reads — rather than
 the loop itself.

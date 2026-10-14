@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Content model of the barq wiki, shared by the React app (through Vite) and by
+ * Content model of the phasor wiki, shared by the React app (through Vite) and by
  * the Node checker (scripts/check-wiki.mjs). Plain ESM JavaScript with JSDoc
  * types so both can import it without a build step.
  *
@@ -456,14 +456,14 @@ export function looksLikePath(text) {
 export function crateContext(page) {
   if (!page) return null;
   if (page.kind === "crate") return page.id;
-  if (page.parent && page.parent.startsWith("barq")) return page.parent;
+  if (page.parent && page.parent.startsWith("phasor")) return page.parent;
   return null;
 }
 
 /**
  * Resolve inline code that names a repository file. Pages often write paths
  * relative to their crate (`src/lib.rs`, `tests/parity_signals.rs`) or to
- * `crates/` (`barq-py/src/array.rs`); try, in order, the path as written, the
+ * `crates/` (`phasor-py/src/array.rs`); try, in order, the path as written, the
  * page's crate directory, and `crates/`. Returns the repo-relative path with
  * any `:line` suffix kept, or null when no candidate exists.
  * @param {string} text
@@ -479,7 +479,7 @@ export function resolveCodePath(text, page, exists) {
   const crate = crateContext(page);
   const candidates = [path];
   if (crate) candidates.push(`crates/${crate}/${path}`);
-  if (/^barq(-[\w]+)?\//.test(path)) candidates.push(`crates/${path}`);
+  if (/^phasor(-[\w]+)?\//.test(path)) candidates.push(`crates/${path}`);
   for (const c of candidates) {
     const normalized = normalizePath(c) + (c.endsWith("/") ? "/" : "");
     if (!normalized.startsWith("..") && exists(normalized.replace(/\/$/, ""))) return normalized + suffix;

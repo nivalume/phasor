@@ -2,25 +2,25 @@
 title: from_orders 的一根 K 线
 kind: algorithm
 summary: simulate_group 每根 K 线先解析全组价格与净值，再按调用顺序逐列执行；value 在 K 线内穿线而不是逐笔重算。
-parent: barq-sim
+parent: phasor-sim
 related: [call-seq-auto, cash-flows, execute-order-pipeline, validated-order, parallel-simulation, prepare-order]
 tags: [simulation, loop, cash-sharing]
 sources:
-  - crates/barq-sim/src/from_orders.rs:328-591
-  - crates/barq-sim/src/from_orders.rs:254-275
-  - crates/barq-sim/src/from_orders.rs:305-312
+  - crates/phasor-sim/src/from_orders.rs:328-591
+  - crates/phasor-sim/src/from_orders.rs:254-275
+  - crates/phasor-sim/src/from_orders.rs:305-312
 order: 1001
 ---
 
 # from_orders 的一根 K 线
 
-`from_orders` 的 `simulate_group` 一次处理一个账户组：每根 K 线先做开盘现金流，再分两遍——第一遍解析全组的价格与估值、算出 `group_value`，第二遍按[调用顺序](../algorithms/call-seq-auto.md)把每列的订单交给[撮合内核](../crates/barq-exec.md)，最后入账收盘收支。它也是 [from_signals 的决策顺序](../algorithms/prepare-order.md)所在循环的模板。
+`from_orders` 的 `simulate_group` 一次处理一个账户组：每根 K 线先做开盘现金流，再分两遍——第一遍解析全组的价格与估值、算出 `group_value`，第二遍按[调用顺序](../algorithms/call-seq-auto.md)把每列的订单交给[撮合内核](../crates/phasor-exec.md)，最后入账收盘收支。它也是 [from_signals 的决策顺序](../algorithms/prepare-order.md)所在循环的模板。
 
 ## 位置
 
-- `crates/barq-sim/src/from_orders.rs:328-591`（`simulate_group`）
-- `crates/barq-sim/src/from_orders.rs:305-312`（为什么分两遍的注释）
-- `crates/barq-sim/src/from_orders.rs:254-275`（`updated_value`）
+- `crates/phasor-sim/src/from_orders.rs:328-591`（`simulate_group`）
+- `crates/phasor-sim/src/from_orders.rs:305-312`（为什么分两遍的注释）
+- `crates/phasor-sim/src/from_orders.rs:254-275`（`updated_value`）
 
 ## 一根 K 线的时序
 
@@ -69,7 +69,7 @@ sequenceDiagram
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate，两条循环与四种入口。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate，两条循环与四种入口。
 - [call_seq=auto：共享账户内的执行顺序](../algorithms/call-seq-auto.md)：第一遍末尾决定第二遍的 `seq`。
 - [成交之外的现金流](../concepts/cash-flows.md)：`at_open` 与 `earn` 在一根 K 线里的位置。
 - [execute_order 的固定顺序](../algorithms/execute-order-pipeline.md)：第二遍每列调用的内核。

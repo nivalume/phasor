@@ -1,9 +1,9 @@
 {
-  "name": "barq-wiki",
+  "name": "phasor-wiki",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "barq knowledge base: Markdown pages in content/ plus a React viewer with a graph of how pages relate.",
+  "description": "phasor knowledge base: Markdown pages in content/ plus a React viewer with a graph of how pages relate.",
   "scripts": {
     "dev": "vite",
     "build": "npm run check && tsc --noEmit && vite build",

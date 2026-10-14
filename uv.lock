@@ -25,8 +25,8 @@ wheels = [
 ]
 
 [[package]]
-name = "barq"
-source = { editable = "crates/barq-py" }
+name = "phasor"
+source = { editable = "crates/phasor-py" }
 dependencies = [
     { name = "numpy" },
 ]
@@ -46,11 +46,11 @@ requires-dist = [
 provides-extras = ["data", "test"]
 
 [[package]]
-name = "barq-dev"
+name = "phasor-dev"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "barq", extra = ["data"] },
+    { name = "phasor", extra = ["data"] },
 ]
 
 [package.dev-dependencies]
@@ -62,7 +62,7 @@ research = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "barq", extras = ["data"], editable = "crates/barq-py" }]
+requires-dist = [{ name = "phasor", extras = ["data"], editable = "crates/phasor-py" }]
 
 [package.metadata.requires-dev]
 research = [

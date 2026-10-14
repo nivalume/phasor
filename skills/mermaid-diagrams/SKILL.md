@@ -4,7 +4,7 @@ description: Draw and validate Mermaid diagrams (classDiagram, sequenceDiagram, 
 license: Apache-2.0 (the repository licence)
 compatibility: Python 3.9+ for the checker. Rendering needs Node.js with @mermaid-js/mermaid-cli and a Chromium; the checker finds Playwright, Puppeteer and system installs or accepts --chrome.
 metadata:
-  author: barq maintainers
+  author: phasor maintainers
   version: "1.0"
   canonical-path: skills/mermaid-diagrams
 ---
@@ -27,7 +27,7 @@ current. One diagram per idea; two small diagrams beat one large one.
 
 | Reader's question | Type | Worked example in this repo |
 |---|---|---|
-| What are the types and who owns / borrows / implements what? | `classDiagram` | `wiki/content/crates/barq-sim.md` (类图) |
+| What are the types and who owns / borrows / implements what? | `classDiagram` | `wiki/content/crates/phasor-sim.md` (类图) |
 | What happens, in what order, between which parts, in one unit of work? | `sequenceDiagram` | `wiki/content/algorithms/bar-loop.md` (one bar of a shared account) |
 | Which decision leads where; what is the fixed order of stages? | `flowchart TD` | `wiki/content/algorithms/prepare-order.md` (`prepare_order`) |
 | What depends on what (crates, tasks, milestones)? | `flowchart BT` / `LR` | `wiki/content/guides/system-map.md` (crate dependencies) |

@@ -2,12 +2,12 @@
 title: PyPortfolio 的跨调用缓存与 GIL
 kind: concept
 summary: PyPortfolio 拥有记录与收盘价拷贝，每次调用用 from_borrowed 借出同一个 Cache 重建视图；引擎计算时释放 GIL。
-parent: barq-py
-related: [rebuild-chain, barq-analysis, python-boundary, sweep-aggregation, stats-registry]
+parent: phasor-py
+related: [rebuild-chain, phasor-analysis, python-boundary, sweep-aggregation, stats-registry]
 tags: [python, cache, gil]
 sources:
-  - crates/barq-py/src/lib.rs:75-197
-  - crates/barq-analysis/src/portfolio.rs:240-260
+  - crates/phasor-py/src/lib.rs:75-197
+  - crates/phasor-analysis/src/portfolio.rs:240-260
 order: 1302
 ---
 
@@ -17,8 +17,8 @@ order: 1302
 
 ## 位置
 
-- `crates/barq-py/src/lib.rs:75-197`（`PyPortfolio`、`core()` 127–151、`assemble()` 159–196）
-- `crates/barq-analysis/src/portfolio.rs:240-260`（`Portfolio::from_borrowed`）
+- `crates/phasor-py/src/lib.rs:75-197`（`PyPortfolio`、`core()` 127–151、`assemble()` 159–196）
+- `crates/phasor-analysis/src/portfolio.rs:240-260`（`Portfolio::from_borrowed`）
 
 ## 拥有什么，每次调用重建什么
 
@@ -35,7 +35,7 @@ core():
 
 ## from_borrowed：分析层一侧
 
-`Cache` 的 `OnceLock` 存的是[重建链](../algorithms/rebuild-chain.md)上的派生结果（持仓、现金、净值、收益、成交、回撤…）。分析层这一侧的入口在 `crates/barq-analysis/src/portfolio.rs`：
+`Cache` 的 `OnceLock` 存的是[重建链](../algorithms/rebuild-chain.md)上的派生结果（持仓、现金、净值、收益、成交、回撤…）。分析层这一侧的入口在 `crates/phasor-analysis/src/portfolio.rs`：
 
 `from_borrowed(&OrderRecords, &Cache)`（240–260）是 Python 层的路径：Python 对象拥有价格与记录，每次调用重建一个借用它们的 `Portfolio<'a>`，派生结果留在调用方的 `Cache` 里供下次复用。它要求记录已经是列主序（不排序，因为排序要每次重复）。`with_scoring` 改 `trades_type` 时，借来的缓存会换成私有缓存而不是改动出借方的。
 
@@ -51,9 +51,9 @@ GIL：`from_signals`/`from_orders`、`stats`、`metrics`、`sharpe_ratio`、`val
 
 ## 相关
 
-- [barq-py：Python 层](../crates/barq-py.md)：`PyPortfolio` 是 Rust 侧三件事里"释放 GIL 调引擎"的落点。
+- [phasor-py：Python 层](../crates/phasor-py.md)：`PyPortfolio` 是 Rust 侧三件事里"释放 GIL 调引擎"的落点。
 - [从记录重建净值](../algorithms/rebuild-chain.md)：`Cache` 里缓存的就是这条链上的序列。
-- [barq-analysis：分析层](../crates/barq-analysis.md)：`Portfolio`、`Cache` 与 `from_borrowed` 的定义所在。
+- [phasor-analysis：分析层](../crates/phasor-analysis.md)：`Portfolio`、`Cache` 与 `from_borrowed` 的定义所在。
 - [统计表注册表](../concepts/stats-registry.md)：`stats()` 返回的表从哪里来。
 - [扫描结果汇总与 +inf 陷阱](../concepts/sweep-aggregation.md)：`traded_only` 为什么存在。
 - [Python 边界：F 序与一维的三种含义](../concepts/python-boundary.md)：`close` 和 `init_cash` 在进入 `PyPortfolio` 之前怎么被借用和展开。

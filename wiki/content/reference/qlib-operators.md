@@ -2,18 +2,18 @@
 title: 因子算子与 Qlib 对照
 kind: reference
 summary: 因子表达式语言的字段、运算符与函数一览，EMA 的参数约定，以及每个算子与 Qlib ops.py 的对应和对照精度。
-related: [barq-expr, pratt-parser, rolling-accumulators, alpha-feature-sets, polars-backend, look-ahead]
+related: [phasor-expr, pratt-parser, rolling-accumulators, alpha-feature-sets, polars-backend, look-ahead]
 tags: [factors, qlib, operators]
 sources:
-  - crates/barq-expr/src/graph.rs:423-437
-  - crates/barq-expr/src/eval.rs:686-730
-  - crates/barq-expr/tests/parity_qlib.rs
+  - crates/phasor-expr/src/graph.rs:423-437
+  - crates/phasor-expr/src/eval.rs:686-730
+  - crates/phasor-expr/tests/parity_qlib.rs
 order: 30
 ---
 
 # 因子算子与 Qlib 对照
 
-[barq-expr](../crates/barq-expr.md) 接受的表达式语言是 Qlib 的方言：大多数公式可以原样照搬，少数地方（优先级、`Ref(x,0)`、WMA 权重）有意或无意地偏离。本页先列出语言本身，再逐算子对照 Qlib。
+[phasor-expr](../crates/phasor-expr.md) 接受的表达式语言是 Qlib 的方言：大多数公式可以原样照搬，少数地方（优先级、`Ref(x,0)`、WMA 权重）有意或无意地偏离。本页先列出语言本身，再逐算子对照 Qlib。
 
 ## 语言速览
 
@@ -39,7 +39,7 @@ order: 30
 
 ## 与 Qlib 的对应
 
-| barq | Qlib `qlib/data/ops.py` | 备注 |
+| phasor | Qlib `qlib/data/ops.py` | 备注 |
 |---|---|---|
 | `$close` | `Feature("close")` | 小写化 |
 | 算术/比较/逻辑算子与同名函数 | `Add Sub … Gt … And Or`（`PairOperator`） | 同一节点 |
@@ -54,13 +54,13 @@ order: 30
 | `alpha158()` / `alpha360()` | `Alpha158DL` / `Alpha360DL.get_feature_config()` | 无标签、无处理器 |
 | — | `Mask`、`ChangeInstrument`、`PRef`、`TResample`、`CSRankNorm` | 不支持 |
 
-Qlib 按表达式字符串缓存、逐标的在 pandas Series 上求值；barq 的对应物是哈希合并的图加按标的并行。Qlib 的 `get_extended_window_size`（"我需要多少历史"）没有对应：barq 从你给的面板第一行起用 `min_periods=1`，预热行要调用方自己补。
+Qlib 按表达式字符串缓存、逐标的在 pandas Series 上求值；phasor 的对应物是哈希合并的图加按标的并行。Qlib 的 `get_extended_window_size`（"我需要多少历史"）没有对应：phasor 从你给的面板第一行起用 `min_periods=1`，预热行要调用方自己补。
 
 各算子的实现在 [O(1) 滚动累加器](../algorithms/rolling-accumulators.md)、[单调队列](../algorithms/monotonic-queue.md)和[顺序统计量](../algorithms/order-statistics.md)；"哈希合并的图"与"按标的并行"分别见[依赖图编译](../algorithms/factor-graph.md)与[原生求值](../algorithms/native-evaluation.md)。
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：这门语言的实现所在；它的阅读陷阱列出了与 Python/Qlib 的每处偏离。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：这门语言的实现所在；它的阅读陷阱列出了与 Python/Qlib 的每处偏离。
 - [Pratt 解析器](../algorithms/pratt-parser.md)：运算符优先级表；比较比 `&`/`|` 绑得紧，与 Python 相反。
 - [O(1) 滚动累加器](../algorithms/rolling-accumulators.md)：`Slope Rsquare Resi Corr Cov` 的 2e-5 掩码与常量窗口处理。
 - [Alpha158 与 Alpha360](../concepts/alpha-feature-sets.md)：`alpha158()` / `alpha360()` 怎样生成。

@@ -110,10 +110,10 @@ def head_to_head(rows: list[dict[str, str]]) -> None:
     # The kernel tier is the honest comparison: loop against loop, with
     # nobody's language bindings inside the measurement.
     print("\nKERNEL — the simulation loop alone (millions of elements/sec, best of N)\n")
-    cols = [("barq", "1"), ("vectorbt-numba-kernel", "1"), ("vectorbt-rust-kernel", "1")]
+    cols = [("phasor", "1"), ("vectorbt-numba-kernel", "1"), ("vectorbt-rust-kernel", "1")]
     if cores > 1:
-        cols.append(("barq", str(cores)))
-    labels = ["barq", "their numba", "their rust", f"barq x{cores}"][: len(cols)]
+        cols.append(("phasor", str(cores)))
+    labels = ["phasor", "their numba", "their rust", f"phasor x{cores}"][: len(cols)]
 
     header = f"{'workload':<22}" + "".join(f"{label:>14}" for label in labels)
     header += f"{'vs numba':>11}{'vs their rust':>15}"
@@ -125,7 +125,7 @@ def head_to_head(rows: list[dict[str, str]]) -> None:
         for impl, threads in cols:
             v = rate.get((w, impl, threads))
             line += f"{fmt_rate(v) if v else '-':>14}"
-        ours = rate.get((w, "barq", "1"))
+        ours = rate.get((w, "phasor", "1"))
         numba = rate.get((w, "vectorbt-numba-kernel", "1"))
         their_rust = rate.get((w, "vectorbt-rust-kernel", "1"))
         line += f"{f'{ours / numba:.2f}x' if ours and numba else '-':>11}"
@@ -133,8 +133,8 @@ def head_to_head(rows: list[dict[str, str]]) -> None:
         print(line)
 
     for label, a, b in [
-        ("barq vs their numba kernel", ("barq", "1"), ("vectorbt-numba-kernel", "1")),
-        ("barq vs their rust kernel ", ("barq", "1"), ("vectorbt-rust-kernel", "1")),
+        ("phasor vs their numba kernel", ("phasor", "1"), ("vectorbt-numba-kernel", "1")),
+        ("phasor vs their rust kernel ", ("phasor", "1"), ("vectorbt-rust-kernel", "1")),
         (
             "their rust vs their numba",
             ("vectorbt-rust-kernel", "1"),
@@ -147,11 +147,11 @@ def head_to_head(rows: list[dict[str, str]]) -> None:
             print(f"  {label}: median {med:.2f}x  (range {lo:.2f}x - {hi:.2f}x)")
 
     if cores > 1:
-        stats = median_ratio(rate, seen, ("barq", str(cores)), ("vectorbt-numba-kernel", "1"))
+        stats = median_ratio(rate, seen, ("phasor", str(cores)), ("vectorbt-numba-kernel", "1"))
         if stats:
             med, lo, hi = stats
             print(
-                f"  barq x{cores} vs their numba kernel: median {med:.2f}x  "
+                f"  phasor x{cores} vs their numba kernel: median {med:.2f}x  "
                 f"(range {lo:.2f}x - {hi:.2f}x)"
             )
         print(
@@ -319,12 +319,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    ours = read(RESULTS / "barq.tsv")
+    ours = read(RESULTS / "phasor.tsv")
     theirs = read(RESULTS / "vectorbt.tsv")
     if not ours:
         print(
-            "no results at benchmarks/results/barq.tsv; run:\n"
-            "  cargo run --release --example bench -p barq-sim",
+            "no results at benchmarks/results/phasor.tsv; run:\n"
+            "  cargo run --release --example bench -p phasor-sim",
             file=sys.stderr,
         )
         return 1
@@ -334,12 +334,12 @@ def main() -> int:
     if args.write_baseline:
         header = (
             "# Committed performance baseline for this engine.\n"
-            "# Regenerate with: cargo run --release --example bench -p barq-sim\n"
+            "# Regenerate with: cargo run --release --example bench -p phasor-sim\n"
             "#                  python benchmarks/compare.py --write-baseline\n"
             "# Absolute numbers are machine-specific; the point is catching large\n"
             "# regressions on the same machine, not comparing across machines.\n"
         )
-        src = (RESULTS / "barq.tsv").read_text().splitlines()
+        src = (RESULTS / "phasor.tsv").read_text().splitlines()
         body = [line for line in src if not line.startswith("#")]
         machine = [line for line in src if line.startswith("# cores")]
         BASELINE.write_text(header + "\n".join(machine + body) + "\n")

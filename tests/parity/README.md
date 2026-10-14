@@ -22,9 +22,9 @@ without it.
 
 | Generator | Fixture | Rust test | Covers |
 |---|---|---|---|
-| `generate_execute_order.py` | `execute_order.tsv` | `barq-exec/tests/parity.rs` | One kernel call in isolation |
-| `generate_order_sequence.py` | `order_sequence.tsv` | `barq-exec/tests/parity_sequence.rs` | State threaded across chained calls |
-| `generate_from_orders.py` | `from_orders.tsv` | `barq-sim/tests/parity_from_orders.rs` | The simulation loop driving both |
+| `generate_execute_order.py` | `execute_order.tsv` | `phasor-exec/tests/parity.rs` | One kernel call in isolation |
+| `generate_order_sequence.py` | `order_sequence.tsv` | `phasor-exec/tests/parity_sequence.rs` | State threaded across chained calls |
+| `generate_from_orders.py` | `from_orders.tsv` | `phasor-sim/tests/parity_from_orders.rs` | The simulation loop driving both |
 
 They are layered on purpose. Because the kernel is already pinned by the first
 two, a failure in the third is almost certainly the loop rather than the
@@ -62,7 +62,7 @@ the one you touched rather than all of them:
 
 ```bash
 .venv-parity/bin/python tests/parity/generate_execute_order.py
-cargo test -p barq-exec
+cargo test -p phasor-exec
 
 # or, to rebuild every fixture at once
 for g in tests/parity/generate_*.py; do .venv-parity/bin/python "$g"; done
@@ -74,7 +74,7 @@ Alpha158 and Alpha360 use the already initialized local Qlib Conda environment:
 ```bash
 conda run -n rdagent4qlib python tests/parity/generate_qlib_alpha158.py
 conda run -n rdagent4qlib python tests/parity/generate_qlib_alpha360.py
-cargo test -p barq-expr --features polars --test parity_qlib
+cargo test -p phasor-expr --features polars --test parity_qlib
 ```
 
 The generators run Qlib's own Alpha158 and Alpha360 expressions over
@@ -798,12 +798,12 @@ multi-line patterns, which silently matched nothing, and reported four
 ## Shared-account Python boundary
 
 Install the local reference into the binding test environment and generate the
-full account oracle from the barq repository root:
+full account oracle from the phasor repository root:
 
 ```sh
 python -m pip install -e ../vectorbt
 python tests/parity/generate_shared_accounts.py
-pytest crates/barq-py/tests/test_shared_accounts.py -q
+pytest crates/phasor-py/tests/test_shared_accounts.py -q
 ```
 
 `shared_accounts.json` records 48 cases with deterministic inputs, orders, all stored log
@@ -812,7 +812,7 @@ for both order and signal paths. It covers default/auto execution, multiple
 accounts, short positions, reversals, costs, stops, missing prices and valuation
 updates. Committed-oracle tests run without vectorbt; the live test repeats the
 reference calculation when vectorbt is installed. Shared-account benchmarks are
-intentionally absent in barq, so that statistics row is checked as `None`.
+intentionally absent in phasor, so that statistics row is checked as `None`.
 Missing valuation bars keep the existing per-bar return semantics. Shared-account
 total return uses final equity against initial capital, so intermediate missing
 prices cannot erase part of the account's PnL.

@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-pytest.importorskip("barq")
+pytest.importorskip("phasor")
 
-from barq_lab import data as bars  # noqa: E402
-from barq_lab.protocol.policy import DEFAULT_POLICY  # noqa: E402
-from barq_lab.types.factor_ts import harness  # noqa: E402
-from barq_lab.types.factor_ts import spec as fs  # noqa: E402
+from phasor_lab import data as bars  # noqa: E402
+from phasor_lab.protocol.policy import DEFAULT_POLICY  # noqa: E402
+from phasor_lab.types.factor_ts import harness  # noqa: E402
+from phasor_lab.types.factor_ts import spec as fs  # noqa: E402
 
 COSTS = DEFAULT_POLICY["costs"]
 

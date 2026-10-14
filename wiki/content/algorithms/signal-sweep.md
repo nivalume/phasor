@@ -2,13 +2,13 @@
 title: SignalSweep：因子到信号列
 kind: algorithm
 summary: 对每个 case × 标的把延迟后的因子值交给 rule 生成进出场，列号 case_idx × n_symbols + symbol，信号不清洗。
-parent: barq
+parent: phasor
 related: [column-labels, strategy-sweep, signal-conflicts, indicator-sweep, look-ahead]
 tags: [sweep, signals, columns]
 sources:
-  - crates/barq/src/sweep.rs:42-186
-  - crates/barq/examples/factor_sweep.rs
-  - crates/barq/tests/factor_sweep.rs
+  - crates/phasor/src/sweep.rs:42-186
+  - crates/phasor/examples/factor_sweep.rs
+  - crates/phasor/tests/factor_sweep.rs
 order: 1201
 ---
 
@@ -18,10 +18,10 @@ order: 1201
 
 ## 位置
 
-- `crates/barq/src/sweep.rs:42-123`（`from_factor`；标签 107–113）
-- `crates/barq/src/sweep.rs:141-159`（`expand`）
-- `crates/barq/src/sweep.rs:170-186`（`args`）
-- `crates/barq/examples/factor_sweep.rs`（示例）
+- `crates/phasor/src/sweep.rs:42-123`（`from_factor`；标签 107–113）
+- `crates/phasor/src/sweep.rs:141-159`（`expand`）
+- `crates/phasor/src/sweep.rs:170-186`（`args`）
+- `crates/phasor/examples/factor_sweep.rs`（示例）
 
 ## 算法
 
@@ -33,15 +33,15 @@ from_factor((name, &factor), symbols, cases, delay, rule):
 args(&expanded_close) → FromSignals { close, entries, exits, ..default }   ← 费用、止损用结构体更新语法补
 ```
 
-它**不清洗**信号，让模拟器对真实持仓解冲突（见 [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)）。示例 `crates/barq/examples/factor_sweep.rs`。
+它**不清洗**信号，让模拟器对真实持仓解冲突（见 [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)）。示例 `crates/phasor/examples/factor_sweep.rs`。
 
-列号规则与 Python 侧 [`@barq.strategy`](../algorithms/strategy-sweep.md) 的 `p × S + s` 相同；设计说明见 [ARCHITECTURE §6.1](../../../docs/ARCHITECTURE.zh-CN.md)。
+列号规则与 Python 侧 [`@phasor.strategy`](../algorithms/strategy-sweep.md) 的 `p × S + s` 相同；设计说明见 [ARCHITECTURE §6.1](../../../docs/ARCHITECTURE.zh-CN.md)。
 
 ## 相关
 
-- [barq：门面 crate](../crates/barq.md)：`SignalSweep` 是门面 crate 自己唯一的模块，经 `prelude` 导出。
+- [phasor：门面 crate](../crates/phasor.md)：`SignalSweep` 是门面 crate 自己唯一的模块，经 `prelude` 导出。
 - [列标签：Columns、Level 与 group_indices](../concepts/column-labels.md)：`Level::repeat` / `Level::tile` 生成的 `factor`/`case`/`symbol` 三级标签。
-- [@barq.strategy 的参数扫描](../algorithms/strategy-sweep.md)：Python 侧同一条列轴。
+- [@phasor.strategy 的参数扫描](../algorithms/strategy-sweep.md)：Python 侧同一条列轴。
 - [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)：不清洗的信号在模拟器里对真实持仓解冲突。
 - [指标参数网格与共享缓存](../algorithms/indicator-sweep.md)：指标扫描使用同样的 `case × n_symbols + symbol` 列布局。
 - [延迟与前视偏差](../concepts/look-ahead.md)：`delay` 让第 `row` 行只读 `factor[row − delay]`。

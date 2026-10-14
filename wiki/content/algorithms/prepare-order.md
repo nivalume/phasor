@@ -2,13 +2,13 @@
 title: from_signals 的决策顺序
 kind: algorithm
 summary: prepare_order 按固定顺序解析价格与估值价、测止损、读信号并解冲突、定量，最后产出一个 Pending 或 None。
-parent: barq-sim
+parent: phasor-sim
 related: [stop-engine, signal-conflicts, bar-loop, size-cascade, call-seq-auto]
 tags: [simulation, signals, pipeline]
 sources:
-  - crates/barq-sim/src/from_signals.rs:502-704
-  - crates/barq-sim/src/from_signals.rs:356-385
-  - crates/barq-sim/src/from_signals.rs:711-993
+  - crates/phasor-sim/src/from_signals.rs:502-704
+  - crates/phasor-sim/src/from_signals.rs:356-385
+  - crates/phasor-sim/src/from_signals.rs:711-993
 order: 1003
 ---
 
@@ -18,9 +18,9 @@ order: 1003
 
 ## 位置
 
-- `crates/barq-sim/src/from_signals.rs:502-704`（`prepare_order`）
-- `crates/barq-sim/src/from_signals.rs:356-385`（`read_signals`）
-- `crates/barq-sim/src/from_signals.rs:711-993`（`simulate_group`，调用 `prepare_order` 并执行 `Pending`）
+- `crates/phasor-sim/src/from_signals.rs:502-704`（`prepare_order`）
+- `crates/phasor-sim/src/from_signals.rs:356-385`（`read_signals`）
+- `crates/phasor-sim/src/from_signals.rs:711-993`（`simulate_group`，调用 `prepare_order` 并执行 `Pending`）
 
 ## 决策流程
 
@@ -51,7 +51,7 @@ flowchart TD
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate；`Pending`、`Signals`、`Stops` 的类图与 `−inf` 价格、`exits` 语义等阅读陷阱。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate；`Pending`、`Signals`、`Stops` 的类图与 `−inf` 价格、`exits` 语义等阅读陷阱。
 - [止损引擎：触发、跟踪与重新布防](../algorithms/stop-engine.md)：流程图 ③④ 的细节。
 - [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)：流程图里 `from_stop`、`resolve_*` 与 ⑤ 的纯函数。
 - [from_orders 的一根 K 线](../algorithms/bar-loop.md)：`prepare_order` 之后的排序与执行沿用同一结构。

@@ -2,12 +2,12 @@
 title: 数量换算链与 percent
 kind: algorithm
 summary: 每一级把 size_type 改写成更低级的类型，只有 Amount 进入买卖分支；percent 是可用资源的比例，不是目标仓位。
-parent: barq-exec
+parent: phasor-exec
 related: [execute-order-pipeline, buy-leg, sell-leg, status-info, prepare-order]
 tags: [execution, sizing]
 sources:
-  - crates/barq-exec/src/kernel.rs:610-677
-  - crates/barq-exec/src/kernel.rs:25-33
+  - crates/phasor-exec/src/kernel.rs:610-677
+  - crates/phasor-exec/src/kernel.rs:25-33
 order: 802
 ---
 
@@ -17,10 +17,10 @@ order: 802
 
 ## 位置
 
-- `crates/barq-exec/src/kernel.rs:610-677`：换算链
-- `crates/barq-exec/src/kernel.rs:25-33`：NumPy 语义的 `sign`
-- `crates/barq-exec/src/kernel.rs:89-91`：`buy` 里乘 `percent`
-- `crates/barq-exec/src/kernel.rs:268-291`：`sell` 里乘 `percent`
+- `crates/phasor-exec/src/kernel.rs:610-677`：换算链
+- `crates/phasor-exec/src/kernel.rs:25-33`：NumPy 语义的 `sign`
+- `crates/phasor-exec/src/kernel.rs:89-91`：`buy` 里乘 `percent`
+- `crates/phasor-exec/src/kernel.rs:268-291`：`sell` 里乘 `percent`
 
 ## 换算链
 
@@ -60,7 +60,7 @@ flowchart LR
 
 ## 相关
 
-- [barq-exec：撮合内核](../crates/barq-exec.md)：换算链是 `execute_validated` 的中段。
+- [phasor-exec：撮合内核](../crates/phasor-exec.md)：换算链是 `execute_validated` 的中段。
 - [execute_order 的固定顺序](../algorithms/execute-order-pipeline.md)：换算链前后的步骤，以及换算后按符号分发。
 - [buy：买入、平空与 lock_cash 预算](../algorithms/buy-leg.md)：正比例在现金预算上乘。
 - [sell：卖出与开空](../algorithms/sell-leg.md)：负比例在可卖数量上乘。

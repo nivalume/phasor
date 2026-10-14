@@ -8,15 +8,15 @@ sources:
   - tests/parity/README.md
   - tests/fixtures
   - docs/ARCHITECTURE.zh-CN.md
-  - crates/barq-exec/tests/parity.rs
-  - crates/barq-exec/tests/parity_sequence.rs
-  - crates/barq-sim/tests/parity_from_orders.rs
+  - crates/phasor-exec/tests/parity.rs
+  - crates/phasor-exec/tests/parity_sequence.rs
+  - crates/phasor-sim/tests/parity_from_orders.rs
 order: 20
 ---
 
 # 差分测试与 fixture
 
-barq 的正确性是"与参考实现逐字段一致"：vectorbt 1.1.0 和 Qlib 在仓库之外的环境里跑出期望结果，写成 TSV fixture 提交进 `tests/fixtures/`，Rust 测试读回来逐条比较。它和[研究协议 barq_lab](../tooling/research-protocol.md)、[基准协议](../tooling/benchmarks.md)一起，是"围绕引擎的三件外围设施"。
+phasor 的正确性是"与参考实现逐字段一致"：vectorbt 1.1.0 和 Qlib 在仓库之外的环境里跑出期望结果，写成 TSV fixture 提交进 `tests/fixtures/`，Rust 测试读回来逐条比较。它和[研究协议 phasor_lab](../tooling/research-protocol.md)、[基准协议](../tooling/benchmarks.md)一起，是"围绕引擎的三件外围设施"。
 
 ## 定位
 
@@ -32,7 +32,7 @@ barq 的正确性是"与参考实现逐字段一致"：vectorbt 1.1.0 和 Qlib �
 
 第一遍可跳过：`tests/parity/README.md:104-776` 的逐层变异表。
 
-顺序号沿用研究协议、差分测试与基准的整体阅读顺序（其余各行见 [研究协议 barq_lab](../tooling/research-protocol.md#文件与阅读顺序)）。
+顺序号沿用研究协议、差分测试与基准的整体阅读顺序（其余各行见 [研究协议 phasor_lab](../tooling/research-protocol.md#文件与阅读顺序)）。
 
 ## 差分测试的做法
 
@@ -56,24 +56,24 @@ barq 的正确性是"与参考实现逐字段一致"：vectorbt 1.1.0 和 Qlib �
 
 | 测试 | 夹具（行数） | 容差 |
 |---|---|---|
-| `barq-exec/tests/parity.rs` | `execute_order.tsv`（474） | `agree` |
-| `barq-exec/tests/parity_sequence.rs` | `order_sequence.tsv`（1,504 步） | `agree` |
-| `barq-sim/tests/parity_from_orders.rs` | `from_orders.tsv`（290） | `agree`，逐字段 |
-| `barq-sim/tests/parity_from_signals.rs` | `from_signals.tsv`（181） | `agree` |
-| `barq-sim/tests/parity_signals.rs` | `signals.tsv`（5,088，穷举） | `is_close` |
-| `barq-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv`（48） | 相对 1e-9 |
-| `barq-records/tests/parity_trades.rs` | `trades.tsv`（267） | `is_close`，整数精确 |
-| `barq-records/tests/parity_drawdowns.rs` | `drawdowns.tsv`（998） | 相对 1e-12 |
-| `barq-records/tests/parity_mapped.rs` | `mapped.tsv`（28,367） | 相对 1e-12 |
-| `barq-generic/tests/parity_generic.rs` | `generic.tsv`（1,650） | `is_close` |
-| `barq-indicators/tests/parity_indicators.rs` | `indicators.tsv`（480） | `is_close`；扫描逐位一致 |
-| `barq-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv`（5,782） | 精确 / 1e-12 |
-| `barq-analysis/tests/parity_analysis.rs` | `analysis.tsv`（37） | `is_close` |
-| `barq-analysis/tests/parity_metrics.rs` | `metrics.tsv`（2,047） | 相对 1e-9 |
-| `barq-analysis/tests/parity_stats.rs` | `stats.tsv`（72） | 相对 1e-9；标题精确 |
-| `barq-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv`（240）、`qlib_alpha360.tsv`（64） | 1e-6（`CORR*/CORD*` 为 1e-4）；两个后端 |
+| `phasor-exec/tests/parity.rs` | `execute_order.tsv`（474） | `agree` |
+| `phasor-exec/tests/parity_sequence.rs` | `order_sequence.tsv`（1,504 步） | `agree` |
+| `phasor-sim/tests/parity_from_orders.rs` | `from_orders.tsv`（290） | `agree`，逐字段 |
+| `phasor-sim/tests/parity_from_signals.rs` | `from_signals.tsv`（181） | `agree` |
+| `phasor-sim/tests/parity_signals.rs` | `signals.tsv`（5,088，穷举） | `is_close` |
+| `phasor-sim/tests/parity_cash_sharing.rs` | `cash_sharing.tsv`（48） | 相对 1e-9 |
+| `phasor-records/tests/parity_trades.rs` | `trades.tsv`（267） | `is_close`，整数精确 |
+| `phasor-records/tests/parity_drawdowns.rs` | `drawdowns.tsv`（998） | 相对 1e-12 |
+| `phasor-records/tests/parity_mapped.rs` | `mapped.tsv`（28,367） | 相对 1e-12 |
+| `phasor-generic/tests/parity_generic.rs` | `generic.tsv`（1,650） | `is_close` |
+| `phasor-indicators/tests/parity_indicators.rs` | `indicators.tsv`（480） | `is_close`；扫描逐位一致 |
+| `phasor-signals/tests/parity_signals_gen.rs` | `signals_gen.tsv`（5,782） | 精确 / 1e-12 |
+| `phasor-analysis/tests/parity_analysis.rs` | `analysis.tsv`（37） | `is_close` |
+| `phasor-analysis/tests/parity_metrics.rs` | `metrics.tsv`（2,047） | 相对 1e-9 |
+| `phasor-analysis/tests/parity_stats.rs` | `stats.tsv`（72） | 相对 1e-9；标题精确 |
+| `phasor-expr/tests/parity_qlib.rs` | `qlib_alpha158.tsv`（240）、`qlib_alpha360.tsv`（64） | 1e-6（`CORR*/CORD*` 为 1e-4）；两个后端 |
 
-Python 侧的差分测试（`crates/barq-py/tests/test_bindings.py` 对在线 vectorbt，`test_shared_accounts.py` 重放 `tests/fixtures/shared_accounts.json` 的 48 个用例）与重新生成 fixture 的命令见 ARCHITECTURE §14.5、§14.6。
+Python 侧的差分测试（`crates/phasor-py/tests/test_bindings.py` 对在线 vectorbt，`test_shared_accounts.py` 重放 `tests/fixtures/shared_accounts.json` 的 48 个用例）与重新生成 fixture 的命令见 ARCHITECTURE §14.5、§14.6。
 
 ## 阅读陷阱
 
@@ -90,4 +90,4 @@ Python 侧的差分测试（`crates/barq-py/tests/test_bindings.py` 对在线 ve
 - [execute_order 的固定顺序](../algorithms/execute-order-pipeline.md)：`execute_order.tsv` 一行就是一次内核调用。
 - [数量换算链与 percent](../algorithms/size-cascade.md)：单次调用的 fixture 能指出坏在换算链哪一级。
 - [基准协议](../tooling/benchmarks.md)：同样"与参考实现对照"，比的是速度而不是结果。
-- [研究协议 barq_lab](../tooling/research-protocol.md)：另一件外围设施，判定同样不许事后修改。
+- [研究协议 phasor_lab](../tooling/research-protocol.md)：另一件外围设施，判定同样不许事后修改。

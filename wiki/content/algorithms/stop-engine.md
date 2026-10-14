@@ -2,16 +2,16 @@
 title: 止损引擎：触发、跟踪与重新布防
 kind: algorithm
 summary: stop_price 带跳空分支判定触发价，先测后 trail，只在成交后按 stop_entry_price 选锚重新布防，止损限价单不计滑点。
-parent: barq-sim
+parent: phasor-sim
 related: [prepare-order, signal-conflicts, validated-order, bar-loop, execute-order-pipeline]
 tags: [simulation, stops, risk]
 sources:
-  - crates/barq-sim/src/from_signals.rs:276-316
-  - crates/barq-sim/src/from_signals.rs:318-353
-  - crates/barq-sim/src/from_signals.rs:548-602
-  - crates/barq-sim/src/from_signals.rs:902-943
-  - crates/barq-sim/src/from_signals.rs:737-744
-  - crates/barq-sim/src/from_signals.rs:1224-1251
+  - crates/phasor-sim/src/from_signals.rs:276-316
+  - crates/phasor-sim/src/from_signals.rs:318-353
+  - crates/phasor-sim/src/from_signals.rs:548-602
+  - crates/phasor-sim/src/from_signals.rs:902-943
+  - crates/phasor-sim/src/from_signals.rs:737-744
+  - crates/phasor-sim/src/from_signals.rs:1224-1251
 order: 1004
 ---
 
@@ -21,11 +21,11 @@ order: 1004
 
 ## 位置
 
-- `crates/barq-sim/src/from_signals.rs:276-316`（`stop_price`）
-- `crates/barq-sim/src/from_signals.rs:318-353`（`should_update_stop`、`Stops`、`armed`）
-- `crates/barq-sim/src/from_signals.rs:548-602`（`prepare_order` 里的止损测试，trail 在 595–601）
-- `crates/barq-sim/src/from_signals.rs:902-943`（`simulate_group` 里的重新布防）
-- `crates/barq-sim/src/from_signals.rs:737-744`（两个 `ValidatedOrder`）
+- `crates/phasor-sim/src/from_signals.rs:276-316`（`stop_price`）
+- `crates/phasor-sim/src/from_signals.rs:318-353`（`should_update_stop`、`Stops`、`armed`）
+- `crates/phasor-sim/src/from_signals.rs:548-602`（`prepare_order` 里的止损测试，trail 在 595–601）
+- `crates/phasor-sim/src/from_signals.rs:902-943`（`simulate_group` 里的重新布防）
+- `crates/phasor-sim/src/from_signals.rs:737-744`（两个 `ValidatedOrder`）
 
 ## 止损状态的一生
 
@@ -78,7 +78,7 @@ upward   = (空头 & SL) 或 (多头 & TP)：level = anchor × (1 + stop)，对�
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate；`Stops` 的字段与 vectorbt 内联 SL/TP 逻辑的对应。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate；`Stops` 的字段与 vectorbt 内联 SL/TP 逻辑的对应。
 - [from_signals 的决策顺序](../algorithms/prepare-order.md)：止损测试与 `from_stop` 在整条决策流程里的位置。
 - [信号冲突解析链与 signals_to_size](../algorithms/signal-conflicts.md)：`from_stop` 按 `upon_stop_exit` 发出的信号怎样变成数量。
 - [ValidatedOrder：按列提升参数校验](../concepts/validated-order.md)：止损单那份 `slippage = 0` 的校验结果。

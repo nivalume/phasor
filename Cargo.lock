@@ -231,139 +231,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "barq"
-version = "0.1.0"
-dependencies = [
- "barq-analysis",
- "barq-core",
- "barq-data",
- "barq-exec",
- "barq-expr",
- "barq-generic",
- "barq-indicators",
- "barq-model",
- "barq-records",
- "barq-signals",
- "barq-sim",
-]
-
-[[package]]
-name = "barq-analysis"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-generic",
- "barq-model",
- "barq-records",
- "barq-sim",
-]
-
-[[package]]
-name = "barq-core"
-version = "0.1.0"
-
-[[package]]
-name = "barq-data"
-version = "0.1.0"
-dependencies = [
- "arrow-array",
- "arrow-cast",
- "arrow-csv",
- "arrow-schema",
- "arrow-select",
- "barq-model",
- "csv",
- "parquet",
-]
-
-[[package]]
-name = "barq-exec"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-model",
-]
-
-[[package]]
-name = "barq-expr"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-generic",
- "barq-model",
- "criterion",
- "polars",
- "rayon",
-]
-
-[[package]]
-name = "barq-generic"
-version = "0.1.0"
-dependencies = [
- "barq-core",
-]
-
-[[package]]
-name = "barq-indicators"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-generic",
-]
-
-[[package]]
-name = "barq-model"
-version = "0.1.0"
-dependencies = [
- "barq-core",
-]
-
-[[package]]
-name = "barq-py"
-version = "0.1.0"
-dependencies = [
- "arrow-array",
- "arrow-schema",
- "barq-analysis",
- "barq-core",
- "barq-data",
- "barq-expr",
- "barq-generic",
- "barq-model",
- "barq-records",
- "barq-sim",
- "numpy",
- "pyo3",
- "pyo3-build-config",
-]
-
-[[package]]
-name = "barq-records"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-exec",
- "barq-model",
-]
-
-[[package]]
-name = "barq-signals"
-version = "0.1.0"
-dependencies = [
- "barq-core",
-]
-
-[[package]]
-name = "barq-sim"
-version = "0.1.0"
-dependencies = [
- "barq-core",
- "barq-exec",
- "barq-model",
- "barq-records",
-]
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,6 +1056,139 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "phasor"
+version = "0.1.0"
+dependencies = [
+ "phasor-analysis",
+ "phasor-core",
+ "phasor-data",
+ "phasor-exec",
+ "phasor-expr",
+ "phasor-generic",
+ "phasor-indicators",
+ "phasor-model",
+ "phasor-records",
+ "phasor-signals",
+ "phasor-sim",
+]
+
+[[package]]
+name = "phasor-analysis"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+ "phasor-generic",
+ "phasor-model",
+ "phasor-records",
+ "phasor-sim",
+]
+
+[[package]]
+name = "phasor-core"
+version = "0.1.0"
+
+[[package]]
+name = "phasor-data"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-cast",
+ "arrow-csv",
+ "arrow-schema",
+ "arrow-select",
+ "csv",
+ "parquet",
+ "phasor-model",
+]
+
+[[package]]
+name = "phasor-exec"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+ "phasor-model",
+]
+
+[[package]]
+name = "phasor-expr"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "phasor-core",
+ "phasor-generic",
+ "phasor-model",
+ "polars",
+ "rayon",
+]
+
+[[package]]
+name = "phasor-generic"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+]
+
+[[package]]
+name = "phasor-indicators"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+ "phasor-generic",
+]
+
+[[package]]
+name = "phasor-model"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+]
+
+[[package]]
+name = "phasor-py"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "numpy",
+ "phasor-analysis",
+ "phasor-core",
+ "phasor-data",
+ "phasor-expr",
+ "phasor-generic",
+ "phasor-model",
+ "phasor-records",
+ "phasor-sim",
+ "pyo3",
+ "pyo3-build-config",
+]
+
+[[package]]
+name = "phasor-records"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+ "phasor-exec",
+ "phasor-model",
+]
+
+[[package]]
+name = "phasor-signals"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+]
+
+[[package]]
+name = "phasor-sim"
+version = "0.1.0"
+dependencies = [
+ "phasor-core",
+ "phasor-exec",
+ "phasor-model",
+ "phasor-records",
+]
 
 [[package]]
 name = "phf"

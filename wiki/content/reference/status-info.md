@@ -2,17 +2,17 @@
 title: 拒单原因 StatusInfo
 kind: reference
 summary: 14 种 StatusInfo 各由撮合内核的哪一步、哪几行触发，以及对应的状态是 Ignored 还是 Rejected。
-related: [errors-vs-rejections, execute-order-pipeline, buy-leg, sell-leg, barq-model, barq-exec]
+related: [errors-vs-rejections, execute-order-pipeline, buy-leg, sell-leg, phasor-model, phasor-exec]
 tags: [rejections, orders]
 sources:
-  - crates/barq-exec/src/kernel.rs
-  - crates/barq-model/src/enums.rs
+  - crates/phasor-exec/src/kernel.rs
+  - crates/phasor-model/src/enums.rs
 order: 10
 ---
 
 # 拒单原因 StatusInfo
 
-订单没有成交时，[barq-exec](../crates/barq-exec.md) 返回的 `OrderResult` 里 `status` 是 `Ignored` 或 `Rejected`，`status_info` 说明原因；这不是错误（见[错误与拒单](../concepts/errors-vs-rejections.md)）。下表按原因列出它在撮合内核里的触发位置。
+订单没有成交时，[phasor-exec](../crates/phasor-exec.md) 返回的 `OrderResult` 里 `status` 是 `Ignored` 或 `Rejected`，`status_info` 说明原因；这不是错误（见[错误与拒单](../concepts/errors-vs-rejections.md)）。下表按原因列出它在撮合内核里的触发位置。
 
 ## 14 种 `StatusInfo` 的触发点
 
@@ -31,7 +31,7 @@ order: 10
 | `PartialFill` | Rejected | buy `kernel.rs:185-190`；sell `kernel.rs:332-337` |
 | `NoCashShort` | Rejected | sell `kernel.rs:245-252` |
 
-枚举定义和判别值在 `crates/barq-model/src/enums.rs`，记录里存的是整数，所以判别值被测试钉死。
+枚举定义和判别值在 `crates/phasor-model/src/enums.rs`，记录里存的是整数，所以判别值被测试钉死。
 
 ## 相关
 
@@ -40,4 +40,4 @@ order: 10
 - [数量换算链与 percent](../algorithms/size-cascade.md)：`ValueNaN`、`ValueZeroNeg`、`ValPriceNaN` 来自换算链。
 - [buy：买入、平空与 lock_cash 预算](../algorithms/buy-leg.md)：`buy` 里的各个拒单出口。
 - [sell：卖出与开空](../algorithms/sell-leg.md)：`sell` 里的各个拒单出口。
-- [barq-model：领域模型](../crates/barq-model.md)：`StatusInfo` 的定义和被测试钉死的判别值。
+- [phasor-model：领域模型](../crates/phasor-model.md)：`StatusInfo` 的定义和被测试钉死的判别值。

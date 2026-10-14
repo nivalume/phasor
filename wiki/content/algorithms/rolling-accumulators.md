@@ -2,12 +2,12 @@
 title: O(1) 滚动累加器
 kind: algorithm
 summary: slide_into 每行 push 进入值、pop 离开值、每 window 行重建一次；Moments 平移求和并精确识别常量窗口，总代价 O(n)。
-parent: barq-expr
+parent: phasor-expr
 related: [native-evaluation, order-statistics, monotonic-queue, generic-windows, qlib-operators]
 tags: [rolling, numerics, accumulators]
 sources:
-  - crates/barq-expr/src/window.rs
-  - crates/barq-expr/src/eval.rs:963-1046
+  - crates/phasor-expr/src/window.rs
+  - crates/phasor-expr/src/eval.rs:963-1046
 order: 704
 ---
 
@@ -17,11 +17,11 @@ order: 704
 
 ## 位置
 
-- `crates/barq-expr/src/window.rs:1-22`：模块文档
-- `crates/barq-expr/src/window.rs:49-70`：驱动 `slide_into`
-- `crates/barq-expr/src/window.rs:75-163`：`Moments`
-- `crates/barq-expr/src/window.rs`：`Sum`/`Count` → `Deviation` → `Wma` → `Regression` → `Pair` → `Shape`
-- `crates/barq-expr/src/eval.rs:963-1046`：精度测试 `incremental_windows_match_a_full_rescan`
+- `crates/phasor-expr/src/window.rs:1-22`：模块文档
+- `crates/phasor-expr/src/window.rs:49-70`：驱动 `slide_into`
+- `crates/phasor-expr/src/window.rs:75-163`：`Moments`
+- `crates/phasor-expr/src/window.rs`：`Sum`/`Count` → `Deviation` → `Wma` → `Regression` → `Pair` → `Shape`
+- `crates/phasor-expr/src/eval.rs:963-1046`：精度测试 `incremental_windows_match_a_full_rescan`
 
 ![窗口核](../../../docs/img/zh/window.svg)
 
@@ -58,7 +58,7 @@ NaN：push/pop 都忽略——占一个窗口位，但不进任何和
 
 ## Mean、窗口规则与精度
 
-`Mean` 在 `barq_generic::rolling::rolling_mean_1d`：前缀和 + 前缀 NaN 计数，O(n)，不做周期重建。
+`Mean` 在 `phasor_generic::rolling::rolling_mean_1d`：前缀和 + 前缀 NaN 计数，O(n)，不做周期重建。
 `min_periods = 1` 处处如此；`N = 0` 是扩展窗口；全 NaN 窗口返回 NaN。
 精度钉住：`incremental_windows_match_a_full_rescan`（`eval.rs:963-1046`）在 6 条压力序列（NaN 空洞、全 NaN 段、常量段、1e4 水平上的 1e-3 波动、阶跃）× 窗口 `{1,2,3,5,20,61,299,300,1000}` 上以 1e-9 相对误差对照朴素重扫。
 
@@ -66,9 +66,9 @@ NaN：push/pop 都忽略——占一个窗口位，但不进任何和
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；阅读陷阱第 5、10、12 条（`min_periods = 1`、增量核与重扫的 1e-9、WMA 权重）都与这里有关。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；阅读陷阱第 5、10、12 条（`min_periods = 1`、增量核与重扫的 1e-9、WMA 权重）都与这里有关。
 - [原生求值：按标的并行走图](../algorithms/native-evaluation.md)：`rolling_into` 把滚动节点分派到这些核。
 - [顺序统计量：有序环与树状数组](../algorithms/order-statistics.md)：需要有序窗口的 `Quantile`/`Med`/`Rank`/`Mad` 走另一套结构。
 - [单调队列：窗口极值与极值位置](../algorithms/monotonic-queue.md)：`Max`/`Min`/`IdxMax`/`IdxMin`。
-- [前缀和与 EWM 窗口核](../algorithms/generic-windows.md)：`Mean` 用的 `barq_generic` 前缀和核。
+- [前缀和与 EWM 窗口核](../algorithms/generic-windows.md)：`Mean` 用的 `phasor_generic` 前缀和核。
 - [因子算子与 Qlib 对照](../reference/qlib-operators.md)：每个累加器对应的 Qlib 算子与对照精度。

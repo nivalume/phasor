@@ -1,28 +1,28 @@
 ---
 title: 指标公式表
 kind: reference
-summary: barq-analysis 的收益指标、基准指标与交易统计的公式和边界情况，以及滚动版本为什么朴素地逐窗重算。
-related: [barq-analysis, stats-registry, sweep-aggregation, rebuild-chain, overfitting-stats]
+summary: phasor-analysis 的收益指标、基准指标与交易统计的公式和边界情况，以及滚动版本为什么朴素地逐窗重算。
+related: [phasor-analysis, stats-registry, sweep-aggregation, rebuild-chain, overfitting-stats]
 tags: [metrics, analysis, formulas]
 sources:
-  - crates/barq-analysis/src/metrics.rs
-  - crates/barq-analysis/src/benchmark.rs
-  - crates/barq-analysis/src/trade_stats.rs
-  - crates/barq-analysis/src/percentile.rs
-  - crates/barq-analysis/src/rolling.rs
+  - crates/phasor-analysis/src/metrics.rs
+  - crates/phasor-analysis/src/benchmark.rs
+  - crates/phasor-analysis/src/trade_stats.rs
+  - crates/phasor-analysis/src/percentile.rs
+  - crates/phasor-analysis/src/rolling.rs
 order: 20
 ---
 
 # 指标公式表
 
-[barq-analysis](../crates/barq-analysis.md) 在[重建链](../algorithms/rebuild-chain.md)给出的收益列上计算的每个指标：公式按参考实现（vectorbt 的 `returns/nb.py`，血统是 empyrical）的拼写，边界一列写出 NaN、`+inf` 从哪里来。
+[phasor-analysis](../crates/phasor-analysis.md) 在[重建链](../algorithms/rebuild-chain.md)给出的收益列上计算的每个指标：公式按参考实现（vectorbt 的 `returns/nb.py`，血统是 empyrical）的拼写，边界一列写出 NaN、`+inf` 从哪里来。
 
 ## 位置
 
-- `crates/barq-analysis/src/metrics.rs`、`crates/barq-analysis/src/percentile.rs`（`percentile` 43–79）
-- `crates/barq-analysis/src/benchmark.rs`
-- `crates/barq-analysis/src/trade_stats.rs`（51–98）
-- `crates/barq-analysis/src/rolling.rs`；`rolling_apply_1d` 在 `crates/barq-generic/src/rolling.rs:71-99`
+- `crates/phasor-analysis/src/metrics.rs`、`crates/phasor-analysis/src/percentile.rs`（`percentile` 43–79）
+- `crates/phasor-analysis/src/benchmark.rs`
+- `crates/phasor-analysis/src/trade_stats.rs`（51–98）
+- `crates/phasor-analysis/src/rolling.rs`；`rolling_apply_1d` 在 `crates/phasor-generic/src/rolling.rs:71-99`
 
 ## 记号
 
@@ -60,9 +60,9 @@ order: 20
 
 ## 相关
 
-- [barq-analysis：分析层](../crates/barq-analysis.md)：这些公式所在的 crate，以及它们与 vectorbt 的逐项对应。
+- [phasor-analysis：分析层](../crates/phasor-analysis.md)：这些公式所在的 crate，以及它们与 vectorbt 的逐项对应。
 - [统计表注册表](../concepts/stats-registry.md)：`Portfolio.stats()` 的 28 行调用的就是这些函数。
 - [扫描结果汇总与 +inf 陷阱](../concepts/sweep-aggregation.md)：`sharpe_ratio` 等指标的 `+inf` 在参数扫描里的后果。
 - [过拟合检验：PSR、DSR、PBO](../algorithms/overfitting-stats.md)：那里的 Sharpe 是每根 K 线、不年化、无无风险利率的版本。
 - [从记录重建净值](../algorithms/rebuild-chain.md)：收益列 `r` 从哪里来。
-- [barq-generic：通用窗口算子](../crates/barq-generic.md)：`rolling_apply_1d` 所在的 crate。
+- [phasor-generic：通用窗口算子](../crates/phasor-generic.md)：`rolling_apply_1d` 所在的 crate。

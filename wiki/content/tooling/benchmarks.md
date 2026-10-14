@@ -9,13 +9,13 @@ sources:
   - benchmarks/compare.py
   - benchmarks/workloads.tsv
   - benchmarks/bench_vectorbt.py
-  - crates/barq-sim/examples/bench.rs
+  - crates/phasor-sim/examples/bench.rs
 order: 30
 ---
 
 # 基准协议
 
-`benchmarks/` 回答两个问题：barq 的模拟循环是不是真的比 vectorbt 快、快多少；一次改动有没有让自己变慢。协议的重点不在测得多快，而在"比的是同样的工作"和"报出来的比例是诚实的"。它和[研究协议 barq_lab](../tooling/research-protocol.md)、[差分测试与 fixture](../tooling/parity-testing.md)一起，是"围绕引擎的三件外围设施"。
+`benchmarks/` 回答两个问题：phasor 的模拟循环是不是真的比 vectorbt 快、快多少；一次改动有没有让自己变慢。协议的重点不在测得多快，而在"比的是同样的工作"和"报出来的比例是诚实的"。它和[研究协议 phasor_lab](../tooling/research-protocol.md)、[差分测试与 fixture](../tooling/parity-testing.md)一起，是"围绕引擎的三件外围设施"。
 
 ## 定位
 
@@ -27,7 +27,7 @@ order: 30
 |---|---|---:|---|
 | 10 | `benchmarks/README.md`、`benchmarks/compare.py` | — | 协议与门槛 |
 
-顺序号沿用研究协议、差分测试与基准的整体阅读顺序（其余各行见 [研究协议 barq_lab](../tooling/research-protocol.md#文件与阅读顺序)）。其余文件：`crates/barq-sim/examples/bench.rs`（barq 的 runner）、`benchmarks/bench_vectorbt.py`（vectorbt 的 runner）、`benchmarks/bench_python.py`（Python 层的开销）、`benchmarks/workloads.tsv` 与 `benchmarks/workloads_signals.tsv`（工作负载）、`benchmarks/baseline.tsv`（基线门槛的参照），运行命令在 `benchmarks/README.md` 开头。
+顺序号沿用研究协议、差分测试与基准的整体阅读顺序（其余各行见 [研究协议 phasor_lab](../tooling/research-protocol.md#文件与阅读顺序)）。其余文件：`crates/phasor-sim/examples/bench.rs`（phasor 的 runner）、`benchmarks/bench_vectorbt.py`（vectorbt 的 runner）、`benchmarks/bench_python.py`（Python 层的开销）、`benchmarks/workloads.tsv` 与 `benchmarks/workloads_signals.tsv`（工作负载）、`benchmarks/baseline.tsv`（基线门槛的参照），运行命令在 `benchmarks/README.md` 开头。
 
 ## 协议规则
 
@@ -35,10 +35,10 @@ order: 30
 |---|---|
 | 两个 runner 读同一份 `workloads.tsv`，用逐位相同的公式生成输入 | 可比 |
 | 每个 runner 报 `checksum`（close 与 size 位模式的 wrapping u64 和）和成交数；`compare.py` 不一致就退出码 2 | "同样的工作，否则不比" |
-| 只比 `kernel` 层（`simulate_from_orders_nb` 对 barq 循环），`api` 层的包装约 2× | 诚实的比例 |
+| 只比 `kernel` 层（`simulate_from_orders_nb` 对 phasor 循环），`api` 层的包装约 2× | 诚实的比例 |
 | Rust 侧 best-of-7 | 单线程噪声地板 ~1.3%（best-of-3 最差 9.5%） |
 | `--check-baseline`：只看单线程行，容差 10%；`looks_uniform` 检测"整机一起慢" | 多线程离散度曾达 47% |
-| 比例是区间不是数字 | Numba 循环在忙机器上掉得比 barq 多，机器越空 barq 越好看 |
+| 比例是区间不是数字 | Numba 循环在忙机器上掉得比 phasor 多，机器越空 phasor 越好看 |
 
 ## 结果
 

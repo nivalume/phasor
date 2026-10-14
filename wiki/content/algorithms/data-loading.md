@@ -2,27 +2,27 @@
 title: 加载 load 与面板 prepare
 kind: algorithm
 summary: load 逐批次读、解码、投影、校验，解码之后才按 available_time 过滤；prepare 以 available_time 的有序并集为行轴拼出列主序面板。
-parent: barq-data
+parent: phasor-data
 related: [pit-alignment, python-boundary, column-axis, look-ahead]
 tags: [data, arrow, loading]
 sources:
-  - crates/barq-data/src/lib.rs:217-414
-  - crates/barq-py/src/data.rs:238-250
-  - crates/barq-py/python/barq/data.py:58
+  - crates/phasor-data/src/lib.rs:217-414
+  - crates/phasor-py/src/data.rs:238-250
+  - crates/phasor-py/python/phasor/data.py:58
   - examples/multi_data.py:28-36
 order: 601
 ---
 
 # 加载 load 与面板 prepare
 
-[barq-data](../crates/barq-data.md) 的两步：`load` 把目录里的文件变成 `Dataset`（一串解码后的 Arrow 批次），`prepare` 把 K 线数据集拼成 `BarPanel`。两步的时间轴都是 `available_time`，原因见 [延迟与前视偏差](../concepts/look-ahead.md)。
+[phasor-data](../crates/phasor-data.md) 的两步：`load` 把目录里的文件变成 `Dataset`（一串解码后的 Arrow 批次），`prepare` 把 K 线数据集拼成 `BarPanel`。两步的时间轴都是 `available_time`，原因见 [延迟与前视偏差](../concepts/look-ahead.md)。
 
 ## 位置
 
-- `crates/barq-data/src/lib.rs:217-332`（`load`）
-- `crates/barq-data/src/lib.rs:343-414`（`prepare`）
-- `crates/barq-py/src/data.rs:238-250`（Python 解码器按批次重新拿 GIL）
-- `crates/barq-py/python/barq/data.py:58`（`order="F"` reshape）
+- `crates/phasor-data/src/lib.rs:217-332`（`load`）
+- `crates/phasor-data/src/lib.rs:343-414`（`prepare`）
+- `crates/phasor-py/src/data.rs:238-250`（Python 解码器按批次重新拿 GIL）
+- `crates/phasor-py/python/phasor/data.py:58`（`order="F"` reshape）
 - `examples/multi_data.py:28-36`（解码器把毫秒改成纳秒）
 
 ## `load`（`lib.rs:217-332`）
@@ -47,7 +47,7 @@ for item in items:
 
 过滤放在解码**之后**，因为解码器可能改时间单位（`multi_data.py:28-36` 把交易所的毫秒改成纳秒）。
 批次不拼接，`Dataset.batches` 是列表，峰值内存被 65,536 行一批限制住。
-解码器是 `FnMut`，Python 回调从 `py.detach` 的外层循环里按批次 `Python::attach` 重新拿 GIL（`barq-py/src/data.rs:238-250`）。
+解码器是 `FnMut`，Python 回调从 `py.detach` 的外层循环里按批次 `Python::attach` 重新拿 GIL（`phasor-py/src/data.rs:238-250`）。
 
 ## `prepare`（`lib.rs:343-414`）
 
@@ -69,7 +69,7 @@ BarPanel { time, bar_types, values }
 
 ## 相关
 
-- [barq-data：数据层](../crates/barq-data.md)：所属 crate；类图、调用链与阅读陷阱（`prepare` 要求每个键都是 `BarType`、`project` 从不转换类型）。
+- [phasor-data：数据层](../crates/phasor-data.md)：所属 crate；类图、调用链与阅读陷阱（`prepare` 要求每个键都是 `BarType`、`project` 从不转换类型）。
 - [按时点对齐 align](../algorithms/pit-alignment.md)：`load` 得到的辅助数据集如何对齐到 `prepare` 得到的时间轴上。
 - [Python 边界：F 序与一维的三种含义](../concepts/python-boundary.md)：为什么面板在 Python 侧必须是 `order="F"`。
 - [列轴与列主序](../concepts/column-axis.md)：`index = col × n_rows + row` 的列主序布局。

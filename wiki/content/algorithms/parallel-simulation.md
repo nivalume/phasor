@@ -2,15 +2,15 @@
 title: 按账户组并行与确定性合并
 kind: algorithm
 summary: 按列数把账户组切块、每块一个作用域线程、按块顺序合并并重基 order_id，所以线程数不改变任何一位结果。
-parent: barq-sim
+parent: phasor-sim
 related: [record-merge, stateless-rng, bar-loop, conventions, benchmarks]
 tags: [parallel, determinism, threads]
 sources:
-  - crates/barq-sim/src/groups.rs:156-175
-  - crates/barq-sim/src/from_orders.rs:703-757
-  - crates/barq-records/src/lib.rs:252-305
-  - crates/barq-records/src/logs.rs:464-474
-  - crates/barq-sim/examples/scaling.rs
+  - crates/phasor-sim/src/groups.rs:156-175
+  - crates/phasor-sim/src/from_orders.rs:703-757
+  - crates/phasor-records/src/lib.rs:252-305
+  - crates/phasor-records/src/logs.rs:464-474
+  - crates/phasor-sim/examples/scaling.rs
 order: 1006
 ---
 
@@ -20,11 +20,11 @@ order: 1006
 
 ## 位置
 
-- `crates/barq-sim/src/groups.rs:156-175`（`Groups::chunks`）
-- `crates/barq-sim/src/from_orders.rs:703-757`（`simulate_into_parallel`）
-- `crates/barq-records/src/lib.rs:252-305`（`OrderRecords::concat`）
-- `crates/barq-records/src/logs.rs:464-474`（`Journal::extend`）
-- `crates/barq-sim/examples/scaling.rs`（扩展性测量）
+- `crates/phasor-sim/src/groups.rs:156-175`（`Groups::chunks`）
+- `crates/phasor-sim/src/from_orders.rs:703-757`（`simulate_into_parallel`）
+- `crates/phasor-records/src/lib.rs:252-305`（`OrderRecords::concat`）
+- `crates/phasor-records/src/logs.rs:464-474`（`Journal::extend`）
+- `crates/phasor-sim/examples/scaling.rs`（扩展性测量）
 
 ## 切块、执行、合并
 
@@ -43,7 +43,7 @@ order: 1006
 
 ## 相关
 
-- [barq-sim：模拟循环](../crates/barq-sim.md)：所属 crate；plain / logged / serial / parallel 四种入口。
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：所属 crate；plain / logged / serial / parallel 四种入口。
 - [合并每线程缓冲与 order_id 重基](../algorithms/record-merge.md)：`S::merge` 在记录层的实现。
 - [无状态随机数 SplitMix64](../concepts/stateless-rng.md)：随机抽样不依赖分组与线程数的原因。
 - [from_orders 的一根 K 线](../algorithms/bar-loop.md)：每个线程内部逐组执行的循环。

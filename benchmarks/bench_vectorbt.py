@@ -52,7 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _generate(n_rows, n_cols, fill_every, target_percent):
     """Generates the input arrays, column-major.
 
-    **This formula is duplicated in `crates/barq-sim/examples/bench.rs` and the
+    **This formula is duplicated in `crates/phasor-sim/examples/bench.rs` and the
     two must agree bit for bit.** The price walk is sequential and cannot be
     vectorized without reordering the multiplications, which would change the
     last bits — hence the explicit loop, JIT-compiled so generating the data is

@@ -2,7 +2,7 @@
 title: 系统全景
 kind: guide
 summary: 先建立全局地图：数据怎么流过各个 crate，crate 之间怎么依赖、各有多大，跨 crate 的类型骨架长什么样。
-related: [conventions, reading-roadmap, algorithm-index, barq-core, barq-sim, barq-expr]
+related: [conventions, reading-roadmap, algorithm-index, phasor-core, phasor-sim, phasor-expr]
 tags: [architecture, overview, crates]
 sources:
   - Cargo.toml
@@ -18,32 +18,32 @@ order: 10
 
 ```
 本地文件 ─▶ BarPanel(时间 × 标的) ─▶ 因子矩阵 ─▶ 信号(时间 × 列) ─▶ 模拟循环 ─▶ 记录 ─▶ 分析
-   barq-data        barq-model      barq-expr    barq-signals     barq-sim    barq-records  barq-analysis
-                                    (按标的并行)   barq/sweep      (按账户组并行)   (SoA)      (Portfolio)
+   phasor-data        phasor-model      phasor-expr    phasor-signals     phasor-sim    phasor-records  phasor-analysis
+                                    (按标的并行)   phasor/sweep      (按账户组并行)   (SoA)      (Portfolio)
 ```
 
 ![流水线](../../../docs/img/zh/pipeline.svg)
 
 整条流水线里没有 DataFrame：阶段之间传的是内存里的 `Vec<f64>`（[列主序](../concepts/column-axis.md)）、[`FlexArray`](../concepts/flex-array.md) 借用和结构体数组（SoA）。
-这也是为什么几乎每个 crate 都要先读 [`barq-core`](../crates/barq-core.md)：它定义了所有阶段共用的"数组长什么样"。
+这也是为什么几乎每个 crate 都要先读 [`phasor-core`](../crates/phasor-core.md)：它定义了所有阶段共用的"数组长什么样"。
 
 ## Crate 依赖与分层
 
 ```mermaid
 flowchart BT
-  core["barq-core<br/>Matrix · FlexArray · Columns · math · Error"]
-  model["barq-model<br/>枚举 · Id · BarType · OhlcvPanel · 定点数"]
-  generic["barq-generic<br/>滚动/扩展/EWM 窗口 · 合成价格"]
-  signals["barq-signals<br/>清洗 · 生成 · 排名 · 随机 · 标签"]
-  exec["barq-exec<br/>execute_order"]
-  data["barq-data<br/>CSV/Parquet → 面板 · 按时点对齐"]
-  expr["barq-expr<br/>解析 · 依赖图 · 原生/Polars 求值 · Alpha158/360"]
-  indicators["barq-indicators<br/>8 个指标 + 参数扫描"]
-  records["barq-records<br/>记录格式 · sink · 交易/回撤/MAE"]
-  sim["barq-sim<br/>from_orders · from_signals · 账户组 · 现金流"]
-  analysis["barq-analysis<br/>Portfolio · 重建链 · 指标 · 稳健性"]
-  facade["barq（门面）<br/>prelude · SignalSweep"]
-  py["barq-py<br/>PyO3 扩展 + Python 包"]
+  core["phasor-core<br/>Matrix · FlexArray · Columns · math · Error"]
+  model["phasor-model<br/>枚举 · Id · BarType · OhlcvPanel · 定点数"]
+  generic["phasor-generic<br/>滚动/扩展/EWM 窗口 · 合成价格"]
+  signals["phasor-signals<br/>清洗 · 生成 · 排名 · 随机 · 标签"]
+  exec["phasor-exec<br/>execute_order"]
+  data["phasor-data<br/>CSV/Parquet → 面板 · 按时点对齐"]
+  expr["phasor-expr<br/>解析 · 依赖图 · 原生/Polars 求值 · Alpha158/360"]
+  indicators["phasor-indicators<br/>8 个指标 + 参数扫描"]
+  records["phasor-records<br/>记录格式 · sink · 交易/回撤/MAE"]
+  sim["phasor-sim<br/>from_orders · from_signals · 账户组 · 现金流"]
+  analysis["phasor-analysis<br/>Portfolio · 重建链 · 指标 · 稳健性"]
+  facade["phasor（门面）<br/>prelude · SignalSweep"]
+  py["phasor-py<br/>PyO3 扩展 + Python 包"]
 
   model --> core
   generic --> core
@@ -94,38 +94,38 @@ flowchart BT
 
 图里每个方框是一页，自下而上：
 
-- [barq-core：基础类型](../crates/barq-core.md)：Matrix · FlexArray · Columns · math · Error
-- [barq-model：领域模型](../crates/barq-model.md)：枚举 · Id · BarType · OhlcvPanel · 定点数
-- [barq-generic：通用窗口算子](../crates/barq-generic.md)：滚动/扩展/EWM 窗口 · 合成价格
-- [barq-signals：信号工具箱](../crates/barq-signals.md)：清洗 · 生成 · 排名 · 随机 · 标签
-- [barq-indicators：技术指标](../crates/barq-indicators.md)：8 个指标 + 参数扫描
-- [barq-data：数据层](../crates/barq-data.md)：CSV/Parquet → 面板 · 按时点对齐
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：解析 · 依赖图 · 原生/Polars 求值 · Alpha158/360
-- [barq-exec：撮合内核](../crates/barq-exec.md)：execute_order
-- [barq-records：记录与派生视图](../crates/barq-records.md)：记录格式 · sink · 交易/回撤/MAE
-- [barq-sim：模拟循环](../crates/barq-sim.md)：from_orders · from_signals · 账户组 · 现金流
-- [barq-analysis：分析层](../crates/barq-analysis.md)：Portfolio · 重建链 · 指标 · 稳健性
-- [barq：门面 crate](../crates/barq.md)：prelude · SignalSweep
-- [barq-py：Python 层](../crates/barq-py.md)：PyO3 扩展 + Python 包
+- [phasor-core：基础类型](../crates/phasor-core.md)：Matrix · FlexArray · Columns · math · Error
+- [phasor-model：领域模型](../crates/phasor-model.md)：枚举 · Id · BarType · OhlcvPanel · 定点数
+- [phasor-generic：通用窗口算子](../crates/phasor-generic.md)：滚动/扩展/EWM 窗口 · 合成价格
+- [phasor-signals：信号工具箱](../crates/phasor-signals.md)：清洗 · 生成 · 排名 · 随机 · 标签
+- [phasor-indicators：技术指标](../crates/phasor-indicators.md)：8 个指标 + 参数扫描
+- [phasor-data：数据层](../crates/phasor-data.md)：CSV/Parquet → 面板 · 按时点对齐
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：解析 · 依赖图 · 原生/Polars 求值 · Alpha158/360
+- [phasor-exec：撮合内核](../crates/phasor-exec.md)：execute_order
+- [phasor-records：记录与派生视图](../crates/phasor-records.md)：记录格式 · sink · 交易/回撤/MAE
+- [phasor-sim：模拟循环](../crates/phasor-sim.md)：from_orders · from_signals · 账户组 · 现金流
+- [phasor-analysis：分析层](../crates/phasor-analysis.md)：Portfolio · 重建链 · 指标 · 稳健性
+- [phasor：门面 crate](../crates/phasor.md)：prelude · SignalSweep
+- [phasor-py：Python 层](../crates/phasor-py.md)：PyO3 扩展 + Python 包
 
 ## 代码规模（`src/` 行数，含单元测试）
 
 | crate | 行数 | 文件数 | 一句话 |
 |---|---:|---:|---|
-| [barq-core](../crates/barq-core.md) | 1,258 | 6 | 数组、广播、列标签、浮点容差、错误 |
-| [barq-model](../crates/barq-model.md) | 793 | 5 | 领域枚举与 Id，和 vectorbt / Nautilus 对齐 |
-| [barq-data](../crates/barq-data.md) | 560 | 1 | Arrow 读取、面板、按 `available_time` 对齐 |
-| [barq-exec](../crates/barq-exec.md) | 1,152 | 3 | 一笔订单对一个账户在一根 K 线上的撮合 |
-| [barq-sim](../crates/barq-sim.md) | 4,258 | 7 | 驱动内核的两条循环、止损、账户组、并行 |
-| [barq-records](../crates/barq-records.md) | 4,032 | 7 | 记录格式与派生视图 |
-| [barq-analysis](../crates/barq-analysis.md) | 5,578 | 12 | 从记录重建净值、全部指标 |
-| [barq-expr](../crates/barq-expr.md) | 4,089 | 10 | 因子 DSL 全链路 |
-| [barq-generic](../crates/barq-generic.md) | 1,533 | 4 | 通用窗口算子 |
-| [barq-indicators](../crates/barq-indicators.md) | 1,188 | 3 | 技术指标与参数网格 |
-| [barq-signals](../crates/barq-signals.md) | 2,021 | 7 | 信号工具箱 |
-| [barq](../crates/barq.md) | 364 | 2 | 门面 |
-| [barq-py](../crates/barq-py.md) | 2,367 Rust + 1,257 Python | 7 + 4 | Python 边界 |
-| [research/barq_lab](../tooling/research-protocol.md) | 2,459 Python | 22 | 预注册因子研究协议 |
+| [phasor-core](../crates/phasor-core.md) | 1,258 | 6 | 数组、广播、列标签、浮点容差、错误 |
+| [phasor-model](../crates/phasor-model.md) | 793 | 5 | 领域枚举与 Id，和 vectorbt / Nautilus 对齐 |
+| [phasor-data](../crates/phasor-data.md) | 560 | 1 | Arrow 读取、面板、按 `available_time` 对齐 |
+| [phasor-exec](../crates/phasor-exec.md) | 1,152 | 3 | 一笔订单对一个账户在一根 K 线上的撮合 |
+| [phasor-sim](../crates/phasor-sim.md) | 4,258 | 7 | 驱动内核的两条循环、止损、账户组、并行 |
+| [phasor-records](../crates/phasor-records.md) | 4,032 | 7 | 记录格式与派生视图 |
+| [phasor-analysis](../crates/phasor-analysis.md) | 5,578 | 12 | 从记录重建净值、全部指标 |
+| [phasor-expr](../crates/phasor-expr.md) | 4,089 | 10 | 因子 DSL 全链路 |
+| [phasor-generic](../crates/phasor-generic.md) | 1,533 | 4 | 通用窗口算子 |
+| [phasor-indicators](../crates/phasor-indicators.md) | 1,188 | 3 | 技术指标与参数网格 |
+| [phasor-signals](../crates/phasor-signals.md) | 2,021 | 7 | 信号工具箱 |
+| [phasor](../crates/phasor.md) | 364 | 2 | 门面 |
+| [phasor-py](../crates/phasor-py.md) | 2,367 Rust + 1,257 Python | 7 + 4 | Python 边界 |
+| [research/phasor_lab](../tooling/research-protocol.md) | 2,459 Python | 22 | 预注册因子研究协议 |
 
 ## 全局类图（只画跨 crate 的骨架）
 

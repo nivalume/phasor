@@ -22,13 +22,13 @@ function listFiles(dir: string, prefix: string, out: string[]) {
 
 /**
  * `virtual:repo-files`: the repository's file list, so the app links inline
- * code like `crates/barq-exec/src/kernel.rs:144` only when the file exists.
+ * code like `crates/phasor-exec/src/kernel.rs:144` only when the file exists.
  */
 function repoFiles(): Plugin {
   const id = "virtual:repo-files";
   const resolved = `\0${id}`;
   return {
-    name: "barq-repo-files",
+    name: "phasor-repo-files",
     resolveId: (source) => (source === id ? resolved : null),
     load(source) {
       if (source !== resolved) return null;

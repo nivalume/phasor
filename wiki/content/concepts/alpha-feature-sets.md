@@ -2,25 +2,25 @@
 title: Alpha158 与 Alpha360
 kind: concept
 summary: alpha158() 与 alpha360() 按 Qlib 的特征配置生成 158 和 360 个因子公式并编译成一个 FactorSet，不含标签与标准化，vwap 由调用方提供。
-parent: barq-expr
+parent: phasor-expr
 related: [factor-graph, qlib-operators, order-statistics, monotonic-queue, polars-backend]
 tags: [factors, qlib, features]
 sources:
-  - crates/barq-expr/src/alpha158.rs
-  - crates/barq-expr/src/alpha360.rs
-  - crates/barq-expr/tests/parity_qlib.rs
+  - crates/phasor-expr/src/alpha158.rs
+  - crates/phasor-expr/src/alpha360.rs
+  - crates/phasor-expr/tests/parity_qlib.rs
 order: 707
 ---
 
 # Alpha158 与 Alpha360
 
-Qlib 的两套默认特征库在 barq 里是两个返回 `FactorSet` 的函数：公式按 Qlib `Alpha158DL` / `Alpha360DL` 的 `get_feature_config()` 生成字符串，再走普通的[编译](../algorithms/factor-graph.md)与[求值](../algorithms/native-evaluation.md)。它们是 barq-expr 的主要负载，也是 Qlib fixture 钉住的对象。
+Qlib 的两套默认特征库在 phasor 里是两个返回 `FactorSet` 的函数：公式按 Qlib `Alpha158DL` / `Alpha360DL` 的 `get_feature_config()` 生成字符串，再走普通的[编译](../algorithms/factor-graph.md)与[求值](../algorithms/native-evaluation.md)。它们是 phasor-expr 的主要负载，也是 Qlib fixture 钉住的对象。
 
 ## 位置
 
-- `crates/barq-expr/src/alpha158.rs`：`alpha158()`
-- `crates/barq-expr/src/alpha360.rs`：`alpha360()`
-- `crates/barq-expr/tests/parity_qlib.rs`：用 Qlib 预言机生成的 fixture（`tests/fixtures/qlib_alpha158.tsv`、`tests/fixtures/qlib_alpha360.tsv`）对照
+- `crates/phasor-expr/src/alpha158.rs`：`alpha158()`
+- `crates/phasor-expr/src/alpha360.rs`：`alpha360()`
+- `crates/phasor-expr/tests/parity_qlib.rs`：用 Qlib 预言机生成的 fixture（`tests/fixtures/qlib_alpha158.tsv`、`tests/fixtures/qlib_alpha360.tsv`）对照
 
 ## 生成方式
 
@@ -32,7 +32,7 @@ Qlib 的两套默认特征库在 barq 里是两个返回 `FactorSet` 的函数�
 
 ## 相关
 
-- [barq-expr：因子表达式引擎](../crates/barq-expr.md)：所属 crate；`alpha158.rs`、`alpha360.rs` 是它阅读顺序里的第 7 步。
+- [phasor-expr：因子表达式引擎](../crates/phasor-expr.md)：所属 crate；`alpha158.rs`、`alpha360.rs` 是它阅读顺序里的第 7 步。
 - [依赖图编译：哈希合并、Ref 视图与槽位调度](../algorithms/factor-graph.md)：哈希合并让几十个因子共用一个 `Ref($close,1)`，Alpha360 的 354 个 `Ref` 都成了视图。
 - [因子算子与 Qlib 对照](../reference/qlib-operators.md)：`alpha158()` / `alpha360()` 对应 `Alpha158DL` / `Alpha360DL.get_feature_config()`，以及逐算子的对照精度。
 - [顺序统计量：有序环与树状数组](../algorithms/order-statistics.md)：Alpha158 的所有窗口 ≤ 60，所以 `QTLU`/`QTLD`/`RANK` 永远走有序环。
