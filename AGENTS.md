@@ -36,6 +36,7 @@ Reusable skills live in `skills/` (Agent Skills format, one `SKILL.md` per direc
 
 | Skill | When to use |
 |---|---|
+| `skills/docs-canvas` | Docs overview / architecture walkthrough / API reference as a navigable Cursor Canvas; requires Cursor Canvas SDK. |
 | `skills/mermaid-diagrams` | Any Markdown with a ```mermaid block: pick the diagram type, follow the house style, then run `python3 skills/mermaid-diagrams/scripts/check_mermaid.py <file-or-dir>` and fix every `FAIL` before committing. |
 
-Codex: `$mermaid-diagrams` or `/skills`. Grok Build: `grok inspect` lists what was discovered. Claude Code: loads it automatically.
+Codex: `$docs-canvas`, `$mermaid-diagrams`, or `/skills`. Grok Build: `grok inspect` lists what was discovered. Claude Code: loads it automatically.

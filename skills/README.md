@@ -6,6 +6,7 @@
 
 | 技能 | 用途 |
 |---|---|
+| [`docs-canvas/`](docs-canvas/SKILL.md) | 把架构说明、API 参考、walkthrough 等文档做成可导航的 Cursor Canvas（依赖 Cursor Canvas SDK） |
 | [`mermaid-diagrams/`](mermaid-diagrams/SKILL.md) | 在 Markdown 里画类图 / 时序图 / 流程图 / 状态图 / 路线图，并用 mermaid-cli 逐块渲染校验 |
 
 ## 各工具怎么发现这些技能
