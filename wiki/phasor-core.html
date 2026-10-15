@@ -12,16 +12,17 @@
     --text: #f0f0f0;
     --secondary: #b8b8b8;
     --muted: #909090;
-    --faint: #666;
     --stroke: #303030;
     --stroke2: #3d3d3d;
     --fill: #2b2b2b;
     --accent: #3a7afe;
-    --math: #3a7afe;
-    --flex: #1f8a65;
-    --matrix: #c9a227;
-    --columns: #7b64b8;
-    --error: #c06028;
+    --math: #d35d5d;
+    --flex: #2fbfa8;
+    --matrix: #3a7afe;
+    --columns: #c9a227;
+    --error: #b07cd8;
+    --good: #4caf7a;
+    --bad: #d35d5d;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -33,24 +34,18 @@
   a { color: #8eb6ff; text-decoration: none; }
   a:hover { text-decoration: underline; }
   header.top {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    padding: 10px 22px;
-    background: var(--chrome);
-    border-bottom: 1px solid var(--stroke);
-    font-size: 13px;
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: 16px; align-items: center;
+    padding: 10px 22px; background: var(--chrome); border-bottom: 1px solid var(--stroke); font-size: 13px;
   }
   header.top strong { font-size: 14px; }
   header.top nav { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
   header.top nav a { color: var(--secondary); }
+  header.top nav a.sep { color: var(--muted); }
   main { max-width: 1080px; margin: 0 auto; padding: 28px 22px 72px; }
   h1 { font-size: 24px; line-height: 30px; font-weight: 600; margin: 0 0 8px; }
   h2 { font-size: 18px; line-height: 24px; font-weight: 600; margin: 32px 0 10px; }
-  h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 18px 0 4px; }
   p { margin: 0 0 10px; }
   .muted { color: var(--secondary); }
   .small { color: var(--muted); font-size: 12px; line-height: 16px; }
@@ -58,77 +53,82 @@
   .stat { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
   .stat b { display: block; font-size: 20px; font-weight: 650; margin-bottom: 2px; }
   .stat span { color: var(--muted); font-size: 12px; }
-  .panel {
-    border: 1px solid var(--stroke);
-    border-radius: 8px;
-    overflow: hidden;
-    margin: 12px 0;
-  }
-  .panel .cap {
-    padding: 8px 12px;
-    background: #242424;
-    border-bottom: 1px solid var(--stroke);
-    font-size: 12px;
-    font-weight: 600;
-  }
+  .panel { border: 1px solid var(--stroke); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+  .panel .cap { padding: 8px 12px; background: #242424; border-bottom: 1px solid var(--stroke); font-size: 12px; font-weight: 600; }
   .panel .body { padding: 12px; background: var(--bg); overflow-x: auto; }
   .panel .foot { padding: 8px 12px; border-top: 1px solid var(--stroke); }
   .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 8px; }
-  .legend button, .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--stroke2);
-    background: transparent;
-    color: var(--secondary);
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 12px;
-    cursor: pointer;
+  .legend button, .chip, .seg button {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--stroke2); background: transparent; color: var(--secondary);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
   }
-  .legend button.on { color: var(--text); background: var(--fill); }
+  .legend button.on, .seg button.on { color: var(--text); background: var(--fill); border-color: #5a5a5a; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; align-items: center; }
+  .seg .lbl { color: var(--muted); font-size: 12px; margin-right: 2px; }
   .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
-  #detail {
-    min-height: 72px;
-    border: 1px solid var(--stroke);
-    border-radius: 8px;
-    padding: 12px 14px;
-    background: var(--elev);
-  }
-  #detail h3 { margin-bottom: 4px; }
+  .detail { min-height: 72px; border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  .detail h3 { margin: 0 0 4px; }
   .uses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; vertical-align: top; border-top: 1px solid var(--stroke); }
   th { color: var(--text); font-weight: 600; background: var(--elev); border-top: none; }
   td { color: var(--secondary); }
-  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; }
-  .types td:first-child, .types-3 td:nth-child(2) { white-space: nowrap; }
+  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; overflow-x: auto; }
+  .types td:first-child { white-space: nowrap; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .card { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: #202020; }
+  .card h3 { margin-top: 0; }
   .card p { color: var(--secondary); font-size: 13px; margin: 0; }
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   pre {
-    margin: 0;
-    padding: 10px 12px;
-    background: var(--fill);
-    border: 1px solid var(--stroke);
-    border-radius: 6px;
-    overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-    line-height: 18px;
+    margin: 0; padding: 10px 12px; background: var(--fill); border: 1px solid var(--stroke);
+    border-radius: 6px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px;
   }
-  .note {
-    border-left: 3px solid var(--accent);
-    background: #242424;
-    border-radius: 6px;
-    padding: 10px 12px;
-    color: var(--secondary);
-    font-size: 13px;
-  }
+  .note { border-left: 3px solid var(--accent); background: #242424; border-radius: 6px; padding: 10px 12px; color: var(--secondary); font-size: 13px; margin: 10px 0; }
+  .note.warn { border-left-color: var(--bad); }
+  ol.steps { margin: 6px 0 10px; padding-left: 22px; }
+  ol.steps li { color: var(--secondary); margin: 0 0 6px; }
+  ol.steps li b { color: var(--text); }
+  .panel .body > svg { max-width: 100%; height: auto; display: block; }
   svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
-  @media (max-width: 800px) {
-    .stats, .grid2 { grid-template-columns: 1fr; }
+  input[type="text"], input[type="number"] {
+    background: var(--fill); color: var(--text); border: 1px solid var(--stroke2); border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 5px 8px;
+  }
+  input[type="text"] { width: 100%; }
+  input[type="number"] { width: 96px; }
+  label.field { display: block; color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  label.field span { display: block; margin-bottom: 3px; }
+  label.inline { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12px; margin-right: 14px; }
+  .err { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 4px; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  .kpi { border: 1px solid var(--stroke2); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--secondary); background: #232323; }
+  .kpi b { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  /* cell grids */
+  table.cells { width: auto; border-collapse: separate; border-spacing: 3px; font-size: 11px; }
+  table.cells th, table.cells td { border: none; padding: 0; background: none; }
+  table.cells th.rl { text-align: right; padding-right: 8px; font-weight: 500; color: var(--secondary); white-space: nowrap; font-size: 12px; }
+  table.cells th.ix { color: var(--muted); font-weight: 400; text-align: center; font-family: ui-monospace, Menlo, monospace; padding: 0 2px; }
+  table.cells td.c {
+    min-width: 46px; height: 28px; padding: 0 4px; text-align: center; vertical-align: middle; border-radius: 4px;
+    border: 1px solid var(--stroke2); background: #232323; color: var(--secondary);
+    font-family: ui-monospace, Menlo, monospace; cursor: default;
+  }
+  table.cells td.hot { outline: 2px solid #f0f0f0; outline-offset: -1px; color: var(--text); }
+  table.cells td.dim { opacity: 0.35; }
+  table.cells td.none { border-style: dashed; color: #666; }
+  .flexrow { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .flexrow > div { min-width: 0; }
+  @media (max-width: 860px) {
+    .stats, .grid2, .grid3, .controls { grid-template-columns: 1fr; }
+    main { padding: 20px 16px 60px; }
+    header.top { padding: 10px 16px; flex-wrap: wrap; }
   }
 </style>
 </head>
@@ -143,642 +143,936 @@
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
+    <a class="sep">|</a>
+    <a href="#concept">第一性原理</a>
     <a href="#graph">依赖图</a>
+    <a href="#columns">列轴</a>
+    <a href="#flex">FlexArray</a>
+    <a href="#matrix">Matrix</a>
+    <a href="#math">容差</a>
+    <a href="#error">错误</a>
     <a href="#class">类图</a>
-    <a href="#types">类型</a>
-    <a href="#modules">五个模块</a>
     <a href="#table">对照表</a>
+    <a href="#rules">规则</a>
   </nav>
 </header>
 <main>
   <h1>phasor-core</h1>
   <p class="muted">
-    整个引擎共用的地基 crate：浮点容差、零分配广播、列主序矩阵、多层列标签、不变量错误。
-    <code>Cargo.toml</code> 的 <code>[dependencies]</code> 是空的，只依赖 Rust 标准库。
-    下游数字是否可信，取决于这里的四件事没有被绕开。
+    地基。其它每个 crate 都站在它上面，而它只依赖 <code>std</code>。它回答四个“全引擎必须统一口径”的问题：
+    浮点数怎么比较（<code>math</code>），二维数据怎么放、参数怎么广播（<code>matrix</code>、<code>flex</code>），
+    每一列代表什么（<code>columns</code>），以及什么算错误（<code>error</code>）。这些口径一旦不统一，下游每个数字都会悄悄偏掉。
   </p>
   <div class="stats">
-    <div class="stat"><b>0</b><span>外部 crate 依赖。arrow、polars、pyo3 都不进这一层</span></div>
-    <div class="stat"><b>5</b><span>模块：math、flex、matrix、columns、error</span></div>
-    <div class="stat"><b>10 + 1</b><span>10 个 crate 在 src 里直接使用；phasor-model 只在 Cargo.toml 里声明</span></div>
+    <div class="stat"><b>0 个外部依赖</b><span>连 <code>thiserror</code> 都没有：<code>Error</code> 的 <code>Display</code> 是手写的，地基不引入任何第三方代码</span></div>
+    <div class="stat"><b>11 个 crate 直接依赖</b><span>工作区 13 个 crate 中，除了它自己和 phasor-data，全部在 <code>[dependencies]</code> 里写了 phasor-core</span></div>
+    <div class="stat"><b>1,258 行 · 32 个测试</b><span>五个模块；math 一个文件就有 13 个测试，因为它是整个移植里最容易“差一分钱”的地方</span></div>
   </div>
 
+  <!-- ============================================================ -->
+  <h2 id="concept">从第一性原理看：地基该放什么</h2>
+  <p class="muted">
+    先不看代码。一个向量化回测引擎，把“成千上万个参数组合 × 上百个标的”一次跑完。什么东西必须由所有层共享、只定义一次？
+  </p>
+
+  <h3>1. 列是工作单位</h3>
+  <p>
+    向量化回测的核心技巧，是把“参数”“标的”“因子”全部压进同一个<b>列轴</b>：每一列是一次彼此独立的模拟，模拟器只知道有 <code>n_cols</code> 列，
+    不知道某一列“是什么”。由此推出三件事：一列在内存里必须<b>连续</b>（扫描一列就是顺序读一段内存，线程按列切分不会抢同一条缓存行）——所以是<b>列主序</b>；
+    同一个参数组合的列必须<b>相邻</b>（共享资金的账户就是一段切片）；而且必须有一套<b>标签</b>把结果归因回“哪个参数、哪个标的”。
+  </p>
+
+  <h3>2. 参数不能展开</h3>
+  <p>
+    手续费、滑点、止损距离、下单量……每个参数都可以是一个标量、每列一个值、每行一个值或一整个矩阵。把它们全部展开成 <code>n_rows × n_cols</code>，
+    10 万根 K 线 × 2,000 列就是 1.6 GB <b>一个</b>参数，而参数有十几个。所以需要一个“看起来是矩阵、实际只借用原始形状”的类型，读的时候再算下标。
+  </p>
+
+  <h3>3. 钱不能用 == 比较</h3>
+  <p>
+    <code>0.1 + 0.2 != 0.3</code>。在回测里这不是学术问题：平仓后仓位剩下 <code>-1.1e-16</code>，这个仓位就“还开着”，下一根 K 线的逻辑全错；
+    “现金够不够买”用 <code>&lt;=</code> 判断，差一个舍入误差就拒单。而 phasor 要和参考实现（vectorbt）逐笔对齐，所以容差的<b>语义</b>也必须和参考实现一致，
+    一处不一致就是几千根 K 线之后的一分钱漂移。
+  </p>
+
+  <h3>4. 错误和“没成交”是两回事</h3>
+  <p>
+    形状对不上、要的标签层不存在、现金变成负数——这是调用方给了不可能的输入，应该停下来。
+    但“钱不够所以没买”是一次正常的模拟结果，要被记下来、被统计（“这次扫描为什么不交易”是用户最常问的问题）。把两者混在一个 <code>Err</code> 里，
+    要么一次拒单就中断整个扫描，要么真正的 bug 被当成拒单吞掉。
+  </p>
+
+  <div class="panel">
+    <div class="cap">四个问题，五个模块。箭头表示模块之间的 use：flex 和 matrix 都只用 error；math 和 error 互不依赖</div>
+    <div class="body">
+      <svg width="1040" height="232" viewBox="0 0 1040 232" role="img" aria-label="四个问题对应五个模块">
+        <defs>
+          <marker id="carr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" />
+          </marker>
+        </defs>
+        <g font-size="11">
+          <text x="16" y="18" fill="#909090">问题</text>
+          <rect x="16" y="28" width="230" height="40" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="131" y="52" text-anchor="middle" fill="#f0f0f0">列是工作单位：怎么放、代表什么</text>
+          <rect x="16" y="80" width="230" height="40" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="131" y="104" text-anchor="middle" fill="#f0f0f0">参数不能展开：怎么广播</text>
+          <rect x="16" y="132" width="230" height="40" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="131" y="156" text-anchor="middle" fill="#f0f0f0">钱不能用 == 比较</text>
+          <rect x="16" y="184" width="230" height="40" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="131" y="208" text-anchor="middle" fill="#f0f0f0">错误 ≠ 没成交</text>
+
+          <text x="316" y="18" fill="#909090">模块（src/）</text>
+          <rect x="316" y="22" width="170" height="40" rx="6" fill="#262626" stroke="#3a7afe"/>
+          <text x="401" y="40" text-anchor="middle" font-weight="600" fill="#f0f0f0">matrix</text>
+          <text x="401" y="54" text-anchor="middle" font-size="10" fill="#9ec1ff">列主序 Matrix</text>
+          <rect x="316" y="70" width="170" height="40" rx="6" fill="#262626" stroke="#c9a227"/>
+          <text x="401" y="88" text-anchor="middle" font-weight="600" fill="#f0f0f0">columns</text>
+          <text x="401" y="102" text-anchor="middle" font-size="10" fill="#e6c35c">Label · Level · Columns</text>
+          <rect x="316" y="118" width="170" height="40" rx="6" fill="#262626" stroke="#2fbfa8"/>
+          <text x="401" y="136" text-anchor="middle" font-weight="600" fill="#f0f0f0">flex</text>
+          <text x="401" y="150" text-anchor="middle" font-size="10" fill="#8fe0d2">FlexArray 五种形状</text>
+          <rect x="316" y="166" width="170" height="40" rx="6" fill="#262626" stroke="#d35d5d"/>
+          <text x="401" y="184" text-anchor="middle" font-weight="600" fill="#f0f0f0">math</text>
+          <text x="401" y="198" text-anchor="middle" font-size="10" fill="#f0a0a0">is_close · add</text>
+
+          <rect x="560" y="94" width="170" height="40" rx="6" fill="#262626" stroke="#b07cd8"/>
+          <text x="645" y="112" text-anchor="middle" font-weight="600" fill="#f0f0f0">error</text>
+          <text x="645" y="126" text-anchor="middle" font-size="10" fill="#d3b5ee">Error · Result</text>
+
+          <text x="790" y="18" fill="#909090">下游怎么用</text>
+          <text x="790" y="46" fill="#b8b8b8">因子、净值、收益都是 Matrix；线程拿一段列</text>
+          <text x="790" y="94" fill="#b8b8b8">扫描结果按 group_indices 汇总</text>
+          <text x="790" y="142" fill="#b8b8b8">模拟的每个参数都是 FlexArray</text>
+          <text x="790" y="190" fill="#b8b8b8">撮合内核的归零与可负担判断</text>
+          <text x="790" y="214" fill="#b8b8b8">拒单走 OrderResult，不走 Err</text>
+        </g>
+        <path d="M246 48 C 280 48, 280 42, 316 42" fill="none" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M246 48 C 280 48, 280 90, 316 90" fill="none" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M246 100 C 280 100, 280 138, 316 138" fill="none" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M246 152 C 280 152, 280 186, 316 186" fill="none" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M246 204 C 420 226, 600 226, 645 134" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3" marker-end="url(#carr)"/>
+        <path d="M486 42 C 530 42, 530 104, 560 108" fill="none" stroke="#b07cd8" stroke-dasharray="4 3" marker-end="url(#carr)"/>
+        <path d="M486 90 C 520 90, 530 110, 560 112" fill="none" stroke="#b07cd8" stroke-dasharray="4 3" marker-end="url(#carr)"/>
+        <path d="M486 138 C 520 138, 530 118, 560 118" fill="none" stroke="#b07cd8" stroke-dasharray="4 3" marker-end="url(#carr)"/>
+      </svg>
+    </div>
+  </div>
+
+  <h3>如果从零实现，按这个顺序</h3>
+  <ol class="steps">
+    <li><b>先定错误类型，并划清边界。</b>只放“不变量被破坏”；拒单是返回值。手写 <code>Display</code>，让地基没有依赖。</li>
+    <li><b>定容差层，并用 lint 强制。</b>照抄参考实现的容差语义（这里是 PEP 485 的 <code>isclose</code>，外加“无穷永远不接近”），然后把 <code>clippy::float_cmp</code> 设成 deny，让 <code>==</code> 必须写理由。</li>
+    <li><b>定内存布局：列主序。</b><code>column(c)</code> 必须是零拷贝切片；跨语言边界（NumPy 默认行主序）显式转置。</li>
+    <li><b>定广播：借用而不展开。</b>一个枚举覆盖标量 / 每列 / 每行 / 全矩阵 / 列映射，读的时候一次 <code>match</code>；构造时校验长度，而不是在模拟深处越界。</li>
+    <li><b>定列标签，并靠构造函数建立布局约定。</b>参数“重复”、标的“平铺”，使 <code>col = param_idx × n_symbols + symbol_idx</code>；用测试钉住，运行时不检查。</li>
+  </ol>
+
+  <div class="wrap types">
+    <table>
+      <thead><tr><th>第一性原理的问题</th><th>phasor-core 的回答</th><th>小节</th></tr></thead>
+      <tbody>
+        <tr><td>一列代表什么</td><td><code>Columns { levels, n_cols }</code>，<code>Level::repeat</code> / <code>Level::tile</code>，<code>group_indices</code></td><td><a href="#columns">列轴</a></td></tr>
+        <tr><td>参数怎么广播</td><td><code>FlexArray::{Scalar, PerColumn, PerRow, MappedColumns, Full}</code>，<code>get(row, col)</code>，<code>varies_by_row()</code></td><td><a href="#flex">FlexArray</a></td></tr>
+        <tr><td>二维数据怎么放</td><td><code>Matrix { data, n_rows, n_cols }</code>，<code>data[col × n_rows + row]</code></td><td><a href="#matrix">Matrix</a></td></tr>
+        <tr><td>浮点怎么比</td><td><code>is_close</code>（REL 1e-9 / ABS 1e-12，NaN 与 ±inf 永不接近）、<code>is_close_or_less</code>、<code>is_less</code>、<code>add</code></td><td><a href="#math">容差</a></td></tr>
+        <tr><td>什么算错误</td><td><code>Error::{Broadcast, FlexLen, UnknownLevel, LevelWidth, Invariant}</code>；拒单不在其中</td><td><a href="#error">错误</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================ -->
   <h2 id="graph">依赖图</h2>
   <p>
-    左侧是上游：只有 <code>std</code>。中间是 phasor-core 的五个模块。右侧是声明了
-    <code>phasor-core</code> 依赖的 crate。一根线表示该 crate 的 <code>src/</code>
-    引用了对应模块（测试目录不计）。点模块或 crate，只保留相关的线，并在图下写出用途。
+    左边没有上游，只有 <code>std</code>。中间是五个模块，右边是直接 <code>use phasor_core::…</code> 的 crate（只统计 <code>src/</code>；测试里的用法写在说明里）。
+    点任一节点，只保留相关的线，图下面写出它用来做什么。
   </p>
   <div class="legend" id="legend"></div>
   <div class="panel">
-    <div class="cap">phasor-core 不依赖任何 phasor crate；实线是 src 引用，虚线是仅声明、源码未使用</div>
+    <div class="cap">线的颜色 = 被用到的模块。phasor-model 在 Cargo.toml 里声明了依赖，但 src/ 里一行都没有用到（虚线）</div>
     <div class="body">
-      <svg id="dep-graph" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-label="phasor-core 依赖图"></svg>
+      <svg id="dep-graph" width="1040" height="600" viewBox="0 0 1040 600" role="img" aria-label="phasor-core 依赖图"></svg>
     </div>
     <div class="foot">
       <p class="small" style="margin:0">
-        来源：各 crate 的 Cargo.toml，以及 src/ 中的 <code>use phasor_core::…</code> / <code>phasor_core::Error</code>。
-        不含 tests/、examples/。phasor-data 不在图中：它依赖 phasor-model，不依赖 phasor-core。
-        error 的线默认更淡：几乎每个使用方都把它当作共同的 <code>Result</code>，亮出来会盖住 math、flex、matrix、columns 这些更具体的边。
+        来源：各 crate 的 Cargo.toml 与 <code>src/</code> 中的 <code>use phasor_core::…</code>。phasor-data 不依赖 phasor-core（它只依赖 phasor-model）。
       </p>
     </div>
   </div>
-  <div id="detail">
+  <div class="detail" id="detail">
     <h3>点一个节点</h3>
-    <p class="muted" style="margin:0">模块说明它被谁使用；crate 说明它拿 phasor-core 的哪一部分去做什么。</p>
+    <p class="muted" style="margin:0">模块：它解决什么、谁在用。下游：用到了哪几项、在哪些文件。</p>
   </div>
 
-  <h2>crate 内部</h2>
-  <p class="muted">五个模块之间只有一条依赖方向：flex、matrix、columns 在长度或标签不合法时返回 <code>Error</code>。math 不依赖它们。</p>
-  <div class="panel">
-    <div class="cap">内部依赖：校验失败统一落成 Error，比较与存储互不引用</div>
-    <div class="body">
-      <svg width="720" height="168" viewBox="0 0 720 168" role="img" aria-label="phasor-core 内部依赖">
-        <defs>
-          <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L8,4 L0,8 z" fill="#666" />
-          </marker>
-        </defs>
-        <rect x="250" y="16" width="120" height="36" rx="6" fill="#2b2b2b" stroke="#3d3d3d"/>
-        <text x="310" y="39" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">math</text>
-        <text x="390" y="39" font-size="11" fill="#909090">不引用其他模块</text>
-
-        <rect x="40" y="108" width="120" height="36" rx="6" fill="#1a2e28" stroke="#1f8a65"/>
-        <text x="100" y="131" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">flex</text>
-        <rect x="200" y="108" width="120" height="36" rx="6" fill="#2e2916" stroke="#c9a227"/>
-        <text x="260" y="131" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">matrix</text>
-        <rect x="360" y="108" width="120" height="36" rx="6" fill="#261f33" stroke="#7b64b8"/>
-        <text x="420" y="131" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">columns</text>
-        <rect x="540" y="108" width="120" height="36" rx="6" fill="#332016" stroke="#c06028"/>
-        <text x="600" y="131" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">error</text>
-
-        <path d="M160 126 H 520" fill="none" stroke="#666" marker-end="url(#arr)"/>
-        <path d="M320 126 H 520" fill="none" stroke="#666" marker-end="url(#arr)"/>
-        <path d="M480 126 H 520" fill="none" stroke="#666" marker-end="url(#arr)"/>
-      </svg>
-    </div>
-    <div class="foot"><p class="small" style="margin:0">FlexLen、LevelWidth、UnknownLevel、Broadcast、Invariant 都是同一个手写枚举，故意不用 thiserror，这样地基 crate 保持零依赖。</p></div>
-  </div>
-
-  <h2 id="modules">五个模块做什么</h2>
-  <div class="grid2">
-    <article class="card">
-      <h3><span class="dot" style="background:var(--math)"></span> math</h3>
-      <p>所有金额比较的唯一入口。<code>is_close</code> 按 PEP 485（相对 1e-9、绝对 1e-12），但 NaN 与 ±inf 永远不 close，包括 inf 对 inf——因为 <code>+inf</code> 是活哨兵（size 表示全部可下，price 表示用收盘价）。买入是否付得起用 <code>is_close_or_less</code>，不用 <code>&lt;=</code>。余额更新用 <code>add</code>，相消的和吸附成精确的 0.0，避免 1e-17 的灰尘把已平仓位留成“还开着”。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--flex)"></span> flex</h3>
-      <p><code>FlexArray</code> 让标量、逐列、逐行、整矩阵、以及 <code>MappedColumns</code>（column_map）共用一次内联 <code>get(row, col)</code>，不把参数物化成 T×C。100k×2000 的一张 f64 矩阵是 1.6 GB；扫描里十几个参数如果都物化，内存先被参数吃掉。标量分支不访问内存。<code>varies_by_row()</code> 让循环把逐列常量提出去。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--matrix)"></span> matrix</h3>
-      <p>列主序 <code>Matrix { data, n_rows, n_cols }</code>，<code>(row, col)</code> 落在 <code>data[col * n_rows + row]</code>。<code>column(c)</code> 是零拷贝的连续切片：模拟扫一列、因子按一列求值、线程拥有一段列，都依赖这一点。NumPy 默认行主序，跨进 Rust 的数组必须是 Fortran 序，否则会把时间和品种轴对调。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--columns)"></span> columns</h3>
-      <p>模拟器只看见 <code>n_cols</code> 条独立序列。参数、品种、因子都折进同一条列轴之后，<code>Columns</code> 是把结果归因回去的唯一机制。<code>Level::repeat</code> 做参数（一块参数的列连续），<code>Level::tile</code> 做品种，于是 <code>col = param_idx * n_symbols + symbol_idx</code>。这是构造约定，运行时不检查；<code>group_indices</code> 按标签分组，供分析层 <code>group_by</code> 使用。浮点标签按位模式比较，NaN 等于自身。</p>
-    </article>
-  </div>
-  <article class="card" style="margin-top:12px">
-    <h3><span class="dot" style="background:var(--error)"></span> error</h3>
-    <p><code>Error</code> 只表示不变量被破坏：形状广播失败、FlexArray 长度不对、列标签层级不存在或宽度不一致、以及模拟器发现的数值不变量（例如负现金）。拒单一张订单不是 <code>Err</code>，而是带状态码的正常返回。变体手写 <code>Display</code>，信息里带上出错的名字和实际/期望长度。</p>
-  </article>
-
-  <h2 id="class">类图</h2>
+  <!-- ============================================================ -->
+  <h2 id="columns">列轴：参数重复，标的平铺</h2>
   <p>
-    公开类型就这些。<code>math</code> 没有自己的类型，只有函数和两个常量。
-    实心菱形是拥有；虚线是依赖，箭头指向被返回或被校验成的 <code>Error</code>。
-    字段前面的 <code>-</code> 表示私有，<code>+</code> 表示公开。
+    <code>Level::repeat(name, values, times)</code> 把每个值连续重复 <code>times</code> 次：<code>[a, b], 3 → [a,a,a,b,b,b]</code>，用来建<b>参数</b>层；
+    <code>Level::tile</code> 把整段序列平铺 <code>times</code> 次：<code>[a, b], 3 → [a,b,a,b,a,b]</code>，用来建<b>标的</b>层。两者合在一起得到
+    <code>col = param_idx × n_symbols + symbol_idx</code>：同一个参数组合的列相邻。改下面的输入，或者把参数层换成 tile 看看会坏在哪。
   </p>
   <div class="panel">
-    <div class="cap">数值：广播、矩阵、容差。FlexArray 与 Matrix 不互相持有，只共用列主序下标</div>
+    <div class="cap">Columns::new([Level::repeat("window", …), Level::tile("symbol", …)])，JS 移植</div>
     <div class="body">
-      <svg width="1040" height="440" viewBox="0 0 1040 440" role="img" aria-label="数值类型类图">
-        <defs>
-          <marker id="umlDep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-            <path d="M1,1 L9,5 L1,9" fill="none" stroke="#b8b8b8" stroke-width="1.2"/>
-          </marker>
-        </defs>
-
-        <rect x="16" y="16" width="236" height="214" rx="6" fill="#262626" stroke="#3a7afe"/>
-        <rect x="16" y="16" width="236" height="32" rx="6" fill="#1a2744"/>
-        <rect x="16" y="36" width="236" height="12" fill="#1a2744"/>
-        <text x="28" y="37" font-size="11" fill="#9ec1ff">«mod» math</text>
-        <text x="28" y="66" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">REL_TOL: f64 = 1e-9</text>
-        <text x="28" y="84" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">ABS_TOL: f64 = 1e-12</text>
-        <text x="28" y="102" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_close(a, b) -&gt; bool</text>
-        <text x="28" y="120" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_close_tol(a, b, rel, abs)</text>
-        <text x="28" y="138" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_close_or_less(a, b)</text>
-        <text x="28" y="156" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_less(a, b)</text>
-        <text x="28" y="174" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ add(a, b) -&gt; f64</text>
-        <text x="28" y="192" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_addition_zero(a, b)</text>
-        <text x="28" y="214" font-size="10" fill="#909090">无类型，不返回 Error</text>
-
-        <rect x="276" y="16" width="360" height="214" rx="6" fill="#262626" stroke="#1f8a65"/>
-        <rect x="276" y="16" width="360" height="32" rx="6" fill="#143028"/>
-        <rect x="276" y="36" width="360" height="12" fill="#143028"/>
-        <text x="288" y="37" font-size="11" fill="#7dcea0">«enum» FlexArray&lt;'a, T&gt;</text>
-        <text x="288" y="66" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Scalar(T)</text>
-        <text x="288" y="84" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ PerColumn(&amp;'a [T])</text>
-        <text x="288" y="102" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ PerRow(&amp;'a [T])</text>
-        <text x="288" y="120" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ MappedColumns { data, n_rows, columns }</text>
-        <text x="288" y="138" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Full { data, n_rows }</text>
-        <text x="288" y="156" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ get(row, col) -&gt; T</text>
-        <text x="288" y="174" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ varies_by_row() -&gt; bool</text>
-        <text x="288" y="192" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ scalar / per_column / per_row / full / mapped</text>
-        <text x="288" y="214" font-size="10" fill="#909090">T: Copy 才能 get。构造失败才返回 Error</text>
-
-        <rect x="748" y="16" width="276" height="214" rx="6" fill="#262626" stroke="#c9a227"/>
-        <rect x="748" y="16" width="276" height="32" rx="6" fill="#2e2916"/>
-        <rect x="748" y="36" width="276" height="12" fill="#2e2916"/>
-        <text x="760" y="37" font-size="11" fill="#e6c35c">«struct» Matrix</text>
-        <text x="760" y="66" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- data: Vec&lt;f64&gt;</text>
-        <text x="760" y="84" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- n_rows: usize</text>
-        <text x="760" y="102" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- n_cols: usize</text>
-        <text x="760" y="120" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ filled / zeros</text>
-        <text x="760" y="138" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ from_column_major -&gt; Result</text>
-        <text x="760" y="156" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ column(col) -&gt; &amp;[f64]</text>
-        <text x="760" y="174" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ column_mut / get</text>
-        <text x="760" y="192" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ as_slice / into_vec</text>
-        <text x="760" y="214" font-size="10" fill="#909090">+ map_columns -&gt; Vec&lt;f64&gt;</text>
-
-        <path d="M 636 110 H 748" fill="none" stroke="#8a8a8a" stroke-dasharray="4 3"/>
-        <text x="692" y="102" text-anchor="middle" font-size="10" fill="#b8b8b8">同一列主序</text>
-
-        <rect x="276" y="292" width="748" height="132" rx="6" fill="#262626" stroke="#c06028"/>
-        <rect x="276" y="292" width="748" height="32" rx="6" fill="#332016"/>
-        <rect x="276" y="312" width="748" height="12" fill="#332016"/>
-        <text x="288" y="313" font-size="11" fill="#e0a070">«enum» Error</text>
-        <text x="430" y="313" font-size="10" fill="#909090">crate 根再导出 Error、Result&lt;T&gt; = Result&lt;T, Error&gt;</text>
-        <text x="288" y="346" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Broadcast { left, right }</text>
-        <text x="560" y="346" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ FlexLen { kind, actual, expected }</text>
-        <text x="288" y="366" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ UnknownLevel { name, available }</text>
-        <text x="560" y="366" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ LevelWidth { name, actual, expected }</text>
-        <text x="288" y="390" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Invariant(String)</text>
-        <text x="560" y="390" font-size="11" fill="#909090">手写 Display，不用 thiserror</text>
-
-        <path d="M 456 230 V 292" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep)"/>
-        <text x="464" y="266" font-size="10" fill="#b8b8b8">FlexLen · Invariant</text>
-        <path d="M 886 230 V 292" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep)"/>
-        <text x="778" y="266" font-size="10" fill="#b8b8b8">FlexLen</text>
-      </svg>
+      <div class="controls">
+        <label class="field"><span>参数值（window，逗号分隔）</span><input type="text" id="col-params" value="10, 20, 50" /></label>
+        <label class="field"><span>标的（symbol，逗号分隔）</span><input type="text" id="col-symbols" value="BTC, ETH" /></label>
+      </div>
+      <div class="seg" id="col-mode"><span class="lbl">参数层用</span></div>
+      <div class="seg" id="col-group"><span class="lbl">group_indices(</span></div>
+      <div id="col-grid"></div>
+      <div class="err" id="col-err"></div>
+      <div class="kpis" id="col-kpis"></div>
     </div>
-    <div class="foot"><p class="small" style="margin:0">来源：<code>crates/phasor-core/src/flex.rs</code>、<code>matrix.rs</code>、<code>math.rs</code>、<code>error.rs</code>。下标公式都是 <code>data[col * n_rows + row]</code>；MappedColumns 先把 <code>col</code> 换成 <code>columns[col]</code>。</p></div>
+    <div class="foot"><p class="small" style="margin:0" id="col-note">点一列看 describe(col)。</p></div>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>布局是约定，不是检查</h3><p><code>Columns</code> 不知道哪一层是参数、哪一层是标的；相邻性完全来自构造顺序。测试 <code>one_parameter_combination_occupies_contiguous_columns</code> 钉住它，运行时没有任何断言。</p></article>
+    <article class="card"><h3>Label 是标识，不是测量</h3><p><code>Float</code> 按位比较和哈希：<code>NaN == NaN</code>，<code>0.0 ≠ -0.0</code>。这样浮点参数（分位数阈值）才能当 <code>HashMap</code> 的键。</p></article>
+    <article class="card"><h3>group_indices 保序</h3><p>按第一次出现的顺序返回 <code>(Label, Vec&lt;usize&gt;)</code>，所以“每个参数的平均 Sharpe”出来的顺序和扫描的顺序一致，不依赖哈希顺序。</p></article>
   </div>
 
+  <!-- ============================================================ -->
+  <h2 id="flex">FlexArray：借用原始形状，读的时候算下标</h2>
+  <p>
+    下面是一个 4 行 × 6 列的逻辑矩阵（3 组参数 × 2 个标的）。选一种形状，左边是 <code>get(row, col)</code> 读出的值，右边是它<b>实际占用</b>的内存。
+    把鼠标移到左边任一格，右边高亮被读到的那个元素，并给出下标公式。
+  </p>
   <div class="panel">
-    <div class="cap">列索引：Columns 拥有 Level，Level 拥有每列一个 Label。宽度和名字的错误落到 Error</div>
+    <div class="cap">FlexArray&lt;'a, T&gt;::get，JS 移植。get 是一次内联的 match，Scalar 不访问内存</div>
     <div class="body">
-      <svg width="1040" height="360" viewBox="0 0 1040 360" role="img" aria-label="列标签类图">
+      <div class="seg" id="fx-kind"><span class="lbl">形状</span></div>
+      <div class="flexrow">
+        <div><p class="small" style="margin:0 0 4px">逻辑视图：n_rows × n_cols</p><div id="fx-logical"></div></div>
+        <div><p class="small" style="margin:0 0 4px">实际存储</p><div id="fx-storage"></div></div>
+      </div>
+      <div class="kpis" id="fx-kpis"></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="fx-note"></p></div>
+  </div>
+
+  <h3>省下多少内存</h3>
+  <p class="muted">一次扫描里，每个参数都按“全展开”算是 <code>n_rows × n_cols × 8</code> 字节。改下面的规模，对比五种形状的真实占用。</p>
+  <div class="panel">
+    <div class="cap">一个 f64 参数的内存：全展开 vs FlexArray</div>
+    <div class="body">
+      <div class="seg">
+        <label class="inline">K 线 <input type="number" id="mem-rows" value="100000" min="1" /></label>
+        <label class="inline">标的 <input type="number" id="mem-syms" value="100" min="1" /></label>
+        <label class="inline">参数组合 <input type="number" id="mem-params" value="50" min="1" /></label>
+      </div>
+      <div id="mem-bars"></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">MappedColumns 就是 Python 里的 <code>column_map</code>：50 组参数 × 100 个标的是 5,000 个逻辑价格列，内存里只有 100 列价格加一个 5,000 长的 <code>usize</code> 映射表。</p></div>
+  </div>
+  <div class="note">
+    <b>为什么还要 <code>varies_by_row()</code>：</b>Scalar 和 PerColumn 沿行不变，调用方可以在进入一列的内循环之前读一次，然后在循环里复用；
+    PerRow、Full、MappedColumns 返回 <code>true</code>，必须每行读。构造函数 <code>per_column</code> / <code>per_row</code> / <code>full</code> / <code>mapped</code>
+    校验长度并返回 <code>Error::FlexLen</code> 或 <code>Error::Invariant</code>；变体本身是 <code>pub</code> 的，直接写 <code>FlexArray::Full { .. }</code> 会绕过校验，这时越界就成了模拟深处的 panic。
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="matrix">Matrix：一列就是一段连续内存</h2>
+  <p>
+    <code>Matrix { data: Vec&lt;f64&gt;, n_rows, n_cols }</code>，元素 <code>(row, col)</code> 在 <code>data[col × n_rows + row]</code>。
+    列主序不是偏好，而是“列是工作单位”的结果：<code>column(c)</code> 是零拷贝的 <code>&amp;[f64]</code>，一个线程拿一段相邻的列，就拿到一段相邻的内存，不和别的线程共享缓存行。
+  </p>
+  <div class="panel">
+    <div class="cap">3 行 × 4 列。列主序（上）与行主序（下）的同一块缓冲区；两个线程各拿两列</div>
+    <div class="body">
+      <svg id="mx-svg" width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="列主序与行主序"></svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">NumPy 默认行主序，所以传进 Rust 的数组都必须是 Fortran 序（<code>order="F"</code>）；测试夹具生成器也显式这么做。<code>FlexArray::Full</code> 用的是同一个布局，Matrix 的缓冲区可以直接借给它。</p></div>
+  </div>
+  <div class="wrap types">
+    <table>
+      <thead><tr><th>方法</th><th>做什么</th><th>失败时</th></tr></thead>
+      <tbody>
+        <tr><td><code>filled</code> / <code>zeros</code></td><td>分配并填值</td><td>—</td></tr>
+        <tr><td><code>from_column_major(data, n_rows, n_cols)</code></td><td>包装已有的列主序缓冲区，不复制</td><td><code>Error::FlexLen { kind: "matrix" }</code></td></tr>
+        <tr><td><code>column(c)</code> / <code>column_mut(c)</code></td><td>第 c 列的切片</td><td>越界 panic</td></tr>
+        <tr><td><code>get(row, col)</code></td><td>单个元素</td><td>越界 panic</td></tr>
+        <tr><td><code>as_slice</code> / <code>into_vec</code></td><td>整块缓冲区（借用 / 取走，不复制）</td><td>—</td></tr>
+        <tr><td><code>map_columns(f)</code></td><td>每列归约成一个值，例如每列的总收益</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="math">容差层：所有关于钱的比较都走这里</h2>
+  <p>
+    <code>math.rs</code> 只有五十来行有效代码，却是整个移植里最承重的部分：撮合内核先用 <code>is_close</code> 把现金、仓位、负债、可用现金、估值价、净值<b>归零</b>，
+    再用 <code>is_close_or_less</code> 判断买不买得起；所有余额更新都用 <code>add</code>。语义是 PEP 485 的 <code>math.isclose</code>，只有一处故意的偏离：
+    <b>无穷永远不接近，连它自己也不</b>——因为 <code>+inf</code> 在引擎里是活的哨兵值（<code>size=+inf</code> 表示“能买多少买多少”，<code>price=+inf</code> 表示“用收盘价”），
+    <code>is_close(inf, inf) = true</code> 会把两个不同含义的哨兵混为一谈。
+  </p>
+  <div class="panel">
+    <div class="cap">is_close / is_close_or_less / is_less / add，JS 移植（JS 的 Number 就是 f64，结果逐位一致）</div>
+    <div class="body">
+      <div class="seg" id="m-presets"><span class="lbl">例子</span></div>
+      <div class="controls">
+        <label class="field"><span>a（可写 inf、-inf、nan 或表达式如 0.1+0.2）</span><input type="text" id="m-a" /></label>
+        <label class="field"><span>b</span><input type="text" id="m-b" /></label>
+      </div>
+      <div class="err" id="m-err"></div>
+      <div class="wrap"><table><thead><tr><th>调用</th><th>结果</th><th>朴素写法</th><th>朴素结果</th></tr></thead><tbody id="m-rows"></tbody></table></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="m-note"></p></div>
+  </div>
+
+  <h3>残差会让平掉的仓位“还开着”</h3>
+  <p class="muted">每根 K 线买入 0.1 个单位，买 10 次，然后一次卖出 1.0。左边用朴素的 <code>+</code>，右边用 <code>math::add</code>。</p>
+  <div class="panel">
+    <div class="cap">仓位的逐步更新</div>
+    <div class="body"><div id="drift"></div></div>
+    <div class="foot"><p class="small" style="margin:0">朴素加法最后剩下 <code>-1.1e-16</code>：仓位是负的，引擎会认为这一列持有一个极小的空头，下一根 K 线的“是否有持仓”分支就走错了。<code>add</code> 发现两个操作数异号且量级接近，直接返回精确的 <code>0.0</code>。</p></div>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>异号时比大小，不求和</h3><p><code>is_addition_zero</code> 对异号操作数比较 <code>|a|</code> 与 <code>|b|</code>，而不是看 <code>a + b</code> 离 0 多远：两个几乎抵消的大数相加，有效数字几乎全丢，和的大小在相对容差下没有意义。</p></div>
+    <article class="card"><h3>sign 不是 signum</h3><p><code>f64::signum(0.0) = 1.0</code>、<code>signum(-0.0) = -1.0</code>，会把零操作数送进“异号”分支。这里的 <code>sign</code> 返回整数，两个零都是 0，NaN 单独是 <code>i8::MIN</code>。</p></div>
+    <article class="card"><h3>容差内既不大也不小</h3><p><code>is_less(a, b)</code> 不等于 <code>!is_close_or_less(b, a)</code>：容差之内的两个数是“相等”，不是“小于”，也不是“大于”。</p></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="error">错误：只给不变量被破坏的情况</h2>
+  <p>
+    <code>Error</code> 只有五个变体，每个都把出问题的值写进消息（测试 <code>messages_name_the_offending_values</code>、<code>unknown_level_lists_the_alternatives</code> 钉住）。
+    “订单没能成交”<b>从来不是</b> <code>Err</code>：它是 phasor-exec 的 <code>OrderResult</code>，<code>status = Ignored | Rejected</code>，原因写在 phasor-model 的
+    <code>StatusInfo</code>（14 种）里，并进入日志记录。
+  </p>
+  <div class="panel">
+    <div class="cap">同一次模拟里的两条路</div>
+    <div class="body">
+      <svg width="1040" height="150" viewBox="0 0 1040 150" role="img" aria-label="错误与拒单">
         <defs>
-          <marker id="umlDep2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-            <path d="M1,1 L9,5 L1,9" fill="none" stroke="#b8b8b8" stroke-width="1.2"/>
+          <marker id="earr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" />
           </marker>
         </defs>
+        <g font-size="12">
+          <rect x="16" y="50" width="190" height="50" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="111" y="72" text-anchor="middle" font-weight="600" fill="#f0f0f0">simulate(...)</text>
+          <text x="111" y="88" text-anchor="middle" font-size="10" fill="#909090">设置期 + 每根 K 线</text>
 
-        <rect x="16" y="16" width="330" height="220" rx="6" fill="#262626" stroke="#7b64b8"/>
-        <rect x="16" y="16" width="330" height="32" rx="6" fill="#261f33"/>
-        <rect x="16" y="36" width="330" height="12" fill="#261f33"/>
-        <text x="28" y="37" font-size="11" fill="#c4b5e0">«struct» Columns</text>
-        <text x="28" y="66" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- levels: Vec&lt;Level&gt;</text>
-        <text x="28" y="84" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- n_cols: usize</text>
-        <text x="28" y="102" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ unlabelled(n_cols)</text>
-        <text x="28" y="120" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ new(levels) -&gt; Result</text>
-        <text x="28" y="138" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ level(name) -&gt; Result&lt;&amp;Level&gt;</text>
-        <text x="28" y="156" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ label(col, level) -&gt; Result&lt;&amp;Label&gt;</text>
-        <text x="28" y="174" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ group_indices(level)</text>
-        <text x="28" y="192" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ describe(col) -&gt; String</text>
-        <text x="28" y="214" font-size="10" fill="#909090">+ n_cols() / levels() / is_empty()</text>
+          <rect x="300" y="10" width="300" height="50" rx="6" fill="#2a1f33" stroke="#b07cd8"/>
+          <text x="450" y="32" text-anchor="middle" font-weight="600" fill="#f0f0f0">Err(Error::FlexLen / Broadcast / …)</text>
+          <text x="450" y="48" text-anchor="middle" font-size="10" fill="#d3b5ee">输入不可能：形状、层名、负现金</text>
+          <rect x="680" y="10" width="340" height="50" rx="6" fill="#331a1a" stroke="#d35d5d"/>
+          <text x="850" y="32" text-anchor="middle" font-weight="600" fill="#f0f0f0">整次运行停止，? 一路传到调用方</text>
+          <text x="850" y="48" text-anchor="middle" font-size="10" fill="#f0a0a0">Python 侧变成异常</text>
 
-        <polygon points="346,118 358,110 370,118 358,126" fill="#7b64b8"/>
-        <path d="M 370 118 H 408" fill="none" stroke="#7b64b8"/>
-        <text x="378" y="104" font-size="10" fill="#c4b5e0">levels</text>
-
-        <rect x="408" y="16" width="280" height="220" rx="6" fill="#262626" stroke="#7b64b8"/>
-        <rect x="408" y="16" width="280" height="32" rx="6" fill="#261f33"/>
-        <rect x="408" y="36" width="280" height="12" fill="#261f33"/>
-        <text x="420" y="37" font-size="11" fill="#c4b5e0">«struct» Level</text>
-        <text x="420" y="70" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- name: String</text>
-        <text x="420" y="88" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- labels: Vec&lt;Label&gt;</text>
-        <text x="420" y="106" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ new(name, labels)</text>
-        <text x="420" y="124" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ repeat(name, values, times)</text>
-        <text x="420" y="142" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ tile(name, values, times)</text>
-        <text x="420" y="160" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ name() / labels() / len()</text>
-        <text x="420" y="186" font-size="10" fill="#909090">repeat：每个值连续重复 times 次</text>
-        <text x="420" y="204" font-size="10" fill="#909090">tile：整段序列重复 times 次</text>
-
-        <polygon points="688,118 700,110 712,118 700,126" fill="#7b64b8"/>
-        <path d="M 712 118 H 748" fill="none" stroke="#7b64b8"/>
-        <text x="714" y="104" font-size="10" fill="#c4b5e0">labels</text>
-
-        <rect x="748" y="16" width="276" height="220" rx="6" fill="#262626" stroke="#7b64b8"/>
-        <rect x="748" y="16" width="276" height="32" rx="6" fill="#261f33"/>
-        <rect x="748" y="36" width="276" height="12" fill="#261f33"/>
-        <text x="760" y="37" font-size="11" fill="#c4b5e0">«enum» Label</text>
-        <text x="760" y="70" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Int(i64)</text>
-        <text x="760" y="88" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Float(f64)</text>
-        <text x="760" y="106" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Str(Arc&lt;str&gt;)</text>
-        <text x="760" y="124" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Bool(bool)</text>
-        <text x="760" y="142" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ str(s) -&gt; Label</text>
-        <text x="760" y="168" font-size="10" fill="#909090">From：i64、usize、f64、bool、&amp;str</text>
-        <text x="760" y="186" font-size="10" fill="#909090">Eq + Hash</text>
-        <text x="760" y="204" font-size="10" fill="#909090">Float 按 to_bits，NaN 等于自身</text>
-
-        <rect x="408" y="268" width="616" height="76" rx="6" fill="#262626" stroke="#c06028"/>
-        <text x="420" y="296" font-size="11" fill="#e0a070">«enum» Error</text>
-        <text x="420" y="318" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">LevelWidth { name, actual, expected }</text>
-        <text x="760" y="318" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">UnknownLevel { name, available }</text>
-
-        <path d="M 180 236 V 292 H 408" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep2)"/>
-        <text x="196" y="258" font-size="10" fill="#b8b8b8">new → LevelWidth；level / label / group_indices → UnknownLevel</text>
+          <rect x="300" y="90" width="300" height="50" rx="6" fill="#1d3b2a" stroke="#4caf7a"/>
+          <text x="450" y="112" text-anchor="middle" font-weight="600" fill="#f0f0f0">Ok(OrderResult { status: Rejected, … })</text>
+          <text x="450" y="128" text-anchor="middle" font-size="10" fill="#9be0b6">合法输入下的正常结果：钱不够、量太小</text>
+          <rect x="680" y="90" width="340" height="50" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="850" y="112" text-anchor="middle" font-weight="600" fill="#f0f0f0">记入日志（status_info），继续下一根 K 线</text>
+          <text x="850" y="128" text-anchor="middle" font-size="10" fill="#909090">分析层可以统计“为什么没交易”</text>
+        </g>
+        <path d="M206 70 C 250 70, 260 35, 300 35" fill="none" stroke="#b07cd8" marker-end="url(#earr)"/>
+        <path d="M206 80 C 250 80, 260 115, 300 115" fill="none" stroke="#4caf7a" marker-end="url(#earr)"/>
+        <path d="M600 35 H680" stroke="#8a8a8a" marker-end="url(#earr)"/>
+        <path d="M600 115 H680" stroke="#8a8a8a" marker-end="url(#earr)"/>
       </svg>
     </div>
-    <div class="foot"><p class="small" style="margin:0">来源：<code>crates/phasor-core/src/columns.rs</code>。<code>Level::repeat</code> 用来做参数，<code>Level::tile</code> 用来做品种，这样 <code>col = param_idx * n_symbols + symbol_idx</code>。这个布局是构造约定，<code>Columns</code> 运行时只检查各层长度是否相同。</p></div>
   </div>
-
-  <h2 id="types">核心类型</h2>
-  <p class="muted">成员与源码一致。拒单不是这些类型里的任何一种值。</p>
-
-  <h3>math</h3>
-  <p class="small">math.rs · 没有类型。两个常量，六个公开函数。比较的是 f64，不返回 Error</p>
   <div class="wrap types">
     <table>
-      <thead><tr><th>函数</th><th>含义</th></tr></thead>
+      <thead><tr><th>变体</th><th>字段</th><th>谁产生</th><th>消息</th></tr></thead>
       <tbody>
-        <tr><td class="mono">REL_TOL / ABS_TOL</td><td>默认相对容差 1e-9，绝对容差 1e-12。<code>is_close</code> 使用这一对。</td></tr>
-        <tr><td class="mono">is_close(a, b)</td><td>NaN 与任何值都不 close，包括 NaN 自己。±inf 也不 close，包括 inf 对 inf。<code>+inf</code> 是规模和价格的活哨兵。</td></tr>
-        <tr><td class="mono">is_close_tol(a, b, rel, abs)</td><td>同一套判断，容差由调用方传入。有限且位模式相同的值走 <code>a == b</code> 短路。</td></tr>
-        <tr><td class="mono">is_close_or_less(a, b)</td><td><code>is_close(a, b) || a &lt; b</code>。买入是否付得起用这个，不用 <code>&lt;=</code>。</td></tr>
-        <tr><td class="mono">is_less(a, b)</td><td>不 close 且 <code>a &lt; b</code>。容差内的两个值既不小于也不大于。</td></tr>
-        <tr><td class="mono">is_addition_zero(a, b)</td><td>异号时比较绝对值是否 close，避免两个大数相消后相对误差失真。同号时看和是否 close 于 0。</td></tr>
-        <tr><td class="mono">add(a, b)</td><td>相消则返回精确的 0.0，否则返回 <code>a + b</code>。现金、持仓、负债、自由现金的累加走这里。</td></tr>
+        <tr><td><code>Broadcast</code></td><td><code>left, right: (usize, usize)</code></td><td>两个数组必须广播却对不上：phasor-generic 的逐元素运算、phasor-signals 的 <code>clean_enex</code></td><td class="mono">cannot broadcast (3, 2) against (4, 2)</td></tr>
+        <tr><td><code>FlexLen</code></td><td><code>kind, actual, expected</code></td><td><code>FlexArray</code> 的构造函数、<code>Matrix::from_column_major</code></td><td class="mono">per-column array has length 3, expected 4</td></tr>
+        <tr><td><code>UnknownLevel</code></td><td><code>name, available</code></td><td><code>Columns::level</code> / <code>label</code> / <code>group_indices</code>；phasor-analysis 的按层汇总</td><td class="mono">no column level named "windwo" (have: window, symbol)</td></tr>
+        <tr><td><code>LevelWidth</code></td><td><code>name, actual, expected</code></td><td><code>Columns::new</code>：各层描述的列数不一致</td><td class="mono">level "symbol" describes 4 columns, expected 6</td></tr>
+        <tr><td><code>Invariant</code></td><td><code>String</code></td><td>其余所有数值不变量：<code>FlexArray::mapped</code> 的映射越界、signals 的参数非法、records 的日志不一致、analysis 的输入不合法……</td><td class="mono">invariant violated: …</td></tr>
       </tbody>
     </table>
   </div>
 
-  <h3>FlexArray&lt;'a, T&gt;</h3>
-  <p class="small">flex.rs · 枚举 · 借用原切片，不把参数物化成 T×C</p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>成员</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">Scalar(T)</td><td><code>scalar(value)</code> 不检查长度。<code>get</code> 不访问切片，处处返回同一个值。</td></tr>
-        <tr><td class="mono">PerColumn(&amp;'a [T])</td><td>长度必须等于 <code>n_cols</code>，否则 <code>FlexLen { kind: "per-column" }</code>。沿行不变，<code>varies_by_row()</code> 为 false。</td></tr>
-        <tr><td class="mono">PerRow(&amp;'a [T])</td><td>长度必须等于 <code>n_rows</code>，否则 <code>FlexLen { kind: "per-row" }</code>。沿列不变。</td></tr>
-        <tr><td class="mono">MappedColumns</td><td>字段 <code>data</code>、<code>n_rows</code>、<code>columns</code>。读 <code>data[columns[col] * n_rows + row]</code>。<code>mapped</code> 要求 <code>data</code> 恰好是 <code>n_rows × source_cols</code>，<code>columns</code> 非空且每个下标小于 <code>source_cols</code>，否则 <code>Invariant</code>。</td></tr>
-        <tr><td class="mono">Full { data, n_rows }</td><td>读 <code>data[col * n_rows + row]</code>。长度必须是 <code>n_rows * n_cols</code>，否则 <code>FlexLen { kind: "full" }</code>。</td></tr>
-        <tr><td class="mono">get(row, col) -&gt; T</td><td><code>T: Copy</code>。下标超出底层存储会 panic；checked 构造保证，在声明的形状里面这是不可达的。</td></tr>
-        <tr><td class="mono">varies_by_row() -&gt; bool</td><td><code>PerRow</code>、<code>Full</code>、<code>MappedColumns</code> 为 true。为 false 时，调用方可以把读提到内层循环外面。</td></tr>
-      </tbody>
-    </table>
+  <!-- ============================================================ -->
+  <h2 id="class">类图</h2>
+  <p class="muted">五个模块的公开类型。实线箭头是“构造失败时返回”，虚线是“由……组成 / 借用”。</p>
+  <div class="panel">
+    <div class="cap">phasor-core 的公开类型</div>
+    <div class="body">
+      <svg width="1040" height="440" viewBox="0 -20 1040 440" role="img" aria-label="phasor-core 类图">
+        <defs>
+          <marker id="karr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" />
+          </marker>
+          <marker id="kdia" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="10" markerHeight="10" orient="auto">
+            <path d="M1,5 L5,1 L9,5 L5,9 z" fill="#1e1e1e" stroke="#8a8a8a" />
+          </marker>
+        </defs>
+        <g font-size="11" font-family="ui-monospace, Menlo, monospace">
+          <!-- Columns -->
+          <rect x="16" y="16" width="240" height="150" rx="6" fill="#262626" stroke="#c9a227"/>
+          <rect x="16" y="16" width="240" height="24" rx="6" fill="#2e2916"/>
+          <text x="136" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Columns</text>
+          <text x="26" y="56" fill="#b8b8b8">levels: Vec&lt;Level&gt;</text>
+          <text x="26" y="72" fill="#b8b8b8">n_cols: usize</text>
+          <line x1="16" y1="80" x2="256" y2="80" stroke="#3d3d3d"/>
+          <text x="26" y="96" fill="#909090">new(levels) → Result&lt;Self&gt;</text>
+          <text x="26" y="112" fill="#909090">unlabelled(n_cols)</text>
+          <text x="26" y="128" fill="#909090">level(name) / label(col, name)</text>
+          <text x="26" y="144" fill="#909090">group_indices(name)</text>
+          <text x="26" y="160" fill="#909090">describe(col) → String</text>
+          <!-- Level -->
+          <rect x="16" y="210" width="240" height="118" rx="6" fill="#262626" stroke="#c9a227"/>
+          <rect x="16" y="210" width="240" height="24" rx="6" fill="#2e2916"/>
+          <text x="136" y="227" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Level</text>
+          <text x="26" y="250" fill="#b8b8b8">name: String</text>
+          <text x="26" y="266" fill="#b8b8b8">labels: Vec&lt;Label&gt;</text>
+          <line x1="16" y1="274" x2="256" y2="274" stroke="#3d3d3d"/>
+          <text x="26" y="290" fill="#909090">new / repeat / tile</text>
+          <text x="26" y="306" fill="#909090">name() labels() len()</text>
+          <text x="26" y="322" fill="#909090">is_empty()</text>
+          <!-- Label -->
+          <rect x="16" y="356" width="240" height="56" rx="6" fill="#262626" stroke="#c9a227"/>
+          <text x="136" y="374" text-anchor="middle" fill="#f0f0f0" font-weight="600">enum Label</text>
+          <text x="26" y="392" fill="#b8b8b8">Int(i64) | Float(f64)</text>
+          <text x="26" y="406" fill="#b8b8b8">Str(Arc&lt;str&gt;) | Bool(bool)</text>
+
+          <!-- FlexArray -->
+          <rect x="300" y="16" width="300" height="200" rx="6" fill="#262626" stroke="#2fbfa8"/>
+          <rect x="300" y="16" width="300" height="24" rx="6" fill="#143430"/>
+          <text x="450" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">enum FlexArray&lt;'a, T&gt;</text>
+          <text x="310" y="56" fill="#b8b8b8">Scalar(T)</text>
+          <text x="310" y="72" fill="#b8b8b8">PerColumn(&amp;'a [T])</text>
+          <text x="310" y="88" fill="#b8b8b8">PerRow(&amp;'a [T])</text>
+          <text x="310" y="104" fill="#b8b8b8">MappedColumns { data, n_rows, columns }</text>
+          <text x="310" y="120" fill="#b8b8b8">Full { data, n_rows }</text>
+          <line x1="300" y1="128" x2="600" y2="128" stroke="#3d3d3d"/>
+          <text x="310" y="144" fill="#909090">scalar(v)</text>
+          <text x="310" y="160" fill="#909090">per_column / per_row / full → Result</text>
+          <text x="310" y="176" fill="#909090">mapped(data, n_rows, src_cols, map)</text>
+          <text x="310" y="192" fill="#909090">get(row, col) → T     (T: Copy)</text>
+          <text x="310" y="208" fill="#909090">varies_by_row() → bool</text>
+
+          <!-- Matrix -->
+          <rect x="300" y="250" width="300" height="162" rx="6" fill="#262626" stroke="#3a7afe"/>
+          <rect x="300" y="250" width="300" height="24" rx="6" fill="#1a2744"/>
+          <text x="450" y="267" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Matrix</text>
+          <text x="310" y="290" fill="#b8b8b8">data: Vec&lt;f64&gt;   // 列主序</text>
+          <text x="310" y="306" fill="#b8b8b8">n_rows, n_cols: usize</text>
+          <line x1="300" y1="314" x2="600" y2="314" stroke="#3d3d3d"/>
+          <text x="310" y="330" fill="#909090">filled / zeros</text>
+          <text x="310" y="346" fill="#909090">from_column_major → Result</text>
+          <text x="310" y="362" fill="#909090">column(c) / column_mut(c) → &amp;[f64]</text>
+          <text x="310" y="378" fill="#909090">get(row, col)  as_slice  into_vec</text>
+          <text x="310" y="394" fill="#909090">map_columns(f) → Vec&lt;f64&gt;</text>
+
+          <!-- Error -->
+          <rect x="680" y="16" width="344" height="150" rx="6" fill="#262626" stroke="#b07cd8"/>
+          <rect x="680" y="16" width="344" height="24" rx="6" fill="#2a1f33"/>
+          <text x="852" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">enum Error : std::error::Error</text>
+          <text x="690" y="56" fill="#b8b8b8">Broadcast { left, right }</text>
+          <text x="690" y="72" fill="#b8b8b8">FlexLen { kind, actual, expected }</text>
+          <text x="690" y="88" fill="#b8b8b8">UnknownLevel { name, available }</text>
+          <text x="690" y="104" fill="#b8b8b8">LevelWidth { name, actual, expected }</text>
+          <text x="690" y="120" fill="#b8b8b8">Invariant(String)</text>
+          <line x1="680" y1="128" x2="1024" y2="128" stroke="#3d3d3d"/>
+          <text x="690" y="146" fill="#909090">type Result&lt;T&gt; = Result&lt;T, Error&gt;</text>
+          <text x="690" y="160" fill="#909090">impl Display（手写）</text>
+
+          <!-- math -->
+          <rect x="680" y="210" width="344" height="202" rx="6" fill="#262626" stroke="#d35d5d"/>
+          <rect x="680" y="210" width="344" height="24" rx="6" fill="#331a1a"/>
+          <text x="852" y="227" text-anchor="middle" fill="#f0f0f0" font-weight="600">mod math（自由函数）</text>
+          <text x="690" y="250" fill="#b8b8b8">const REL_TOL = 1e-9</text>
+          <text x="690" y="266" fill="#b8b8b8">const ABS_TOL = 1e-12</text>
+          <line x1="680" y1="274" x2="1024" y2="274" stroke="#3d3d3d"/>
+          <text x="690" y="290" fill="#909090">is_close(a, b) → bool</text>
+          <text x="690" y="306" fill="#909090">is_close_tol(a, b, rel, abs)</text>
+          <text x="690" y="322" fill="#909090">is_close_or_less(a, b)</text>
+          <text x="690" y="338" fill="#909090">is_less(a, b)</text>
+          <text x="690" y="354" fill="#909090">is_addition_zero(a, b)</text>
+          <text x="690" y="370" fill="#909090">add(a, b) → f64</text>
+          <text x="690" y="386" fill="#666666">const fn sign(x) → i8    （私有）</text>
+          <text x="690" y="402" fill="#666666">全部 #[inline] #[must_use]</text>
+        </g>
+        <path d="M136 166 V210" stroke="#8a8a8a" stroke-dasharray="4 3" marker-start="url(#kdia)"/>
+        <text x="144" y="192" font-size="10" fill="#909090">1..*</text>
+        <path d="M136 328 V356" stroke="#8a8a8a" stroke-dasharray="4 3" marker-start="url(#kdia)"/>
+        <text x="144" y="346" font-size="10" fill="#909090">n_cols</text>
+        <path d="M200 16 V2 H852 V12" fill="none" stroke="#b07cd8" marker-end="url(#karr)"/>
+        <text x="450" y="-4" font-size="10" fill="#d3b5ee" text-anchor="middle">Columns::new / level → LevelWidth · UnknownLevel</text>
+        <path d="M600 160 C 640 160, 640 110, 680 100" fill="none" stroke="#b07cd8" marker-end="url(#karr)"/>
+        <text x="604" y="150" font-size="10" fill="#d3b5ee">FlexLen · Invariant</text>
+        <path d="M600 346 C 650 346, 640 150, 680 140" fill="none" stroke="#b07cd8" marker-end="url(#karr)"/>
+        <text x="606" y="332" font-size="10" fill="#d3b5ee">FlexLen</text>
+        <path d="M450 250 V216" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#karr)"/>
+        <text x="458" y="238" font-size="10" fill="#909090">as_slice() 借给 Full / MappedColumns</text>
+      </svg>
+    </div>
   </div>
 
-  <h3>Matrix</h3>
-  <p class="small">matrix.rs · 结构体 · 拥有一块列主序 <code>Vec&lt;f64&gt;</code>。字段私有</p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>成员</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">filled / zeros</td><td>按 <code>n_rows * n_cols</code> 分配。zeros 是 filled(0.0)。</td></tr>
-        <tr><td class="mono">from_column_major</td><td><code>data.len() != n_rows * n_cols</code> 时返回 <code>FlexLen { kind: "matrix" }</code>。</td></tr>
-        <tr><td class="mono">column / column_mut</td><td>第 <code>col</code> 列是连续切片 <code>data[col * n_rows .. (col + 1) * n_rows]</code>。<code>col &gt;= n_cols</code> 时 panic。</td></tr>
-        <tr><td class="mono">get(row, col) -&gt; f64</td><td>同一下标公式。任一轴越界 panic。</td></tr>
-        <tr><td class="mono">as_slice / into_vec</td><td>整块列主序缓冲。into_vec 把所有权交出去。</td></tr>
-        <tr><td class="mono">map_columns</td><td>对每一列调用 <code>Fn(&amp;[f64]) -&gt; f64</code>，得到长度 <code>n_cols</code> 的向量。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>Label、Level、Columns</h3>
-  <p class="small">columns.rs · 标签是标识，不是测量。Float 用位模式比较，所以 NaN 等于自身，<code>0.0</code> 不等于 <code>-0.0</code></p>
-  <div class="wrap types types-3">
-    <table>
-      <thead><tr><th>类型</th><th>成员</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">Label</td><td class="mono">Int(i64) · Float(f64) · Str(Arc&lt;str&gt;) · Bool(bool)</td><td><code>Label::str</code> 从任意 <code>AsRef&lt;str&gt;</code> 构建。<code>From</code> 接受 i64、usize（转成 i64）、f64、bool、<code>&amp;str</code>。Eq 和 Hash 对 Float 使用 <code>to_bits</code>。</td></tr>
-        <tr><td class="mono">Level</td><td class="mono">name · labels</td><td><code>new</code> 不检查长度。<code>repeat</code> 把每个值连续重复 <code>times</code> 次，用来做参数层。<code>tile</code> 把整段序列重复 <code>times</code> 次，用来做品种层。</td></tr>
-        <tr><td class="mono">Columns</td><td class="mono">levels · n_cols</td><td><code>unlabelled(n)</code> 没有层级。<code>new</code> 在 levels 为空时得到 <code>unlabelled(0)</code>；否则每一层的长度必须等于第一层，不一致则 <code>LevelWidth</code>。</td></tr>
-        <tr><td class="mono">Columns::level</td><td class="mono">name -&gt; &amp;Level</td><td>找不到名字时 <code>UnknownLevel</code>，<code>available</code> 是现有层级名，逗号分隔。</td></tr>
-        <tr><td class="mono">Columns::label</td><td class="mono">(col, level) -&gt; &amp;Label</td><td>先做 level 查找。<code>col &gt;= n_cols</code> 时 panic。</td></tr>
-        <tr><td class="mono">group_indices</td><td class="mono">level -&gt; Vec&lt;(Label, Vec&lt;usize&gt;)&gt;</td><td>按该层标签分组，顺序是标签第一次出现的顺序。找不到层级则 <code>UnknownLevel</code>。分析层的 group_by 用它。</td></tr>
-        <tr><td class="mono">describe</td><td class="mono">col -&gt; String</td><td>没有层级时返回 <code>col{n}</code>。有层级时拼成 <code>name=label, …</code>；列号越界会 panic。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>Error 与 Result</h3>
-  <p class="small">error.rs · <code>pub use error::{Error, Result}</code> 在 crate 根。实现 <code>Display</code> 和 <code>std::error::Error</code></p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>变体</th><th>谁返回</th><th>字段</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">Broadcast</td><td>phasor-generic、phasor-signals。phasor-core 自己不构造它</td><td><code>left</code>、<code>right</code>：两边的 <code>(usize, usize)</code> 形状</td></tr>
-        <tr><td class="mono">FlexLen</td><td>FlexArray 的 per_column / per_row / full；Matrix::from_column_major</td><td><code>kind</code>（"per-column"、"per-row"、"full"、"matrix"）、<code>actual</code>、<code>expected</code></td></tr>
-        <tr><td class="mono">UnknownLevel</td><td>Columns::level、label、group_indices</td><td><code>name</code> 是查找的名字，<code>available</code> 是已有层级</td></tr>
-        <tr><td class="mono">LevelWidth</td><td>Columns::new</td><td>哪一层的 <code>name</code>，它的 <code>actual</code> 长度，以及第一层的 <code>expected</code></td></tr>
-        <tr><td class="mono">Invariant</td><td>FlexArray::mapped；其余 crate 用它表示不可能的数值或列号</td><td>一条 <code>String</code>。mapped 的原文是 column_map 必须非空，并且下标落在形状正确的源矩阵里</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h2>两条不能绕开的规则</h2>
-  <div class="note" style="margin-bottom:10px">
-    工作区 lint 把 <code>clippy::float_cmp</code> 和 <code>unsafe_code</code> 设为 deny。金融比较必须走 <code>phasor_core::math</code>。在 math 内部对 <code>a == b</code> 的短路是 isclose 契约的一部分，用局部 <code>#[expect]</code> 标明理由。
-  </div>
-  <pre>col = param_idx * n_symbols + symbol_idx
-data[col * n_rows + row]          // 列主序，一列一段 &[f64]
-is_close(inf, inf) == false       // 哨兵不能被容差吞掉
-add(a, -a) == 0.0                 // 当两者幅度 is_close</pre>
-
+  <!-- ============================================================ -->
   <h2 id="table">谁依赖它，用来做什么</h2>
   <div class="wrap">
     <table>
-      <thead>
-        <tr><th>crate</th><th>用到的模块</th><th>用来做什么</th></tr>
-      </thead>
+      <thead><tr><th>crate</th><th>用到的模块</th><th>用来做什么</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
-  <p class="small" style="margin-top:8px">phasor 把 Columns、FlexArray、Matrix、Error 放进 prelude 再导出。phasor-py 把 <code>Error</code> 转成 <code>PyErr</code>（<code>array.rs</code> 的 <code>to_py_err</code>）。</p>
+
+  <h2 id="rules">不能绕开的规则</h2>
+  <div class="grid2">
+    <article class="card"><h3>金融比较不用 == / &lt;=</h3><p>工作区 lint 把 <code>clippy::float_cmp</code> 设为 deny。确实要精确比较的地方（<code>is_close_tol</code> 的短路、测试里断言精确的 <code>0.0</code>）必须局部 <code>#[expect]</code> / <code>#[allow]</code> 并写 <code>reason</code>。</p></article>
+    <article class="card"><h3>容差和参考实现绑在一起</h3><p><code>REL_TOL</code>、<code>ABS_TOL</code> 和“无穷不接近”都来自参考实现的 <code>utils/math_.py</code>。改它们不是调参，而是改变哪些订单成交；<code>tests/fixtures/*.tsv</code> 不能为了让改动通过而重新生成。</p></article>
+    <article class="card"><h3>列布局靠构造，不靠检查</h3><p>新的扫描入口（<code>SignalSweep</code>、<code>phasor.strategy.sweep</code>、<code>column_of</code>）必须保持“参数 repeat、标的 tile”。共享资金的 <code>group_lens</code> 只是长度，模拟器不会去验证这些列真的属于同一组参数。</p></article>
+    <article class="card"><h3>地基不长依赖</h3><p><code>[dependencies]</code> 是空的。需要新能力时先问：它是不是所有层都必须统一口径的东西？不是，就放到上层。库 crate 也不下载、不写文件。</p></article>
+  </div>
 
   <h2>源文件</h2>
   <div class="wrap">
     <table>
       <thead><tr><th>文件</th><th>内容</th></tr></thead>
       <tbody>
-        <tr><td class="mono">crates/phasor-core/src/lib.rs</td><td>模块入口。说明 math、flex、columns 错了会让下游每个数字失效。</td></tr>
-        <tr><td class="mono">src/math.rs</td><td>REL_TOL、ABS_TOL、is_close、is_close_or_less、is_less、add。</td></tr>
-        <tr><td class="mono">src/flex.rs</td><td>FlexArray 五变体与 checked 构造器。</td></tr>
-        <tr><td class="mono">src/matrix.rs</td><td>列主序 Matrix，column / column_mut 零拷贝。</td></tr>
-        <tr><td class="mono">src/columns.rs</td><td>Label、Level::repeat / tile、Columns::group_indices。</td></tr>
-        <tr><td class="mono">src/error.rs</td><td>Error、Result。无外部依赖，因此不用 derive 宏。</td></tr>
+        <tr><td class="mono">crates/phasor-core/src/lib.rs</td><td>三个“承重”模块的说明；再导出 <code>Error</code>、<code>Result</code>。</td></tr>
+        <tr><td class="mono">src/math.rs</td><td>REL_TOL / ABS_TOL（:25、:32），is_close（:40），is_close_tol（:52），is_close_or_less（:72），is_less（:82），is_addition_zero（:94），add（:109），私有 sign；13 个测试。</td></tr>
+        <tr><td class="mono">src/flex.rs</td><td>FlexArray 五个变体（:29），get（:61），varies_by_row（:80），mapped / scalar / per_column / per_row / full 构造函数。</td></tr>
+        <tr><td class="mono">src/matrix.rs</td><td>Matrix（:18）与它的构造、按列访问、map_columns。</td></tr>
+        <tr><td class="mono">src/columns.rs</td><td>布局约定的说明；Label（:36）按位比较的 Eq / Hash；Level::repeat（:151）/ tile（:168）；Columns（:208）、group_indices（:305）、describe（:333）。</td></tr>
+        <tr><td class="mono">src/error.rs</td><td>Result 别名、Error 五个变体与手写 Display。</td></tr>
+        <tr><td class="mono">docs/ARCHITECTURE.zh-CN.md §3.1–3.5</td><td>列轴、内存布局、FlexArray、浮点容差、错误与拒单的设计说明。</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small" style="margin-top:14px">设计背景见 <a href="architecture.html">架构文档</a> 第 3 章（列轴、内存、FlexArray、容差、错误与拒单）。</p>
 </main>
-<script>
-const COLORS = {
-  math: "#3a7afe",
-  flex: "#1f8a65",
-  matrix: "#c9a227",
-  columns: "#7b64b8",
-  error: "#c06028",
-};
-const MODULES = [
-  { id: "math", name: "math", blurb: "容差与余额相加。执行内核、模拟现金流、交易配对、分析重建链都通过它比较和累加 f64。" },
-  { id: "flex", name: "flex", blurb: "参数广播。模拟循环、记录里的价格读取、分析构造、Python 边界和 SignalSweep 用它避免物化。" },
-  { id: "matrix", name: "matrix", blurb: "列主序面板。因子输出、指标、通用窗口、分析净值、mapped 记录都是 Matrix。" },
-  { id: "columns", name: "columns", blurb: "扫描归因。指标参数网格、SignalSweep 和分析层 group_by 用 repeat/tile 与 group_indices。" },
-  { id: "error", name: "error", blurb: "不变量。形状、长度、标签和模拟中的不可能状态。拒单不走这里。" },
-];
-const CRATES = [
-  {
-    id: "phasor-exec",
-    uses: ["math", "error"],
-    role: "执行内核。kernel.rs 用 is_close 把接近 0 的现金和持仓吸附成 0，用 is_close_or_less 判断买单付得起，用 is_less 做严格比较，用 add 更新 cash、position、debt、free_cash。违反不变量时返回 Error::Invariant。",
-  },
-  {
-    id: "phasor-sim",
-    uses: ["flex", "math", "error"],
-    role: "模拟循环。from_orders、from_signals、cash 把价格、规模、费用、止损、入金、分红、利息全部持有成 FlexArray。现金流入账用 add。信号阶段用 is_less。分组长度不覆盖、参数形状不对时返回 Error。",
-  },
-  {
-    id: "phasor-records",
-    uses: ["math", "flex", "matrix", "error"],
-    role: "记录。trades.rs 用容差和 add 配对进出场、计算盈亏；trades 与 excursions 通过 FlexArray 读价格；mapped.rs 把按列归约的结果装进 Matrix。列号越界等不可能状态是 Error::Invariant。",
-  },
-  {
-    id: "phasor-analysis",
-    uses: ["math", "flex", "matrix", "columns", "error"],
-    role: "分析。series.rs 重建现金和持仓时用 add / is_close。Portfolio 保存收盘 Matrix，并从 FlexArray 接模拟参数。aggregate.rs 用 Columns::group_indices 做按标签归约；层级不存在是 UnknownLevel，长度不对是 Invariant。",
-  },
-  {
-    id: "phasor-expr",
-    uses: ["matrix", "error"],
-    role: "因子表达式。eval.rs 与 Polars 后端的输入字段和每个因子输出都是 Matrix。求值前的形状与字段错误返回 Error。表达式图本身不在这个 crate 里。",
-  },
-  {
-    id: "phasor-generic",
-    uses: ["matrix", "error"],
-    role: "滚动、扩展、逐元素窗口。运算对象是 Matrix。左右形状不能广播时返回 Error::Broadcast。",
-  },
-  {
-    id: "phasor-indicators",
-    uses: ["matrix", "columns", "error"],
-    role: "指标与参数网格。结果矩阵是 Matrix。sweep 用 Level::repeat / tile 生成 window × symbol 的 Columns，使一列能还原成参数和品种。标签宽度不一致时返回 LevelWidth。",
-  },
-  {
-    id: "phasor",
-    uses: ["flex", "matrix", "columns", "error"],
-    role: "门面。prelude 再导出这些类型。SignalSweep::from_factor 读因子 Matrix，用 Columns 贴上 factor/case × symbol，并用 FlexArray 把收盘价映射到扫描列。",
-  },
-  {
-    id: "phasor-py",
-    uses: ["flex", "matrix", "error"],
-    role: "Python 边界。array.rs 把 Fortran 序的 NumPy 数组借成 FlexArray 或 Matrix，拒绝 C 序。Error 经 to_py_err 变成 PyErr；expr.rs 用 Error::Invariant 拒绝读未来的表达式进入信号。",
-  },
-  {
-    id: "phasor-signals",
-    uses: ["error"],
-    role: "信号工具自己用 &[bool]，不持有 Matrix。clean、generate、ranges、labels、random 在形状不一致时返回 Error::Broadcast 或 Invariant。",
-  },
-  {
-    id: "phasor-model",
-    uses: [],
-    declared: true,
-    role: "Cargo.toml 写了 phasor-core = { workspace = true }，但 src/ 没有任何 phasor_core 引用。图上用虚线标出这条只存在于清单里的边。领域类型（枚举、Bar、定点价格）目前独立于地基数值类型。",
-  },
-];
 
-const svg = document.getElementById("dep-graph");
+<script>
+/* ---------------- shared helpers ---------------- */
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (name, attrs) => { const n = document.createElementNS(NS, name); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+function seg(hostId, items, onPick) {
+  const host = document.getElementById(hostId);
+  const lbl = host.querySelector(".lbl");
+  host.innerHTML = "";
+  if (lbl) host.appendChild(lbl);
+  const buttons = items.map((it, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = it.name;
+    b.addEventListener("click", () => select(i));
+    host.appendChild(b);
+    return b;
+  });
+  function select(i) {
+    buttons.forEach((b, k) => b.classList.toggle("on", k === i));
+    onPick(items[i], i);
+  }
+  return { select };
+}
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/* ---------------- dependency graph ---------------- */
+const COLORS = { math: "#d35d5d", flex: "#2fbfa8", matrix: "#3a7afe", columns: "#c9a227", error: "#b07cd8" };
+const MODULES = [
+  { id: "math", sub: "is_close · add · is_close_or_less", blurb: "浮点容差层。撮合内核的归零、可负担判断和余额更新都走它；交易记录的 FIFO 分配、净值重建的累加也用它。" },
+  { id: "flex", sub: "FlexArray 五种形状", blurb: "零分配广播。模拟的价格、费用、滑点、止损、下单量全是 FlexArray；分析层和记录层用它读价格。" },
+  { id: "matrix", sub: "Matrix（列主序 f64）", blurb: "所有派生序列的形状：因子值、滚动窗口结果、净值、收益。column(c) 是零拷贝切片。" },
+  { id: "columns", sub: "Label · Level · Columns", blurb: "多级列标签，扫描结果归因的唯一依据。indicators 和 SignalSweep 建标签，analysis 按层汇总。" },
+  { id: "error", sub: "Error · Result", blurb: "只表示不变量被破坏。几乎每个 crate 的公开函数都返回 phasor_core::Result。" },
+];
+const DOWN = [
+  { id: "phasor-exec", sub: "撮合内核", uses: ["math", "error"],
+    role: "kernel.rs 用 add、is_close、is_close_or_less、is_less：先把现金 / 仓位 / 负债归零，再判断买不买得起，所有余额更新都用 add。types.rs 的 is_close 用于比较订单参数。" },
+  { id: "phasor-sim", sub: "模拟循环", uses: ["flex", "math", "error"],
+    role: "from_orders.rs、from_signals.rs、cash.rs 的每个输入参数都是 FlexArray；cash.rs 用 add 累计现金流，signals.rs 用 is_less 判断止损触发。parity 测试用 is_close 比较结果。" },
+  { id: "phasor-records", sub: "记录与交易", uses: ["math", "flex", "matrix", "error"],
+    role: "trades.rs 用 add / is_close / is_close_or_less / is_less 做成交到交易的 FIFO 分配；excursions、logs、trades 用 FlexArray 读价格；mapped.rs 把 mapped array 展回 Matrix。" },
+  { id: "phasor-analysis", sub: "分析", uses: ["columns", "flex", "matrix", "math", "error"],
+    role: "aggregate.rs 用 Columns / Level / Label 和 group_indices 做“每个参数一行”的汇总，层名不存在时返回 UnknownLevel；portfolio、series、stats 用 FlexArray 读价格、返回 Matrix；series.rs 用 add 重建余额。" },
+  { id: "phasor-signals", sub: "信号", uses: ["error"],
+    role: "只用 Error / Result：形状不符返回 Broadcast（clean.rs），参数非法返回 Invariant。不用容差：输入是布尔。" },
+  { id: "phasor-generic", sub: "数组层", uses: ["matrix", "error"],
+    role: "elementwise.rs、rolling.rs 输入输出都是 Matrix，形状不符返回 Broadcast；synthetic.rs 的合成价格。parity 测试用 is_close。" },
+  { id: "phasor-indicators", sub: "指标与扫描", uses: ["columns", "matrix", "error"],
+    role: "indicators.rs、sweep.rs 把参数组合展开成列轴，用 Level::repeat / tile 建标签，输出 Matrix + Columns。" },
+  { id: "phasor-expr", sub: "因子 DSL", uses: ["matrix", "error"],
+    role: "eval.rs、polars_backend.rs 的求值结果是 Matrix；Alpha158 / Alpha360 的错误都是 phasor_core::Result。" },
+  { id: "phasor", sub: "门面 · prelude · SignalSweep", uses: ["columns", "flex", "matrix", "error"],
+    role: "pub use phasor_core as core 整体再导出；prelude 放 Columns、Label、Level、FlexArray、Matrix、Error、Result。sweep.rs 的 SignalSweep 按约定建列标签。" },
+  { id: "phasor-py", sub: "Python 绑定", uses: ["flex", "matrix", "error"],
+    role: "array.rs、params.rs 把 NumPy 数组（Fortran 序）借成 FlexArray，不复制；lib.rs 把 Matrix 交回 Python；Error 转成 Python 异常。" },
+  { id: "phasor-model", sub: "声明了，未使用", uses: [], dashed: true,
+    role: "Cargo.toml 里写了 phasor-core，但 src/ 里没有任何 use phasor_core。领域模型目前不需要容差或矩阵；这条依赖只是让层次关系成立。" },
+];
+const depSvg = document.getElementById("dep-graph");
 const detail = document.getElementById("detail");
 let pinned = null;
-let paths = [];
-let nodes = [];
-
+const paths = [], gnodes = [];
 function nodeBox(id) {
-  if (id === "std") return { x: 16, y: 292, w: 72, h: 40 };
-  if (id === "core") return { x: 150, y: 28, w: 188, h: 584 };
+  if (id === "std") return { x: 16, y: 270, w: 150, h: 56 };
   const mi = MODULES.findIndex((m) => m.id === id);
-  if (mi >= 0) {
-    const h = 72;
-    const gap = 16;
-    return { x: 166, y: 86 + mi * (h + gap), w: 156, h };
-  }
-  const ci = CRATES.findIndex((c) => c.id === id);
-  const h = 42;
-  const gap = 8;
-  const total = CRATES.length * h + (CRATES.length - 1) * gap;
-  const y0 = (640 - total) / 2;
-  return { x: 760, y: y0 + ci * (h + gap), w: 250, h };
+  if (mi >= 0) return { x: 300, y: 118 + mi * 76, w: 248, h: 56 };
+  const di = DOWN.findIndex((d) => d.id === id);
+  return { x: 790, y: 34 + di * 51, w: 234, h: 42 };
 }
-
 function edgeList() {
-  const edges = [{ from: "std", to: "core", kind: "std" }];
-  for (const c of CRATES) {
-    if (c.uses.length === 0) edges.push({ from: "core", to: c.id, kind: "declared" });
-    for (const u of c.uses) edges.push({ from: u, to: c.id, kind: u });
-  }
+  const edges = MODULES.map((m) => ({ from: "std", to: m.id, mod: m.id, std: true }));
+  for (const d of DOWN) for (const u of d.uses) edges.push({ from: u, to: d.id, mod: u });
+  edges.push({ from: "error", to: "phasor-model", mod: "error", dashed: true });
   return edges;
 }
-
-function active(focus, edge) {
-  if (!focus) return edge.kind === "error" ? 0.2 : edge.kind === "declared" ? 0.85 : 0.75;
-  if (focus.kind === "mod") return edge.kind === focus.id ? 0.95 : 0.06;
-  if (focus.kind === "std") return edge.kind === "std" ? 0.95 : 0.06;
-  if (focus.kind === "crate") {
-    const crate = CRATES.find((c) => c.id === focus.id);
-    const hit = edge.to === focus.id && (crate.uses.includes(edge.kind) || edge.kind === "declared");
-    return hit ? 0.95 : 0.06;
-  }
-  return 0.2;
+function edgeOpacity(focus, e) {
+  if (!focus) return e.std ? 0.25 : 0.55;
+  if (focus.kind === "mod") return e.mod === focus.id ? 0.95 : 0.04;
+  if (focus.kind === "std") return e.std ? 0.8 : 0.04;
+  return e.to === focus.id ? 0.95 : 0.04;
 }
-
 function applyFocus(focus) {
-  for (const p of paths) p.el.setAttribute("opacity", String(active(focus, p)));
-  for (const n of nodes) {
+  for (const p of paths) p.el.setAttribute("opacity", String(edgeOpacity(focus, p)));
+  for (const n of gnodes) {
     const on = focus && focus.id === n.id;
     n.rect.setAttribute("stroke-width", on ? "1.8" : "1");
-    if (n.kind === "mod") {
-      n.rect.setAttribute("fill", on ? COLORS[n.id] : "#262626");
-      n.title.setAttribute("fill", on ? "#ffffff" : "#f0f0f0");
-    } else if (n.kind === "crate") {
-      n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d");
-      n.rect.setAttribute("fill", on ? "#303030" : "#262626");
-    } else {
-      n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d");
-    }
+    if (n.kind === "mod") n.rect.setAttribute("fill", on ? COLORS[n.id] + "44" : "#262626");
+    else { n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d"); n.rect.setAttribute("fill", on ? "#303030" : "#262626"); }
   }
-  for (const b of document.querySelectorAll("#legend button")) {
-    b.classList.toggle("on", Boolean(focus && focus.kind === "mod" && b.dataset.id === focus.id));
-  }
+  for (const b of document.querySelectorAll("#legend button")) b.classList.toggle("on", Boolean(focus && focus.kind === "mod" && b.dataset.id === focus.id));
 }
-
-function build() {
-  const ns = "http://www.w3.org/2000/svg";
-  function el(name, attrs) {
-    const node = document.createElementNS(ns, name);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-    return node;
-  }
-  svg.appendChild(el("rect", { x: 150, y: 28, width: 188, height: 584, rx: 10, fill: "#181818", stroke: "#303030" }));
-  svg.appendChild(el("text", { x: 244, y: 52, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-core";
-  svg.appendChild(el("text", { x: 244, y: 68, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "src/ 五个模块";
-
+function buildGraph() {
+  depSvg.appendChild(svgEl("rect", { x: 284, y: 66, width: 280, height: 470, rx: 10, fill: "#181818", stroke: "#303030" }));
+  depSvg.appendChild(svgEl("text", { x: 424, y: 88, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-core";
+  depSvg.appendChild(svgEl("text", { x: 424, y: 104, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "src/ 五个模块，lib.rs 只做声明和再导出";
+  depSvg.appendChild(svgEl("text", { x: 91, y: 258, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "上游";
+  depSvg.appendChild(svgEl("text", { x: 907, y: 22, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "下游（只统计 src/）";
   for (const e of edgeList()) {
-    const a = nodeBox(e.from);
-    const b = nodeBox(e.to);
-    const x1 = a.x + a.w;
-    const y1 = a.y + a.h / 2;
-    const x2 = b.x;
-    const y2 = b.y + b.h / 2;
-    const mid = (x1 + x2) / 2;
-    const path = el("path", {
-      d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-      fill: "none",
-      stroke: COLORS[e.kind] || "#888",
-      "stroke-width": e.kind === "declared" ? "1.2" : "1.5",
-      "stroke-dasharray": e.kind === "declared" ? "4 3" : "",
-    });
-    svg.appendChild(path);
+    const a = nodeBox(e.from), b = nodeBox(e.to);
+    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mid = (x1 + x2) / 2;
+    const path = svgEl("path", { d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`, fill: "none", stroke: e.std ? "#8a8a8a" : COLORS[e.mod], "stroke-width": "1.5" });
+    if (e.dashed || e.std) path.setAttribute("stroke-dasharray", "5 4");
+    depSvg.appendChild(path);
     paths.push({ el: path, ...e });
   }
-
-  function addNode(id, kind, box, fill, stroke, title, sub) {
-    const g = el("g", { style: "cursor:pointer" });
-    const rect = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 6, fill, stroke, "stroke-width": 1 });
-    const ty = sub ? box.y + box.h / 2 - 1 : box.y + box.h / 2 + 4;
-    const label = el("text", { x: box.x + box.w / 2, y: ty, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" });
+  const addNode = (id, kind, title, sub) => {
+    const box = nodeBox(id);
+    const g = svgEl("g", { style: "cursor:pointer" });
+    const rect = svgEl("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 6, fill: "#262626", stroke: kind === "mod" ? COLORS[id] : "#3d3d3d", "stroke-width": 1 });
+    if (kind === "down" && DOWN.find((d) => d.id === id).dashed) rect.setAttribute("stroke-dasharray", "4 3");
+    const label = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 - 2, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" });
     label.textContent = title;
-    g.append(rect, label);
-    if (sub) {
-      const s = el("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 + 14, "text-anchor": "middle", "font-size": 10, fill: "#909090" });
-      s.textContent = sub;
-      g.appendChild(s);
-    }
-    g.addEventListener("click", () => {
-      pinned = pinned && pinned.id === id ? null : { kind, id };
-      show(pinned);
-      applyFocus(pinned);
-    });
-    g.addEventListener("mouseenter", () => {
-      if (pinned) return;
-      show({ kind, id });
-      applyFocus({ kind, id });
-    });
-    svg.appendChild(g);
-    nodes.push({ id, kind, rect, title: label });
-  }
-
-  const std = nodeBox("std");
-  addNode("std", "std", std, "#262626", "#3d3d3d", "std", "唯一上游");
-  for (const m of MODULES) addNode(m.id, "mod", nodeBox(m.id), "#262626", COLORS[m.id], m.name, "");
-  for (const c of CRATES) {
-    addNode(c.id, "crate", nodeBox(c.id), "#262626", "#3d3d3d", c.declared ? "phasor-model · 未使用" : c.id, "");
-  }
-  svg.addEventListener("mouseleave", () => {
-    if (pinned) return;
-    show(null);
-    applyFocus(null);
-  });
+    const s = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 + 12, "text-anchor": "middle", "font-size": 10, fill: "#b0b0b0" });
+    s.textContent = sub;
+    g.append(rect, label, s);
+    g.addEventListener("click", () => { pinned = pinned && pinned.id === id ? null : { kind, id }; showDetail(pinned); applyFocus(pinned); });
+    g.addEventListener("mouseenter", () => { if (pinned) return; showDetail({ kind, id }); applyFocus({ kind, id }); });
+    depSvg.appendChild(g);
+    gnodes.push({ id, kind, rect });
+  };
+  addNode("std", "std", "std", "唯一的上游");
+  for (const m of MODULES) addNode(m.id, "mod", m.id, m.sub);
+  for (const d of DOWN) addNode(d.id, "down", d.id, d.sub);
+  depSvg.addEventListener("mouseleave", () => { if (pinned) return; showDetail(null); applyFocus(null); });
   applyFocus(null);
 }
-
-function chips(uses) {
-  if (!uses.length) return `<div class="uses"><span class="chip">无 src 引用</span></div>`;
-  return `<div class="uses">${uses
-    .map((u) => `<span class="chip"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`)
-    .join("")}</div>`;
-}
-
-function show(focus) {
-  if (!focus) {
-    detail.innerHTML = `<h3>点一个节点</h3><p class="muted" style="margin:0">模块说明它被谁使用；crate 说明它拿 phasor-core 的哪一部分去做什么。</p>`;
-    return;
-  }
-  if (focus.kind === "std") {
-    detail.innerHTML = `<h3>std</h3><p class="muted" style="margin:0">phasor-core 的唯一上游。格式化、HashMap、Arc 来自标准库。没有 thiserror、serde、ndarray 或任何 phasor crate。</p>`;
-    return;
-  }
+const chip = (m) => `<span class="chip" style="cursor:default"><i class="dot" style="background:${COLORS[m]}"></i>${m}</span>`;
+function showDetail(focus) {
+  if (!focus) { detail.innerHTML = `<h3>点一个节点</h3><p class="muted" style="margin:0">模块：它解决什么、谁在用。下游：用到了哪几项、在哪些文件。</p>`; return; }
   if (focus.kind === "mod") {
     const m = MODULES.find((x) => x.id === focus.id);
-    const users = CRATES.filter((c) => c.uses.includes(m.id)).map((c) => c.id);
-    detail.innerHTML = `<h3>${m.name}</h3><p class="muted" style="margin:0">${m.blurb}</p><p class="small" style="margin:8px 0 0">src 引用方：${users.join("、") || "无"}</p>`;
+    const users = DOWN.filter((d) => d.uses.includes(m.id)).map((d) => d.id);
+    detail.innerHTML = `<h3>${m.id}</h3><p class="muted" style="margin:0 0 6px">${m.blurb}</p><p class="small" style="margin:0">src/ 里直接使用它的 crate（${users.length}）：${users.join("、")}</p>`;
     return;
   }
-  const c = CRATES.find((x) => x.id === focus.id);
-  detail.innerHTML = `<h3>${c.id}</h3><p class="muted" style="margin:0">${c.role}</p>${chips(c.uses)}`;
+  if (focus.kind === "std") { detail.innerHTML = `<h3>std</h3><p class="muted" style="margin:0">Cargo.toml 的 [dependencies] 是空的。用到的只有 std::fmt（手写 Display）、std::collections::HashMap（group_indices）、std::sync::Arc（Label::Str）。</p>`; return; }
+  const d = DOWN.find((x) => x.id === focus.id);
+  detail.innerHTML = `<h3>${d.id}</h3><p class="muted" style="margin:0">${d.role}</p><div class="uses">${d.uses.map(chip).join("")}</div>`;
+}
+function buildLegend() {
+  const host = document.getElementById("legend");
+  host.innerHTML = MODULES.map((m) => `<button type="button" data-id="${m.id}"><i class="dot" style="background:${COLORS[m.id]}"></i>${m.id}</button>`).join("");
+  for (const btn of host.querySelectorAll("button")) btn.addEventListener("click", () => {
+    const id = btn.dataset.id;
+    pinned = pinned && pinned.id === id ? null : { kind: "mod", id };
+    showDetail(pinned); applyFocus(pinned);
+  });
+}
+function buildTable() {
+  document.getElementById("rows").innerHTML = DOWN.map((d) =>
+    `<tr><td class="mono">${d.id}</td><td>${d.uses.length ? d.uses.map((u) => `<span class="chip" style="padding:1px 8px;cursor:default"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join(" ") : "—"}</td><td>${d.role}</td></tr>`).join("");
 }
 
-function legend() {
-  const host = document.getElementById("legend");
-  host.innerHTML = MODULES.map(
-    (m) => `<button type="button" data-id="${m.id}"><i class="dot" style="background:${COLORS[m.id]}"></i>${m.name}</button>`
-  ).join("");
-  for (const btn of host.querySelectorAll("button")) {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.id;
-      pinned = pinned && pinned.id === id ? null : { kind: "mod", id };
-      show(pinned);
-      applyFocus(pinned);
-    });
+/* ---------------- columns.rs, ported ---------------- */
+const levelRepeat = (values, times) => values.flatMap((v) => Array(times).fill(v));
+const levelTile = (values, times) => Array.from({ length: times }, () => values).flat();
+function groupIndices(labels) {
+  const order = [], slots = new Map();
+  labels.forEach((l, col) => {
+    if (!slots.has(l)) { slots.set(l, []); order.push(l); }
+    slots.get(l).push(col);
+  });
+  return order.map((l) => [l, slots.get(l)]);
+}
+const PARAM_COLORS = ["#2e4d8f", "#1f6b5c", "#7a5a12", "#6b2f5c", "#5a3a8f", "#2f6b2f", "#8f4a2e", "#3d5d6b"];
+let colMode = "repeat", colGroup = "window", colPick = null;
+function parseList(s) { return s.split(",").map((x) => x.trim()).filter(Boolean); }
+function renderColumns() {
+  const params = parseList(document.getElementById("col-params").value);
+  const syms = parseList(document.getElementById("col-symbols").value);
+  const err = document.getElementById("col-err");
+  const host = document.getElementById("col-grid");
+  if (!params.length || !syms.length || params.length * syms.length > 40) {
+    err.textContent = !params.length || !syms.length ? "两层都至少要一个值。" : "演示最多 40 列。";
+    host.innerHTML = ""; document.getElementById("col-kpis").innerHTML = ""; return;
+  }
+  err.textContent = "";
+  const window_ = colMode === "repeat" ? levelRepeat(params, syms.length) : levelTile(params, syms.length);
+  const symbol = levelTile(syms, params.length);
+  const n = window_.length;
+  const groups = groupIndices(colGroup === "window" ? window_ : symbol);
+  const groupOf = new Map(); groups.forEach(([, cols], gi) => cols.forEach((c) => groupOf.set(c, gi)));
+  const pidx = (v) => params.indexOf(v);
+  let h = `<table class="cells"><tr><th></th>${Array.from({ length: n }, (_, i) => `<th class="ix">${i}</th>`).join("")}</tr>`;
+  const row = (name, labels) => `<tr><th class="rl">${name}</th>${labels.map((l, c) => `<td class="c ${colPick !== null && colPick !== c ? "dim" : ""} ${colPick === c ? "hot" : ""}" data-c="${c}" style="cursor:pointer;background:${PARAM_COLORS[pidx(window_[c]) % PARAM_COLORS.length]}33;border-color:${PARAM_COLORS[pidx(window_[c]) % PARAM_COLORS.length]}">${esc(l)}</td>`).join("")}</tr>`;
+  h += row('"window"', window_) + row('"symbol"', symbol);
+  h += `<tr><th class="rl">group #</th>${Array.from({ length: n }, (_, c) => `<td class="c none">${groupOf.get(c)}</td>`).join("")}</tr></table>`;
+  host.innerHTML = h;
+  host.querySelectorAll("td[data-c]").forEach((td) => td.addEventListener("click", () => {
+    const c = Number(td.dataset.c); colPick = colPick === c ? null : c; renderColumns();
+  }));
+  const contiguous = groups.every(([, cols]) => cols.every((c, i) => i === 0 || c === cols[i - 1] + 1));
+  const lens = groups.map(([, cols]) => cols.length);
+  document.getElementById("col-kpis").innerHTML =
+    `<span class="kpi">n_cols <b>${n}</b></span>` +
+    `<span class="kpi">group_indices("${colGroup}") <b>${groups.map(([l, cols]) => `${esc(l)}→[${cols.join(",")}]`).join("  ")}</b></span>` +
+    (colGroup === "window" ? `<span class="kpi">每组相邻 <b class="${contiguous ? "yes" : "no"}">${contiguous ? "是" : "否"}</b></span>` +
+      `<span class="kpi">group_lens <b>${contiguous ? `[${lens.join(", ")}]` : "无法表示"}</b></span>` : "");
+  const note = document.getElementById("col-note");
+  if (colPick !== null) {
+    const p = Math.floor(colPick / syms.length), s = colPick % syms.length;
+    note.innerHTML = `describe(${colPick}) = <code>window=${esc(window_[colPick])}, symbol=${esc(symbol[colPick])}</code>。` +
+      (colMode === "repeat" ? `按约定 col = param_idx × n_symbols + symbol_idx = ${p} × ${syms.length} + ${s} = ${colPick}。` : `参数层用了 tile，公式 col = param_idx × n_symbols + symbol_idx 不再成立。`);
+  } else if (colMode === "tile") {
+    note.innerHTML = `参数层也用 tile 后，同一个 window 的列被拆散到各处：<code>group_indices("window")</code> 依然能找到它们，但它们不再是一段切片，<code>group_lens</code>（共享资金只认相邻长度）就无法表示“同一组参数共用一个账户”。`;
+  } else {
+    note.textContent = "点一列看 describe(col)。颜色 = 参数组合；切到 group_indices(\"symbol\") 看按标的分组（每组不相邻，这是对的：按标的汇总不需要相邻）。";
   }
 }
-
-function table() {
-  const body = document.getElementById("rows");
-  body.innerHTML = CRATES.map((c) => {
-    const mods = c.uses.length
-      ? c.uses.map((u) => `<span class="chip" style="padding:1px 8px"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join(" ")
-      : "（清单中的依赖，src 未引用）";
-    return `<tr><td class="mono">${c.id}</td><td>${mods}</td><td>${c.role}</td></tr>`;
-  }).join("");
+function buildColumns() {
+  seg("col-mode", [{ name: "repeat（正确）" }, { name: "tile（错误示范）" }], (it, i) => { colMode = i === 0 ? "repeat" : "tile"; colPick = null; renderColumns(); }).select(0);
+  seg("col-group", [{ name: '"window")' }, { name: '"symbol")' }], (it, i) => { colGroup = i === 0 ? "window" : "symbol"; renderColumns(); }).select(0);
+  for (const id of ["col-params", "col-symbols"]) document.getElementById(id).addEventListener("input", () => { colPick = null; renderColumns(); });
 }
 
-legend();
-table();
-build();
+/* ---------------- flex.rs, ported ---------------- */
+const FR = 4, FC = 6, FSYM = 2;
+const FX_KINDS = [
+  { name: "Scalar", make: () => ({ kind: "Scalar", v: 0.001 }), desc: "Scalar(0.001)：例如手续费。所有格子读的都是同一个值，不访问任何缓冲区。" },
+  { name: "PerColumn", make: () => ({ kind: "PerColumn", v: [0.02, 0.02, 0.05, 0.05, 0.1, 0.1] }), desc: "PerColumn(&[f64; n_cols])：例如每组参数一个止损距离。读 values[col]，沿行不变。" },
+  { name: "PerRow", make: () => ({ kind: "PerRow", v: [1, 0, 0, 1] }), desc: "PerRow(&[f64; n_rows])：例如每根 K 线一个“是否允许交易”。读 values[row]，沿列不变。" },
+  { name: "Full", make: () => ({ kind: "Full", v: Array.from({ length: FR * FC }, (_, i) => 100 + i) }), desc: "Full { data, n_rows }：一个完整的列主序矩阵，读 data[col × n_rows + row]。只有真的每格都不同时才值得。" },
+  { name: "MappedColumns", make: () => ({ kind: "MappedColumns", v: [100, 101, 102, 103, 50, 51, 52, 53], map: [0, 1, 0, 1, 0, 1] }), desc: "MappedColumns { data, n_rows, columns }：价格只有 2 个标的列，6 个逻辑列通过 column_map 指过去，读 data[columns[col] × n_rows + row]。扫描不复制价格就靠它。" },
+];
+let fx = null, fxHot = null;
+function fxGet(a, row, col) {
+  switch (a.kind) {
+    case "Scalar": return { v: a.v, idx: null };
+    case "PerColumn": return { v: a.v[col], idx: col };
+    case "PerRow": return { v: a.v[row], idx: row };
+    case "MappedColumns": return { v: a.v[a.map[col] * FR + row], idx: a.map[col] * FR + row, mapIdx: col };
+    default: return { v: a.v[col * FR + row], idx: col * FR + row };
+  }
+}
+const variesByRow = (a) => ["PerRow", "Full", "MappedColumns"].includes(a.kind);
+function renderFlex() {
+  const cell = (t, cls, attrs = "") => `<td class="c ${cls}" ${attrs}>${t}</td>`;
+  const hot = fxHot ? fxGet(fx, fxHot[0], fxHot[1]) : null;
+  let L = `<table class="cells"><tr><th></th>${Array.from({ length: FC }, (_, c) => `<th class="ix">c${c}</th>`).join("")}</tr>`;
+  for (let r = 0; r < FR; r++) {
+    L += `<tr><th class="ix">r${r}</th>`;
+    for (let c = 0; c < FC; c++) {
+      const on = fxHot && fxHot[0] === r && fxHot[1] === c;
+      L += cell(fxGet(fx, r, c).v, on ? "hot" : "", `data-r="${r}" data-c="${c}" style="cursor:crosshair"`);
+    }
+    L += `</tr>`;
+  }
+  L += `</table>`;
+  document.getElementById("fx-logical").innerHTML = L;
+  let S = "";
+  if (fx.kind === "Scalar") {
+    S = `<table class="cells"><tr><th class="rl">寄存器</th>${cell(fx.v, hot ? "hot" : "")}</tr></table><p class="small" style="margin:6px 0 0">0 字节缓冲区：值就在枚举里。</p>`;
+  } else if (fx.kind === "PerColumn" || fx.kind === "PerRow") {
+    S = `<table class="cells"><tr><th></th>${fx.v.map((_, i) => `<th class="ix">${i}</th>`).join("")}</tr><tr><th class="rl">values</th>${fx.v.map((v, i) => cell(v, hot && hot.idx === i ? "hot" : hot ? "dim" : "")).join("")}</tr></table>`;
+  } else {
+    const n = fx.v.length;
+    S = `<table class="cells"><tr><th></th>${fx.v.map((_, i) => `<th class="ix">${i}</th>`).join("")}</tr><tr><th class="rl">data</th>${fx.v.map((v, i) => cell(v, hot && hot.idx === i ? "hot" : hot ? "dim" : "", `style="background:${PARAM_COLORS[Math.floor(i / FR)]}33;border-color:${PARAM_COLORS[Math.floor(i / FR)]}"`)).join("")}</tr>`;
+    if (fx.kind === "MappedColumns") S += `<tr><th class="rl"></th><td colspan="${n}"></td></tr></table><table class="cells"><tr><th></th>${fx.map.map((_, i) => `<th class="ix">c${i}</th>`).join("")}</tr><tr><th class="rl">columns</th>${fx.map.map((m, i) => cell(m, hot && hot.mapIdx === i ? "hot" : hot ? "dim" : "")).join("")}</tr></table>`;
+    else S += `</table>`;
+    S += `<p class="small" style="margin:6px 0 0">颜色 = 存储里的第几列；每列 ${FR} 个元素连续存放。</p>`;
+  }
+  document.getElementById("fx-storage").innerHTML = S;
+  document.getElementById("fx-logical").querySelectorAll("td[data-r]").forEach((td) => {
+    td.addEventListener("mouseenter", () => { fxHot = [Number(td.dataset.r), Number(td.dataset.c)]; renderFlex(); });
+  });
+  const bytes = { Scalar: 0, PerColumn: FC * 8, PerRow: FR * 8, Full: FR * FC * 8, MappedColumns: FR * FSYM * 8 + FC * 8 }[fx.kind];
+  document.getElementById("fx-kpis").innerHTML =
+    `<span class="kpi">varies_by_row() <b>${variesByRow(fx)}</b></span><span class="kpi">实际字节 <b>${bytes}</b></span><span class="kpi">全展开字节 <b>${FR * FC * 8}</b></span>`;
+  const desc = FX_KINDS.find((k) => k.name === fx.kind).desc;
+  let formula = "";
+  if (hot) {
+    const [r, c] = fxHot;
+    formula = { Scalar: `get(${r}, ${c}) = v`, PerColumn: `get(${r}, ${c}) = values[${c}]`, PerRow: `get(${r}, ${c}) = values[${r}]`,
+      Full: `get(${r}, ${c}) = data[${c} × ${FR} + ${r}] = data[${hot.idx}]`,
+      MappedColumns: `get(${r}, ${c}) = data[columns[${c}] × ${FR} + ${r}] = data[${fx.map[c]} × ${FR} + ${r}] = data[${hot.idx}]` }[fx.kind] + ` = ${hot.v}`;
+  }
+  document.getElementById("fx-note").innerHTML = `${desc}${formula ? `<br><code>${formula}</code>` : "<br>把鼠标移到左边的格子上。"}`;
+}
+function buildFlex() {
+  seg("fx-kind", FX_KINDS, (k) => { fx = k.make(); fxHot = [1, 3]; renderFlex(); }).select(4);
+}
+const fmtBytes = (b) => b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${(b / 1e3).toFixed(1)} KB` : `${b} B`;
+function renderMem() {
+  const rows = Math.max(1, Number(document.getElementById("mem-rows").value) || 1);
+  const syms = Math.max(1, Number(document.getElementById("mem-syms").value) || 1);
+  const params = Math.max(1, Number(document.getElementById("mem-params").value) || 1);
+  const cols = syms * params;
+  const items = [
+    { k: "全展开", b: rows * cols * 8, c: "#d35d5d" },
+    { k: "Full", b: rows * cols * 8, c: "#3a7afe", note: "确实每格都不同时" },
+    { k: "MappedColumns", b: rows * syms * 8 + cols * 8, c: "#2fbfa8", note: "价格：每个标的一列 + usize 映射" },
+    { k: "PerRow", b: rows * 8, c: "#c9a227" },
+    { k: "PerColumn", b: cols * 8, c: "#b07cd8" },
+    { k: "Scalar", b: 8, c: "#8fbf4a", note: "值在枚举里，无缓冲区" },
+  ];
+  const max = Math.log10(items[0].b + 1);
+  document.getElementById("mem-bars").innerHTML = `<p class="small" style="margin:0 0 6px">${rows.toLocaleString()} 行 × ${cols.toLocaleString()} 列（${params} 组参数 × ${syms} 个标的）。条长是对数刻度。</p>` + items.map((it) =>
+    `<div style="display:grid;grid-template-columns:120px 1fr 160px;gap:10px;align-items:center;margin:4px 0">
+      <span class="mono" style="color:#b8b8b8">${it.k}</span>
+      <div style="background:#262626;border-radius:4px;height:16px;overflow:hidden"><div style="width:${Math.max(0.5, (Math.log10(it.b + 1) / max) * 100)}%;height:100%;background:${it.c}"></div></div>
+      <span class="mono" style="color:#f0f0f0">${fmtBytes(it.b)}${it.note ? `<span class="small" style="display:block;font-family:inherit">${it.note}</span>` : ""}</span>
+    </div>`).join("");
+}
+
+/* ---------------- matrix layout svg ---------------- */
+function buildMatrix() {
+  const s = document.getElementById("mx-svg");
+  const R = 3, C = 4, cw = 44, ch = 26;
+  const colColor = ["#2e4d8f", "#1f6b5c", "#7a5a12", "#6b2f5c"];
+  const t = (x, y, txt, attrs = {}) => { const e = svgEl("text", { x, y, "font-size": 11, fill: "#b8b8b8", ...attrs }); e.textContent = txt; s.appendChild(e); return e; };
+  t(16, 16, "逻辑视图 (row, col)", { fill: "#909090" });
+  const cells = [];
+  for (let c = 0; c < C; c++) for (let r = 0; r < R; r++) {
+    const x = 16 + c * (cw + 4), y = 26 + r * (ch + 4);
+    const rect = svgEl("rect", { x, y, width: cw, height: ch, rx: 4, fill: colColor[c] + "55", stroke: colColor[c] });
+    s.appendChild(rect);
+    t(x + cw / 2, y + 17, `${r},${c}`, { "text-anchor": "middle", fill: "#f0f0f0", "font-family": "ui-monospace, Menlo, monospace" });
+    cells.push({ r, c, rect });
+  }
+  const ox = 260;
+  t(ox, 16, "列主序 data[col × n_rows + row]（phasor）", { fill: "#909090" });
+  t(ox, 136, "行主序 data[row × n_cols + col]（NumPy 默认）", { fill: "#909090" });
+  const mw = 52;
+  const cm = [], rm = [];
+  for (let i = 0; i < R * C; i++) {
+    const c = Math.floor(i / R), r = i % R;
+    const x = ox + i * (mw + 4);
+    const rect = svgEl("rect", { x, y: 26, width: mw, height: ch, rx: 4, fill: colColor[c] + "55", stroke: colColor[c] });
+    s.appendChild(rect); t(x + mw / 2, 43, `${r},${c}`, { "text-anchor": "middle", fill: "#f0f0f0", "font-family": "ui-monospace, Menlo, monospace" });
+    t(x + mw / 2, 66, String(i), { "text-anchor": "middle", fill: "#666", "font-size": 10 });
+    cm.push({ r, c, rect });
+    const rr = Math.floor(i / C), rc = i % C;
+    const rect2 = svgEl("rect", { x, y: 146, width: mw, height: ch, rx: 4, fill: colColor[rc] + "55", stroke: colColor[rc] });
+    s.appendChild(rect2); t(x + mw / 2, 163, `${rr},${rc}`, { "text-anchor": "middle", fill: "#f0f0f0", "font-family": "ui-monospace, Menlo, monospace" });
+    rm.push({ r: rr, c: rc, rect: rect2 });
+  }
+  // thread brackets on column-major strip
+  const bx = (i) => ox + i * (mw + 4);
+  s.appendChild(svgEl("path", { d: `M ${bx(0)} 80 v6 H ${bx(5) + mw} v-6`, fill: "none", stroke: "#8eb6ff" }));
+  t((bx(0) + bx(5) + mw) / 2, 102, "线程 0：col 0..2 → data[0..6]，一段连续内存", { "text-anchor": "middle", fill: "#9ec1ff" });
+  s.appendChild(svgEl("path", { d: `M ${bx(6)} 80 v6 H ${bx(11) + mw} v-6`, fill: "none", stroke: "#e6c35c" }));
+  t((bx(6) + bx(11) + mw) / 2, 102, "线程 1：col 2..4 → data[6..12]", { "text-anchor": "middle", fill: "#e6c35c" });
+  t(ox, 200, "行主序下，“第 0 列”是 data[0]、data[4]、data[8] 三个跳着的位置：扫一列要跨步读，两个线程写相邻列会落在同一条缓存行上。", { fill: "#b8b8b8" });
+  t(ox, 220, "column(c) = &data[c × n_rows .. (c + 1) × n_rows]，所以它是零拷贝的；把鼠标移到左边的格子上。", { fill: "#b8b8b8" });
+  const hl = (r, c) => {
+    for (const x of [...cells, ...cm, ...rm]) {
+      const on = r === null || (x.r === r && x.c === c);
+      x.rect.setAttribute("opacity", on ? "1" : "0.3");
+      x.rect.setAttribute("stroke-width", r !== null && on ? "2" : "1");
+    }
+  };
+  for (const x of cells) { x.rect.style.cursor = "crosshair"; x.rect.addEventListener("mouseenter", () => hl(x.r, x.c)); }
+  s.addEventListener("mouseleave", () => hl(null, null));
+}
+
+/* ---------------- math.rs, ported ---------------- */
+const REL_TOL = 1e-9, ABS_TOL = 1e-12;
+function isCloseTol(a, b, rel, abs) {
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false; // infinities are sentinels
+  if (a === b) return true;
+  return Math.abs(a - b) <= Math.max(rel * Math.max(Math.abs(a), Math.abs(b)), abs);
+}
+const isClose = (a, b) => isCloseTol(a, b, REL_TOL, ABS_TOL);
+const isCloseOrLess = (a, b) => isClose(a, b) || a < b;
+const isLess = (a, b) => !isClose(a, b) && a < b;
+const sign = (x) => (Number.isNaN(x) ? -128 : x > 0 ? 1 : x < 0 ? -1 : 0);
+const isAdditionZero = (a, b) => (sign(a) !== sign(b) ? isClose(Math.abs(a), Math.abs(b)) : isClose(a + b, 0));
+const add = (a, b) => (isAdditionZero(a, b) ? 0 : a + b);
+function parseNum(s) {
+  const t = s.trim().toLowerCase();
+  if (t === "inf" || t === "+inf") return Infinity;
+  if (t === "-inf") return -Infinity;
+  if (t === "nan") return NaN;
+  if (!/^[0-9eE+\-*/.() ]+$/.test(t) || t === "") throw new Error("只接受数字、inf、nan 和 + - * / ( )");
+  // eslint-disable-next-line no-new-func
+  const v = Function(`"use strict"; return (${t});`)();
+  if (typeof v !== "number") throw new Error("不是数字");
+  return v;
+}
+const show = (v) => (Number.isNaN(v) ? "NaN" : v === Infinity ? "inf" : v === -Infinity ? "-inf" : Object.is(v, -0) ? "-0" : String(v));
+const yn = (b) => `<span class="${b ? "yes" : "no"}">${b}</span>`;
+const M_PRESETS = [
+  { name: "0.1+0.2 vs 0.3", a: "0.1+0.2", b: "0.3", note: "最经典的例子：朴素 == 是 false，is_close 是 true。" },
+  { name: "1e9 vs 1e9+1", a: "1000000000", b: "1000000001", note: "相对容差 1e-9：十亿和十亿零一相等；差到 3 就不再相等（改 b 试试）。" },
+  { name: "1e-12 vs 2e-12", a: "1e-12", b: "2e-12", note: "两者差 50%，相对容差会拒绝；绝对容差 1e-12 兜底，让量级极小的残差被视为零。" },
+  { name: "inf vs inf", a: "inf", b: "inf", note: "PEP 485 认为 inf 接近 inf；这里故意不接近，因为 +inf 是“全部数量”和“用收盘价”两个哨兵。" },
+  { name: "NaN vs NaN", a: "nan", b: "nan", note: "NaN 不接近任何东西，包括它自己。add(NaN, x) 仍然是 NaN。" },
+  { name: "现金够不够", a: "100.00000000001", b: "100", note: "需要 100.00000000001，现金 100：is_close_or_less 认为够（舍入误差内），朴素 <= 会拒单。" },
+  { name: "抵消的仓位", a: "0.1+0.1+0.1+0.1+0.1+0.1+0.1+0.1+0.1+0.1", b: "-1", note: "十次 0.1 的和与 -1 相加：朴素 + 留下 -1.1e-16，add 返回精确的 0。" },
+  { name: "-0 与 0", a: "-0", b: "0", note: "两个零的 sign 都是 0，走“同号”分支，和为 0，is_addition_zero 为 true。" },
+];
+function renderMath(note) {
+  const err = document.getElementById("m-err");
+  let a, b;
+  try { a = parseNum(document.getElementById("m-a").value); b = parseNum(document.getElementById("m-b").value); err.textContent = ""; }
+  catch (e) { err.textContent = e.message; return; }
+  const rows = [
+    ["is_close(a, b)", yn(isClose(a, b)), "a == b", yn(a === b)],
+    ["is_close_or_less(a, b)", yn(isCloseOrLess(a, b)), "a <= b", yn(a <= b)],
+    ["is_less(a, b)", yn(isLess(a, b)), "a < b", yn(a < b)],
+    ["is_addition_zero(a, b)", yn(isAdditionZero(a, b)), "a + b == 0", yn(a + b === 0)],
+    ["add(a, b)", `<b class="mono">${show(add(a, b))}</b>`, "a + b", `<span class="mono">${show(a + b)}</span>`],
+  ];
+  document.getElementById("m-rows").innerHTML = rows.map((r) => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td class="mono">${r[2]}</td><td>${r[3]}</td></tr>`).join("") +
+    `<tr><td class="mono" colspan="4" style="color:#909090">a = ${show(a)}，b = ${show(b)}；|a − b| = ${show(Math.abs(a - b))}，阈值 max(1e-9 × max(|a|,|b|), 1e-12) = ${show(Math.max(REL_TOL * Math.max(Math.abs(a), Math.abs(b)), ABS_TOL))}</td></tr>`;
+  if (note !== undefined) document.getElementById("m-note").textContent = note;
+}
+function buildMath() {
+  seg("m-presets", M_PRESETS, (p) => { document.getElementById("m-a").value = p.a; document.getElementById("m-b").value = p.b; renderMath(p.note); }).select(0);
+  for (const id of ["m-a", "m-b"]) document.getElementById(id).addEventListener("input", () => renderMath(""));
+}
+function buildDrift() {
+  let naive = 0, snapped = 0;
+  const steps = [];
+  for (let i = 0; i < 10; i++) { naive = naive + 0.1; snapped = add(snapped, 0.1); steps.push({ op: "+ 0.1", naive, snapped }); }
+  naive = naive + -1; snapped = add(snapped, -1); steps.push({ op: "− 1.0（平仓）", naive, snapped, last: true });
+  let h = `<div class="wrap"><table><thead><tr><th>步</th><th>操作</th><th>朴素 position + x</th><th>math::add(position, x)</th></tr></thead><tbody>`;
+  steps.forEach((s, i) => {
+    h += `<tr><td class="mono">${i + 1}</td><td class="mono">${s.op}</td><td class="mono" style="${s.last ? "color:#ffb0b0;font-weight:600" : ""}">${show(s.naive)}</td><td class="mono" style="${s.last ? "color:#9be0b6;font-weight:600" : ""}">${show(s.snapped)}</td></tr>`;
+  });
+  h += `</tbody></table></div><div class="kpis"><span class="kpi">朴素：仓位 &lt; 0 <b class="no">${naive < 0}</b>（“还持有空头”）</span><span class="kpi">add：仓位 == 0 <b class="yes">${snapped === 0}</b></span></div>`;
+  document.getElementById("drift").innerHTML = h;
+}
+
+buildLegend(); buildGraph(); buildTable();
+buildColumns(); renderColumns();
+buildFlex();
+for (const id of ["mem-rows", "mem-syms", "mem-params"]) document.getElementById(id).addEventListener("input", renderMem);
+renderMem();
+buildMatrix();
+buildMath();
+buildDrift();
 </script>
 </body>
 </html>

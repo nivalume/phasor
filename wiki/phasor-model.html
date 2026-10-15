@@ -16,10 +16,12 @@
     --stroke2: #3d3d3d;
     --fill: #2b2b2b;
     --accent: #3a7afe;
-    --types: #3a7afe;
-    --ids: #1f8a65;
-    --enums: #c9a227;
-    --bar: #7b64b8;
+    --enums: #e07a3d;
+    --ids: #2fbfa8;
+    --bar: #3a7afe;
+    --types: #c9a227;
+    --good: #4caf7a;
+    --bad: #d35d5d;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -31,20 +33,14 @@
   a { color: #8eb6ff; text-decoration: none; }
   a:hover { text-decoration: underline; }
   header.top {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    padding: 10px 22px;
-    background: var(--chrome);
-    border-bottom: 1px solid var(--stroke);
-    font-size: 13px;
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: 16px; align-items: center;
+    padding: 10px 22px; background: var(--chrome); border-bottom: 1px solid var(--stroke); font-size: 13px;
   }
   header.top strong { font-size: 14px; }
   header.top nav { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
   header.top nav a { color: var(--secondary); }
+  header.top nav a.sep { color: var(--muted); }
   main { max-width: 1080px; margin: 0 auto; padding: 28px 22px 72px; }
   h1 { font-size: 24px; line-height: 30px; font-weight: 600; margin: 0 0 8px; }
   h2 { font-size: 18px; line-height: 24px; font-weight: 600; margin: 32px 0 10px; }
@@ -61,24 +57,28 @@
   .panel .body { padding: 12px; background: var(--bg); overflow-x: auto; }
   .panel .foot { padding: 8px 12px; border-top: 1px solid var(--stroke); }
   .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 8px; }
-  .legend button, .chip {
+  .legend button, .chip, .seg button {
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--stroke2); background: transparent; color: var(--secondary);
-    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
   }
-  .legend button.on { color: var(--text); background: var(--fill); }
+  .legend button.on, .seg button.on { color: var(--text); background: var(--fill); border-color: #5a5a5a; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; align-items: center; }
+  .seg .lbl { color: var(--muted); font-size: 12px; margin-right: 2px; }
   .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
-  #detail { min-height: 72px; border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
-  #detail h3 { margin: 0 0 4px; }
+  .detail { min-height: 72px; border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  .detail h3 { margin: 0 0 4px; }
   .uses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; vertical-align: top; border-top: 1px solid var(--stroke); }
   th { color: var(--text); font-weight: 600; background: var(--elev); border-top: none; }
   td { color: var(--secondary); }
-  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; }
-  .types td:first-child, .types-3 td:nth-child(2) { white-space: nowrap; }
+  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; overflow-x: auto; }
+  .types td:first-child { white-space: nowrap; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .card { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: #202020; }
+  .card h3 { margin-top: 0; }
   .card p { color: var(--secondary); font-size: 13px; margin: 0; }
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   pre {
@@ -86,9 +86,49 @@
     border-radius: 6px; overflow-x: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px;
   }
-  .note { border-left: 3px solid var(--accent); background: #242424; border-radius: 6px; padding: 10px 12px; color: var(--secondary); font-size: 13px; }
+  .note { border-left: 3px solid var(--accent); background: #242424; border-radius: 6px; padding: 10px 12px; color: var(--secondary); font-size: 13px; margin: 10px 0; }
+  .note.warn { border-left-color: var(--bad); }
+  ol.steps { margin: 6px 0 10px; padding-left: 22px; }
+  ol.steps li { color: var(--secondary); margin: 0 0 6px; }
+  ol.steps li b { color: var(--text); }
+  .panel .body > svg { max-width: 100%; height: auto; display: block; }
   svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
-  @media (max-width: 800px) { .stats, .grid2 { grid-template-columns: 1fr; } }
+  input[type="text"], input[type="number"] {
+    background: var(--fill); color: var(--text); border: 1px solid var(--stroke2); border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 5px 8px;
+  }
+  input[type="text"] { width: 100%; }
+  input[type="number"] { width: 96px; }
+  label.field { display: block; color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  label.field span { display: block; margin-bottom: 3px; }
+  label.inline { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12px; margin-right: 14px; }
+  .err { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 4px; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  .kpi { border: 1px solid var(--stroke2); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--secondary); background: #232323; }
+  .kpi b { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  /* cell grids */
+  table.cells { width: auto; border-collapse: separate; border-spacing: 3px; font-size: 11px; }
+  table.cells th, table.cells td { border: none; padding: 0; background: none; }
+  table.cells th.rl { text-align: right; padding-right: 8px; font-weight: 500; color: var(--secondary); white-space: nowrap; font-size: 12px; }
+  table.cells th.ix { color: var(--muted); font-weight: 400; text-align: center; font-family: ui-monospace, Menlo, monospace; padding: 0 2px; }
+  table.cells td.c {
+    min-width: 46px; height: 28px; padding: 0 4px; text-align: center; vertical-align: middle; border-radius: 4px;
+    border: 1px solid var(--stroke2); background: #232323; color: var(--secondary);
+    font-family: ui-monospace, Menlo, monospace; cursor: default;
+  }
+  table.cells td.hot { outline: 2px solid #f0f0f0; outline-offset: -1px; color: var(--text); }
+  table.cells td.dim { opacity: 0.35; }
+  table.cells td.none { border-style: dashed; color: #666; }
+  .flexrow { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .flexrow > div { min-width: 0; }
+  @media (max-width: 860px) {
+    .stats, .grid2, .grid3, .controls { grid-template-columns: 1fr; }
+    main { padding: 20px 16px 60px; }
+    header.top { padding: 10px 16px; flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
@@ -102,464 +142,388 @@
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
+    <a class="sep">|</a>
+    <a href="#concept">第一性原理</a>
     <a href="#graph">依赖图</a>
+    <a href="#enums">枚举</a>
+    <a href="#status">拒单原因</a>
+    <a href="#ids">标识</a>
+    <a href="#bar">K 线</a>
+    <a href="#types">定点数</a>
     <a href="#class">类图</a>
-    <a href="#types">类型</a>
-    <a href="#modules">四个模块</a>
     <a href="#table">对照表</a>
+    <a href="#rules">规则</a>
   </nav>
 </header>
 <main>
   <h1>phasor-model</h1>
   <p class="muted">
-    领域模型：定点价格和数量、交易标识、K 线，以及驱动执行状态机的枚举。
-    执行枚举对齐向量化参考引擎，因为验收标准是成交语义逐位一致。
-    价格和标识对齐阶段 2 的策略 API 形状：定点整数加按品种的精度、可复制的标识。两边如果形状不一致，每次调用都要转换。
+    领域模型。phasor-core 回答“数怎么存、怎么比”，这个 crate 回答“这些数<b>是什么</b>”：一笔订单可以怎样描述、一次撮合可能有哪些结果、
+    一个标的叫什么、一根 K 线长什么样、钱用什么类型存。它没有任何算法，只有类型；但这些类型的<b>判别值</b>被写进记录数组，是磁盘格式的一部分。
   </p>
   <div class="stats">
-    <div class="stat"><b>4</b><span>模块：types、ids、enums、bar。实现是手写的，不从参考项目拷代码</span></div>
-    <div class="stat"><b>8</b><span>个 crate 在 src 里直接使用。测试和 examples 不计</span></div>
-    <div class="stat"><b>1</b><span>条虚线：Cargo.toml 声明了 phasor-core，源码没有引用</span></div>
+    <div class="stat"><b>17 个 repr(i8) 枚举</b><span>判别值由测试固定：它们以整数写进订单记录和日志，被 Python 层和差分测试读回</span></div>
+    <div class="stat"><b>8 个 crate 直接依赖</b><span>exec、sim、records、analysis、data、expr、py 和门面 phasor；向量化热路径只用到枚举和 <code>OhlcvPanel</code></span></div>
+    <div class="stat"><b>两条血统</b><span>撮合枚举跟随 vectorbt（逐笔对齐是验收标准）；数值与标识类型跟随 NautilusTrader（阶段 2 的策略 API）</span></div>
   </div>
 
+  <!-- ============================================================ -->
+  <h2 id="concept">从第一性原理看：领域模型该放什么</h2>
+  <p class="muted">先不看代码。一个回测引擎要和别人对账（参考实现、Python、磁盘上的记录），哪些概念必须有唯一、稳定的定义？</p>
+
+  <h3>1. 订单的“语法”必须是有限集合</h3>
+  <p>
+    “买多少”可以是单位数、金额、可用现金的百分比，或者是目标仓位；同一根 K 线上进场和出场同时触发怎么办；止损按哪个价格挂、触发后按哪个价格成交……
+    这些都不是数值，而是<b>选项</b>。把它们写成字符串，每根 K 线每一列都要比较一次字符串；写成布尔组合，非法组合无处不在。正确的形状是<b>枚举</b>，
+    而且因为结果要写进数组、跨语言读回，枚举必须有<b>固定的整数判别值</b>。
+  </p>
+
+  <h3>2. “没成交”要说清楚为什么</h3>
+  <p>
+    一次扫描跑了 5,000 列，其中 300 列一笔都没交易——用户第一个问题就是“为什么”。所以结果不能只有“成交 / 没成交”，还要有<b>原因码</b>：
+    价格是 NaN、钱不够、数量低于最小值、手续费都付不起……每一种原因单独一个值，才能按原因统计。
+  </p>
+
+  <h3>3. 钱和标识的类型，要为“事件驱动”预留</h3>
+  <p>
+    向量化层为了速度全用 <code>f64</code>，靠 phasor-core 的容差层兜住误差。但事件驱动层（逐笔撮合、真实交易所接口）需要<b>定点数</b>：
+    百万笔成交在浮点里累加的漂移，和 alpha 是同一个量级。标的名在每次写记录时都会被比较，最好是可以按整数比较的句柄。
+    这一层现在可以先定<b>形状</b>，让阶段 2 换实现时不动调用方。
+  </p>
+
+  <h3>4. 行情有两种形状</h3>
+  <p>
+    事件驱动的策略一次看一根 K 线：需要一个 <code>Bar</code> 结构体（数组结构里的“一行”）。向量化引擎一次扫完一列：需要<b>结构体数组</b>，
+    open、high、low、close 各自一块列主序缓冲区。两种形状都要有，而且不能互相冒充。
+  </p>
+
+  <div class="panel">
+    <div class="cap">两条血统，以及阶段 1 里哪些类型真正被用到。实线框：阶段 1 的向量化路径在用；虚线框：为阶段 2 预留，工作区里还没有使用者</div>
+    <div class="body">
+      <svg width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="两条血统">
+        <defs>
+          <marker id="carr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" />
+          </marker>
+        </defs>
+        <g font-size="11">
+          <rect x="16" y="30" width="190" height="64" rx="6" fill="#181818" stroke="#3d3d3d"/>
+          <text x="111" y="56" text-anchor="middle" font-weight="600" fill="#f0f0f0">vectorbt</text>
+          <text x="111" y="74" text-anchor="middle" font-size="10" fill="#909090">撮合语义 · 逐笔对齐的参考实现</text>
+          <rect x="16" y="150" width="190" height="64" rx="6" fill="#181818" stroke="#3d3d3d"/>
+          <text x="111" y="176" text-anchor="middle" font-weight="600" fill="#f0f0f0">NautilusTrader</text>
+          <text x="111" y="194" text-anchor="middle" font-size="10" fill="#909090">值类型与标识 · 阶段 2 策略 API</text>
+
+          <rect x="270" y="22" width="300" height="80" rx="6" fill="#33200f" stroke="#e07a3d"/>
+          <text x="420" y="44" text-anchor="middle" font-weight="600" fill="#f0f0f0">enums.rs — 17 个 repr(i8) 枚举</text>
+          <text x="420" y="62" text-anchor="middle" font-size="10" fill="#f0b088">SizeType · Direction · OrderStatus · StatusInfo</text>
+          <text x="420" y="76" text-anchor="middle" font-size="10" fill="#f0b088">ConflictMode · Stop* · TradesType · CashFlowKind …</text>
+          <text x="420" y="92" text-anchor="middle" font-size="10" fill="#909090">只有 CashFlowKind 是 phasor 自己加的</text>
+
+          <rect x="270" y="122" width="145" height="50" rx="6" fill="#143430" stroke="#2fbfa8"/>
+          <text x="342" y="142" text-anchor="middle" font-weight="600" fill="#f0f0f0">ids.rs</text>
+          <text x="342" y="158" text-anchor="middle" font-size="10" fill="#8fe0d2">InstrumentId · Symbol · Venue</text>
+          <rect x="425" y="122" width="145" height="50" rx="6" fill="#1a2744" stroke="#3a7afe"/>
+          <text x="497" y="142" text-anchor="middle" font-weight="600" fill="#f0f0f0">bar.rs</text>
+          <text x="497" y="158" text-anchor="middle" font-size="10" fill="#9ec1ff">BarType · OhlcvPanel</text>
+
+          <rect x="270" y="186" width="145" height="50" rx="6" fill="#262626" stroke="#3a7afe" stroke-dasharray="4 3"/>
+          <text x="342" y="206" text-anchor="middle" font-weight="600" fill="#f0f0f0">bar.rs</text>
+          <text x="342" y="222" text-anchor="middle" font-size="10" fill="#9ec1ff">Bar · UnixNanos</text>
+          <rect x="425" y="186" width="145" height="50" rx="6" fill="#262626" stroke="#c9a227" stroke-dasharray="4 3"/>
+          <text x="497" y="206" text-anchor="middle" font-weight="600" fill="#f0f0f0">types.rs</text>
+          <text x="497" y="222" text-anchor="middle" font-size="10" fill="#e6c35c">Price · Quantity（定点）</text>
+
+          <text x="640" y="18" fill="#909090">阶段 1 的使用者</text>
+          <text x="640" y="48" fill="#b8b8b8">exec · sim · records · analysis · py：每根 K 线每列都读</text>
+          <text x="640" y="66" fill="#b8b8b8">以整数写进 OrderRecords / Logs / CashRecords</text>
+          <text x="640" y="142" fill="#b8b8b8">data：catalog 的目录键、按标的对齐</text>
+          <text x="640" y="160" fill="#b8b8b8">expr：OhlcvPanel 是因子求值的输入</text>
+          <text x="640" y="206" fill="#b8b8b8">没有使用者。门面 prelude 再导出了 Price / Quantity，</text>
+          <text x="640" y="224" fill="#b8b8b8">但工作区里没有任何地方构造它们；阶段 1 的钱全是 f64</text>
+        </g>
+        <path d="M206 62 H270" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M206 182 C 240 182, 240 147, 270 147" fill="none" stroke="#8a8a8a" marker-end="url(#carr)"/>
+        <path d="M206 182 C 240 182, 240 211, 270 211" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3" marker-end="url(#carr)"/>
+        <path d="M206 190 C 230 240, 400 245, 497 236" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3" marker-end="url(#carr)"/>
+        <path d="M206 170 C 300 120, 420 120, 497 122" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3"/>
+      </svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">每一行都是独立实现，按公开语义编写，没有从任何一个项目里拷贝代码（ARCHITECTURE 附录 A）。<code>BarType</code> 的字符串格式和 <code>SYMBOL.VENUE</code> 都是 Nautilus 的约定。</p></div>
+  </div>
+
+  <h3>如果从零实现，按这个顺序</h3>
+  <ol class="steps">
+    <li><b>先列出撮合的全部选项，写成固定判别值的枚举。</b><code>#[repr(i8)]</code> + 显式 <code>= n</code>，再写一个测试断言判别值——改一个数就是改磁盘格式。</li>
+    <li><b>结果与原因分开。</b><code>OrderStatus</code> 只有三种（成交 / 忽略 / 拒绝），原因另放在 <code>StatusInfo</code>；记录里存整数，再提供“整数 → 枚举 → 文字”的回路。</li>
+    <li><b>标识：先定类型，再优化。</b>调用方只看到不透明的 <code>InstrumentId</code>，内部先用 <code>Arc&lt;str&gt;</code>，等有性能数据再换成驻留句柄。</li>
+    <li><b>行情：两种形状都给。</b>向量化层用结构体数组 <code>OhlcvPanel</code>，事件驱动层用 <code>Bar</code>；K 线带两个时间戳，回放只按“可用时间”排序。</li>
+    <li><b>钱：定点数，哨兵值代替 Option。</b>原始整数 + 精度；用 <code>i64::MAX</code> 表示“没有价格”，省掉内循环里的判别分支，代价是构造函数要负责把关。</li>
+  </ol>
+
+  <!-- ============================================================ -->
   <h2 id="graph">依赖图</h2>
   <p>
-    左侧是上游。中间是 phasor-model 的四个模块。右侧是 <code>src/</code> 里引用了它的 crate。
-    一根线表示该 crate 的生产代码用到了对应模块。点模块或 crate，只保留相关的线，并在图下写出用途。
-    <code>enums</code> 的线默认更淡，避免把 types、ids、bar 盖住。
+    左边的上游是 phasor-core——但只是 Cargo.toml 里的声明：<code>src/</code> 里一行 <code>use phasor_core</code> 都没有（虚线）。中间是四个模块，右边是直接
+    <code>use phasor_model::…</code> 的 crate（只统计 <code>src/</code>）。点任一节点，只保留相关的线。
   </p>
   <div class="legend" id="legend"></div>
   <div class="panel">
-    <div class="cap">实线是 src 引用；虚线是 Cargo.toml 里声明、源码未使用的 phasor-core</div>
+    <div class="cap">线的颜色 = 被用到的模块。types 只有一条出边：门面 prelude 再导出 Price / Quantity，但没有人构造它们</div>
     <div class="body">
-      <svg id="dep-graph" width="1040" height="560" viewBox="0 0 1040 560" role="img" aria-label="phasor-model 依赖图"></svg>
+      <svg id="dep-graph" width="1040" height="470" viewBox="0 0 1040 470" role="img" aria-label="phasor-model 依赖图"></svg>
     </div>
-    <div class="foot">
-      <p class="small" style="margin:0">
-        来源：各 crate 的 Cargo.toml，以及 src/ 中的 <code>use phasor_model::…</code>。不含 tests/、examples/，也不含源文件里的 <code>#[cfg(test)]</code>。
-        phasor-generic、phasor-indicators、phasor-signals 没有声明这个依赖。
-        <code>enums</code> 的线默认更淡，因为执行、模拟、记录、分析、Python 和门面都用它。
-      </p>
-    </div>
+    <div class="foot"><p class="small" style="margin:0">来源：各 crate 的 Cargo.toml 与 <code>src/</code> 中的 <code>use phasor_model::…</code>。phasor-signals、phasor-generic、phasor-indicators 不依赖它。</p></div>
   </div>
-  <div id="detail">
+  <div class="detail" id="detail">
     <h3>点一个节点</h3>
-    <p class="muted" style="margin:0">模块说明它被谁使用；crate 说明它拿 phasor-model 的哪一部分去做什么。</p>
+    <p class="muted" style="margin:0">模块：它定义了什么、谁在用。下游：用到了哪些类型、在哪些文件。</p>
   </div>
 
-  <h2>crate 内部</h2>
-  <p class="muted">四个模块里只有 bar 引用另外两个：<code>Bar</code> 和 <code>BarType</code> 带 <code>InstrumentId</code>，<code>Bar</code> 的价格和成交量是 <code>Price</code>、<code>Quantity</code>。enums 不引用它们。定点类型也不引用枚举，方向放在 <code>OrderSide</code> 里，不放进数量的符号。</p>
-  <div class="panel">
-    <div class="cap">内部依赖：bar 使用 ids 和 types；enums 独立</div>
-    <div class="body">
-      <svg width="720" height="200" viewBox="0 0 720 200" role="img" aria-label="phasor-model 内部依赖">
-        <defs>
-          <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L8,4 L0,8 z" fill="#666"/>
-          </marker>
-        </defs>
-        <rect x="40" y="24" width="140" height="40" rx="6" fill="#1a2744" stroke="#3a7afe"/>
-        <text x="110" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">types</text>
-        <rect x="230" y="24" width="140" height="40" rx="6" fill="#143028" stroke="#1f8a65"/>
-        <text x="300" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">ids</text>
-        <rect x="420" y="24" width="140" height="40" rx="6" fill="#2e2916" stroke="#c9a227"/>
-        <text x="490" y="49" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">enums</text>
-        <text x="575" y="49" font-size="11" fill="#909090">不引用其他模块</text>
-
-        <rect x="200" y="140" width="140" height="40" rx="6" fill="#261f33" stroke="#7b64b8"/>
-        <text x="270" y="165" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">bar</text>
-
-        <path d="M110 64 V 120 H 200 V 140" fill="none" stroke="#666" marker-end="url(#arr)"/>
-        <path d="M300 64 V 140" fill="none" stroke="#666" marker-end="url(#arr)"/>
-      </svg>
-    </div>
-    <div class="foot"><p class="small" style="margin:0"><code>OhlcvPanel</code> 虽在 bar 模块里，字段是 <code>Vec&lt;f64&gt;</code>，不持有 <code>Bar</code> 或 <code>Price</code>。阶段 1 读的是这块列主序面板。</p></div>
-  </div>
-
-  <h2 id="modules">四个模块做什么</h2>
-  <div class="grid2">
-    <article class="card">
-      <h3><span class="dot" style="background:var(--types)"></span> types</h3>
-      <p>价格和数量是带精度的缩放整数，不是 f64。原始值是 <code>value * 10^precision</code>，默认精度 9。<code>Price::UNDEF</code> 用 <code>i64::MAX</code>，<code>Price::ERROR</code> 用 <code>i64::MIN</code>，避免在最内层循环里为 <code>Option</code> 付一次分支。没有换算方法：不同 precision 的同名义值不相等，<code>Ord</code> 先比 raw 再比 precision。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--ids)"></span> ids</h3>
-      <p><code>Symbol</code> 和 <code>Venue</code> 把名字收进 <code>Arc&lt;str&gt;</code>。<code>InstrumentId</code> 是两者的组合，显示成 <code>SYMBOL.VENUE</code>。相等按字符串内容，不按分配地址。类型保持可克隆、可比较，以后换内部存储不必改调用点。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--enums)"></span> enums</h3>
-      <p>全部 <code>#[repr(i8)]</code>。判别值写进记录数组，再被 Python 和对照测试读回来，改一个就是记录格式的破坏性变更。<code>OrderStatus::Rejected</code> 是正常返回值，不是 <code>Err</code>。原因在 <code>StatusInfo</code>，<code>describe</code> 给人看，<code>from_discriminant</code> 从存盘的 i64 还原；<code>-1</code> 表示已成交、没有原因。</p>
-    </article>
-    <article class="card">
-      <h3><span class="dot" style="background:var(--bar)"></span> bar</h3>
-      <p><code>Bar</code> 是一根 K 线，价格用 <code>Price</code>，带 <code>ts_event</code>（交易所收盘）和 <code>ts_init</code>（引擎可见）。回放按 <code>ts_init</code>，这是唯一不会泄漏未来的时间。<code>OhlcvPanel</code> 是四条价格加成交量的列主序 f64，阶段 1 止损分趟读 open、high、low，所以不用结构体数组。<code>BarType</code> 标识一条序列，不是品种本身。</p>
-    </article>
-  </div>
-
-  <h2 id="class">类图</h2>
+  <!-- ============================================================ -->
+  <h2 id="enums">17 个枚举，按它们在流水线里的位置</h2>
   <p>
-    公开类型按三条线画。<code>-</code> 是私有字段，<code>+</code> 是公开成员。
-    实心菱形是拥有。虚线是“使用这个类型”，不是持有另一份数据。
+    所有枚举都是 <code>#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] #[repr(i8)]</code>，判别值从 0 起显式写出。
+    选一组，再点一个枚举，看它的变体、判别值和谁在读它。
   </p>
-
   <div class="panel">
-    <div class="cap">定点值。Price 和 Quantity 都带着自己的 precision，类型别名决定以后加宽时改一处</div>
+    <div class="cap">enums.rs 浏览器</div>
     <div class="body">
-      <svg width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="定点值类图">
-        <rect x="16" y="16" width="340" height="218" rx="6" fill="#262626" stroke="#3a7afe"/>
-        <rect x="16" y="16" width="340" height="32" rx="6" fill="#1a2744"/>
-        <rect x="16" y="36" width="340" height="12" fill="#1a2744"/>
-        <text x="28" y="37" font-size="11" fill="#9ec1ff">«struct» Price</text>
-        <text x="28" y="68" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- raw: PriceRaw</text>
-        <text x="28" y="86" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- precision: u8</text>
-        <text x="28" y="108" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ UNDEF  raw = i64::MAX</text>
-        <text x="28" y="126" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ERROR  raw = i64::MIN</text>
-        <text x="28" y="148" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ from_raw(raw, precision)</text>
-        <text x="28" y="166" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ raw() / precision()</text>
-        <text x="28" y="184" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ is_sentinel()</text>
-        <text x="28" y="210" font-size="10" fill="#909090">Copy + Ord。哨兵的 precision 是 0</text>
-
-        <rect x="376" y="16" width="300" height="180" rx="6" fill="#262626" stroke="#3a7afe"/>
-        <rect x="376" y="16" width="300" height="32" rx="6" fill="#1a2744"/>
-        <rect x="376" y="36" width="300" height="12" fill="#1a2744"/>
-        <text x="388" y="37" font-size="11" fill="#9ec1ff">«struct» Quantity</text>
-        <text x="388" y="68" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- raw: QuantityRaw</text>
-        <text x="388" y="86" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- precision: u8</text>
-        <text x="388" y="112" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ from_raw(raw, precision)</text>
-        <text x="388" y="130" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ raw() / precision()</text>
-        <text x="388" y="160" font-size="10" fill="#909090">无符号。没有 UNDEF / ERROR</text>
-        <text x="388" y="178" font-size="10" fill="#909090">方向在 OrderSide，不在符号位</text>
-
-        <rect x="696" y="16" width="328" height="180" rx="6" fill="#262626" stroke="#3d3d3d"/>
-        <rect x="696" y="16" width="328" height="32" rx="6" fill="#242424"/>
-        <rect x="696" y="36" width="328" height="12" fill="#242424"/>
-        <text x="708" y="37" font-size="11" fill="#b8b8b8">«alias» 标度</text>
-        <text x="708" y="68" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">PriceRaw = i64</text>
-        <text x="708" y="86" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">QuantityRaw = u64</text>
-        <text x="708" y="108" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">PRECISION: u8 = 9</text>
-        <text x="708" y="126" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">SCALAR: f64 = 1_000_000_000</text>
-        <text x="708" y="156" font-size="10" fill="#909090">raw = value × 10^precision</text>
-        <text x="708" y="174" font-size="10" fill="#909090">加宽到 i128 时改别名，不改调用形状</text>
-      </svg>
+      <div class="seg" id="en-group"><span class="lbl">阶段</span></div>
+      <div class="seg" id="en-pick"><span class="lbl">枚举</span></div>
+      <div id="en-body"></div>
     </div>
-    <div class="foot"><p class="small" style="margin:0">来源：<code>crates/phasor-model/src/types.rs</code>。没有加法或换精度的方法。派生的 <code>Ord</code> 按字段顺序比较，先 raw 后 precision。</p></div>
+    <div class="foot"><p class="small" style="margin:0" id="en-note"></p></div>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>SizeType 是一条级联</h3><p>phasor-exec 按固定顺序把 Percent、TargetPercent、TargetValue、Value、TargetAmount 逐级改写，直到只剩 <code>Amount</code>（ARCHITECTURE §7.3）。枚举本身只定义“数量怎么读”，换算在内核里。</p></div>
+    <article class="card"><h3>Rejected 不是 Err</h3><p><code>OrderStatus::Rejected</code> 是返回值里的普通结果，原因在 <code>StatusInfo</code>。<code>Err</code> 留给 phasor-core 的不变量错误。</p></div>
+    <article class="card"><h3>三种交易视图共用一个 schema</h3><p><code>TradesType</code> 的三个值只改变成交如何归属到交易：按进场 FIFO、按出场平均、或按仓位聚合。这是移植时最常见的错误（§9.5）。</p></div>
   </div>
 
+  <!-- ============================================================ -->
+  <h2 id="status">拒单原因：从记录里的整数读回来</h2>
+  <p>
+    日志记录里 <code>res_status_info</code> 是一列 <code>i64</code>：成交的订单没什么要解释，写 <code>-1</code>；被忽略或被拒的订单写原因的判别值。
+    <code>StatusInfo::from_discriminant</code> 是回路，<code>describe</code> 给出人话。粘一列整数进来试试，再看按原因统计。
+  </p>
   <div class="panel">
-    <div class="cap">标识与 K 线。Bar 拥有定点价格；OhlcvPanel 是另一条布局，不拥有 Bar</div>
+    <div class="cap">StatusInfo::from_discriminant + describe，JS 移植</div>
     <div class="body">
-      <svg width="1040" height="460" viewBox="0 0 1040 460" role="img" aria-label="标识与 K 线类图">
+      <label class="field"><span>res_status_info（逗号分隔的整数）</span><input type="text" id="st-in" value="-1, -1, 7, 5, -1, 7, 12, 13, 7, 14, 0" /></label>
+      <div class="flexrow">
+        <div style="flex:1 1 420px"><div class="wrap"><table><thead><tr><th>#</th><th>值</th><th>from_discriminant</th><th>describe()</th></tr></thead><tbody id="st-rows"></tbody></table></div></div>
+        <div style="flex:1 1 360px"><p class="small" style="margin:0 0 6px">按原因计数（“这次扫描为什么不交易”）</p><div id="st-bars"></div></div>
+      </div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">phasor-records 的 <code>logs.rs</code> 就是这样把日志里的整数还原成原因的；超出 0..=13 的值（包括 -1）返回 <code>None</code>，不会被误读成某个原因。</p></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="ids">标识：InstrumentId 与 BarType 的解析</h2>
+  <p>
+    <code>InstrumentId</code> 渲染为 <code>SYMBOL.VENUE</code>，用 <code>rsplit_once('.')</code> 解析——从<b>右边</b>切，所以 <code>BRK.B.NYSE</code> 的标的是 <code>BRK.B</code>。
+    <code>BarType</code> 是 <code>SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE</code>，用 <code>rsplitn(5, '-')</code> 解析——同样从右边切，标的名里可以有 <code>-</code>（<code>BTC-USDT</code>）。
+    两者都是 phasor-data catalog 的目录名（<code>&lt;root&gt;/data/&lt;name&gt;/&lt;key&gt;/</code>），所以解析时拒绝空白、控制字符和路径分隔符。
+  </p>
+  <div class="panel">
+    <div class="cap">FromStr for InstrumentId / BarType，JS 移植；成功时还验证 Display 能原样写回</div>
+    <div class="body">
+      <div class="seg" id="id-presets"><span class="lbl">例子</span></div>
+      <label class="field"><span>字符串</span><input type="text" id="id-in" /></label>
+      <div class="grid2">
+        <div class="card"><h3>按 BarType 解析</h3><div id="id-bar"></div></div>
+        <div class="card"><h3>按 InstrumentId 解析</h3><div id="id-inst"></div></div>
+      </div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="id-note"></p></div>
+  </div>
+  <div class="note warn">
+    <b>文档与实现的差距：</b><code>ids.rs</code> 的模块注释说“驻留把每个标识压成一个 <code>Copy</code> 句柄，按整数比较”。现在的实现不是这样：
+    <code>Symbol</code>、<code>Venue</code> 是 <code>Arc&lt;str&gt;</code> 的包装，<code>InstrumentId</code> 只是 <code>Clone</code>，相等比较按字符串内容。
+    注释自己也说明了“阶段 1 保持简单，有性能数据之后再优化”；ARCHITECTURE §3.6 写作“尚未驻留”。要点是类型已经不透明，换存储时调用方不用改。
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="bar">K 线：一行 vs 一列</h2>
+  <p>
+    阶段 1 只支持 K 线。向量化层<b>不用</b> <code>Bar</code> 结构体，而是读 <code>OhlcvPanel</code>：五个字段各一块 <code>n_rows × n_cols</code> 的列主序 <code>Vec&lt;f64&gt;</code>（空 Vec 表示没提供）。
+    原因是止损引擎分几趟分别读 open、high、low；数组结构体（AoS）每读一个字段都会把整行拉进缓存。
+  </p>
+  <div class="panel">
+    <div class="cap">同样 3 根 K 线 × 1 个标的：Bar（AoS，阶段 2）与 OhlcvPanel（SoA，阶段 1）。高亮：止损检查一趟只读 low</div>
+    <div class="body">
+      <svg id="bar-svg" width="1040" height="210" viewBox="0 0 1040 210" role="img" aria-label="AoS 与 SoA"></svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0"><code>Bar</code> 带两个时间戳：<code>ts_event</code> 是 K 线在交易所收盘的时间，<code>ts_init</code> 是它到达引擎的时间。回放必须按 <code>ts_init</code> 排序，因为只有它不会泄露未来。</p></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="types">定点数：Price 与 Quantity</h2>
+  <p>
+    <code>Price { raw: i64, precision: u8 }</code>、<code>Quantity { raw: u64, precision: u8 }</code>。“没有价格”用 <code>Price::UNDEF</code>（<code>raw = i64::MAX</code>），
+    “算不出来”用 <code>Price::ERROR</code>（<code>raw = i64::MIN</code>），而不是 <code>Option</code>：内核在最内层循环读价格，<code>Option</code> 的判别值是每根 K 线每列一次分支。
+    代价是对哨兵做算术不会编译报错，所以构造函数是唯一的把关点。
+  </p>
+  <div class="panel">
+    <div class="cap">输入两个价格（十进制 + 精度），看 raw、derive 出来的 Eq / Ord，和真实数值比较</div>
+    <div class="body">
+      <div class="seg" id="px-presets"><span class="lbl">例子</span></div>
+      <div class="controls">
+        <div>
+          <label class="inline">A 值 <input type="text" id="px-a" style="width:160px" /></label>
+          <label class="inline">精度 <input type="number" id="px-ap" min="0" max="18" /></label>
+        </div>
+        <div>
+          <label class="inline">B 值 <input type="text" id="px-b" style="width:160px" /></label>
+          <label class="inline">精度 <input type="number" id="px-bp" min="0" max="18" /></label>
+        </div>
+      </div>
+      <div class="err" id="px-err"></div>
+      <div class="wrap"><table><thead><tr><th></th><th>raw</th><th>precision</th><th>is_sentinel()</th><th>该精度下的上限</th></tr></thead><tbody id="px-rows"></tbody></table></div>
+      <div class="kpis" id="px-kpis"></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="px-note"></p></div>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>raw 按每个实例的精度缩放</h3><p>测试里 <code>Price::from_raw(150_500, 3)</code> 是 150.500 JPY，<code>from_raw(6_500_012_345_678, 8)</code> 是 65,000.12345678：raw = 值 × 10<sup>precision</sup>。模块注释里“raw = 值 × 10<sup>PRECISION</sup>（9）”描述的是默认刻度，不是每个实例。</p></div>
+    <article class="card"><h3>derive 的比较只看字段</h3><p><code>Eq</code> 与 <code>Ord</code> 是 derive 的：先比 raw 再比 precision。精度不同时它们没有数值意义——<code>1.00</code> 与 <code>1.000</code> 不相等，<code>1.00</code> 还“大于” <code>5.0</code>。注释说“精度不同的价格做运算前必须先对齐”，目前没有提供对齐的函数。</p></div>
+    <article class="card"><h3>为什么要准备 i128</h3><p><code>PriceRaw</code> 是类型别名。9 位小数下 i64 的上限约 92 亿，价格够用，但链上 18 位小数的数量放不下；高精度变体（16 位小数，<code>i128</code>）只需改别名，不用重写。</p></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="class">类图</h2>
+  <p class="muted">四个模块的公开类型。枚举只画出变体最多的几个，完整列表在上面的浏览器里。</p>
+  <div class="panel">
+    <div class="cap">phasor-model 的公开类型；虚线框为阶段 2 预留</div>
+    <div class="body">
+      <svg width="1040" height="430" viewBox="0 0 1040 430" role="img" aria-label="phasor-model 类图">
         <defs>
-          <marker id="umlDep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-            <path d="M1,1 L9,5 L1,9" fill="none" stroke="#b8b8b8" stroke-width="1.2"/>
+          <marker id="kdia" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="10" markerHeight="10" orient="auto">
+            <path d="M1,5 L5,1 L9,5 L5,9 z" fill="#1e1e1e" stroke="#8a8a8a" />
+          </marker>
+          <marker id="karr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" />
           </marker>
         </defs>
+        <g font-size="11" font-family="ui-monospace, Menlo, monospace">
+          <!-- ids -->
+          <rect x="16" y="16" width="230" height="104" rx="6" fill="#262626" stroke="#2fbfa8"/>
+          <rect x="16" y="16" width="230" height="24" rx="6" fill="#143430"/>
+          <text x="131" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct InstrumentId</text>
+          <text x="26" y="56" fill="#b8b8b8">pub symbol: Symbol</text>
+          <text x="26" y="72" fill="#b8b8b8">pub venue: Venue</text>
+          <line x1="16" y1="80" x2="246" y2="80" stroke="#3d3d3d"/>
+          <text x="26" y="96" fill="#909090">new / from_parts → Result</text>
+          <text x="26" y="112" fill="#909090">FromStr · Display "SYM.VENUE"</text>
+          <rect x="16" y="150" width="108" height="50" rx="6" fill="#262626" stroke="#2fbfa8"/>
+          <text x="70" y="170" text-anchor="middle" fill="#f0f0f0" font-weight="600">Symbol</text>
+          <text x="70" y="188" text-anchor="middle" fill="#909090">(Arc&lt;str&gt;)</text>
+          <rect x="138" y="150" width="108" height="50" rx="6" fill="#262626" stroke="#2fbfa8"/>
+          <text x="192" y="170" text-anchor="middle" fill="#f0f0f0" font-weight="600">Venue</text>
+          <text x="192" y="188" text-anchor="middle" fill="#909090">(Arc&lt;str&gt;)</text>
 
-        <rect x="16" y="16" width="210" height="118" rx="6" fill="#262626" stroke="#1f8a65"/>
-        <rect x="16" y="16" width="210" height="28" rx="6" fill="#143028"/>
-        <rect x="16" y="36" width="210" height="8" fill="#143028"/>
-        <text x="28" y="35" font-size="11" fill="#7dcea0">«struct» Symbol</text>
-        <text x="28" y="62" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- Arc&lt;str&gt;</text>
-        <text x="28" y="84" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ new(s) / as_str()</text>
-        <text x="28" y="112" font-size="10" fill="#909090">Eq + Ord 按字符串内容</text>
+          <!-- BarType -->
+          <rect x="16" y="236" width="230" height="134" rx="6" fill="#262626" stroke="#3a7afe"/>
+          <rect x="16" y="236" width="230" height="24" rx="6" fill="#1a2744"/>
+          <text x="131" y="253" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct BarType</text>
+          <text x="26" y="276" fill="#b8b8b8">instrument: InstrumentId</text>
+          <text x="26" y="292" fill="#b8b8b8">step: u64</text>
+          <text x="26" y="308" fill="#b8b8b8">aggregation: String</text>
+          <text x="26" y="324" fill="#b8b8b8">price_type, source: String</text>
+          <line x1="16" y1="332" x2="246" y2="332" stroke="#3d3d3d"/>
+          <text x="26" y="348" fill="#909090">FromStr（rsplitn 5）</text>
+          <text x="26" y="364" fill="#909090">Display（原样写回）</text>
 
-        <rect x="16" y="152" width="210" height="118" rx="6" fill="#262626" stroke="#1f8a65"/>
-        <rect x="16" y="152" width="210" height="28" rx="6" fill="#143028"/>
-        <rect x="16" y="172" width="210" height="8" fill="#143028"/>
-        <text x="28" y="171" font-size="11" fill="#7dcea0">«struct» Venue</text>
-        <text x="28" y="198" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">- Arc&lt;str&gt;</text>
-        <text x="28" y="220" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ new(s) / as_str()</text>
-        <text x="28" y="248" font-size="10" fill="#909090">例如 BINANCE</text>
+          <!-- OhlcvPanel -->
+          <rect x="290" y="236" width="230" height="134" rx="6" fill="#262626" stroke="#3a7afe"/>
+          <rect x="290" y="236" width="230" height="24" rx="6" fill="#1a2744"/>
+          <text x="405" y="253" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct OhlcvPanel</text>
+          <text x="300" y="276" fill="#b8b8b8">open, high, low: Vec&lt;f64&gt;</text>
+          <text x="300" y="292" fill="#b8b8b8">close, volume: Vec&lt;f64&gt;</text>
+          <text x="300" y="308" fill="#b8b8b8">n_rows, n_cols: usize</text>
+          <line x1="290" y1="316" x2="520" y2="316" stroke="#3d3d3d"/>
+          <text x="300" y="332" fill="#909090">每个字段 n_rows × n_cols</text>
+          <text x="300" y="348" fill="#909090">列主序；空 Vec = 没提供</text>
+          <text x="300" y="364" fill="#909090">derive Default</text>
 
-        <polygon points="226,70 238,62 250,70 238,78" fill="#1f8a65"/>
-        <path d="M 250 70 H 300" fill="none" stroke="#1f8a65"/>
-        <text x="248" y="58" font-size="10" fill="#7dcea0">symbol</text>
-        <polygon points="226,206 238,198 250,206 238,214" fill="#1f8a65"/>
-        <path d="M 250 206 H 276 V 150 H 300" fill="none" stroke="#1f8a65"/>
-        <text x="258" y="196" font-size="10" fill="#7dcea0">venue</text>
+          <!-- Bar -->
+          <rect x="290" y="16" width="230" height="186" rx="6" fill="#262626" stroke="#3a7afe" stroke-dasharray="4 3"/>
+          <rect x="290" y="16" width="230" height="24" rx="6" fill="#1a2744"/>
+          <text x="405" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Bar</text>
+          <text x="300" y="56" fill="#b8b8b8">instrument_id: InstrumentId</text>
+          <text x="300" y="72" fill="#b8b8b8">open, high, low: Price</text>
+          <text x="300" y="88" fill="#b8b8b8">close: Price</text>
+          <text x="300" y="104" fill="#b8b8b8">volume: Quantity</text>
+          <text x="300" y="120" fill="#b8b8b8">ts_event: UnixNanos</text>
+          <text x="300" y="136" fill="#b8b8b8">ts_init: UnixNanos</text>
+          <line x1="290" y1="144" x2="520" y2="144" stroke="#3d3d3d"/>
+          <text x="300" y="160" fill="#909090">type UnixNanos = u64</text>
+          <text x="300" y="176" fill="#909090">回放按 ts_init 排序</text>
+          <text x="300" y="192" fill="#666666">阶段 2 的 on_bar</text>
 
-        <rect x="300" y="56" width="280" height="188" rx="6" fill="#262626" stroke="#1f8a65"/>
-        <rect x="300" y="56" width="280" height="28" rx="6" fill="#143028"/>
-        <rect x="300" y="76" width="280" height="8" fill="#143028"/>
-        <text x="312" y="75" font-size="11" fill="#7dcea0">«struct» InstrumentId</text>
-        <text x="312" y="106" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ symbol: Symbol</text>
-        <text x="312" y="124" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ venue: Venue</text>
-        <text x="312" y="146" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ new(symbol, venue)</text>
-        <text x="312" y="164" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ from_parts(symbol, venue)</text>
-        <text x="312" y="182" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ FromStr / Display</text>
-        <text x="312" y="210" font-size="10" fill="#909090">文本形式 SYMBOL.VENUE</text>
-        <text x="312" y="228" font-size="10" fill="#909090">从右边第一个点切开</text>
+          <!-- Price / Quantity -->
+          <rect x="564" y="16" width="210" height="186" rx="6" fill="#262626" stroke="#c9a227" stroke-dasharray="4 3"/>
+          <rect x="564" y="16" width="210" height="24" rx="6" fill="#2e2916"/>
+          <text x="669" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Price : Copy, Ord</text>
+          <text x="574" y="56" fill="#b8b8b8">raw: PriceRaw (= i64)</text>
+          <text x="574" y="72" fill="#b8b8b8">precision: u8</text>
+          <line x1="564" y1="80" x2="774" y2="80" stroke="#3d3d3d"/>
+          <text x="574" y="96" fill="#909090">const UNDEF  (raw i64::MAX)</text>
+          <text x="574" y="112" fill="#909090">const ERROR  (raw i64::MIN)</text>
+          <text x="574" y="128" fill="#909090">from_raw(raw, precision)</text>
+          <text x="574" y="144" fill="#909090">raw() precision()</text>
+          <text x="574" y="160" fill="#909090">is_sentinel()</text>
+          <text x="574" y="184" fill="#666666">PRECISION = 9 · SCALAR = 1e9</text>
+          <rect x="564" y="236" width="210" height="104" rx="6" fill="#262626" stroke="#c9a227" stroke-dasharray="4 3"/>
+          <rect x="564" y="236" width="210" height="24" rx="6" fill="#2e2916"/>
+          <text x="669" y="253" text-anchor="middle" fill="#f0f0f0" font-weight="600">struct Quantity : Copy, Ord</text>
+          <text x="574" y="276" fill="#b8b8b8">raw: QuantityRaw (= u64)</text>
+          <text x="574" y="292" fill="#b8b8b8">precision: u8</text>
+          <line x1="564" y1="300" x2="774" y2="300" stroke="#3d3d3d"/>
+          <text x="574" y="316" fill="#909090">from_raw · raw() · precision()</text>
+          <text x="574" y="332" fill="#666666">无符号：方向在 OrderSide</text>
 
-        <path d="M 580 120 H 640" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep)"/>
-        <path d="M 580 160 H 612 V 250 H 640" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep)"/>
-
-        <rect x="640" y="16" width="384" height="200" rx="6" fill="#262626" stroke="#7b64b8"/>
-        <rect x="640" y="16" width="384" height="28" rx="6" fill="#261f33"/>
-        <rect x="640" y="36" width="384" height="8" fill="#261f33"/>
-        <text x="652" y="35" font-size="11" fill="#c4b5e0">«struct» Bar</text>
-        <text x="652" y="64" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ instrument_id: InstrumentId</text>
-        <text x="652" y="82" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ open, high, low, close: Price</text>
-        <text x="652" y="100" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ volume: Quantity</text>
-        <text x="652" y="118" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ts_event: UnixNanos</text>
-        <text x="652" y="136" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ts_init: UnixNanos</text>
-        <text x="652" y="164" font-size="10" fill="#909090">UnixNanos = u64，Unix 纪元纳秒</text>
-        <text x="652" y="182" font-size="10" fill="#909090">ts_event 是交易所时间</text>
-        <text x="652" y="200" font-size="10" fill="#909090">回放排序用 ts_init</text>
-
-        <rect x="640" y="236" width="384" height="168" rx="6" fill="#262626" stroke="#7b64b8"/>
-        <rect x="640" y="236" width="384" height="28" rx="6" fill="#261f33"/>
-        <rect x="640" y="256" width="384" height="8" fill="#261f33"/>
-        <text x="652" y="255" font-size="11" fill="#c4b5e0">«struct» BarType</text>
-        <text x="652" y="284" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ instrument: InstrumentId</text>
-        <text x="652" y="302" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ step: u64</text>
-        <text x="652" y="320" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ aggregation, price_type, source: String</text>
-        <text x="652" y="338" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ FromStr / Display</text>
-        <text x="652" y="366" font-size="10" fill="#909090">SYMBOL.VENUE-STEP-AGG-PRICE-SOURCE</text>
-        <text x="652" y="384" font-size="10" fill="#909090">从右边切 4 段，品种名可以含 '-'</text>
-
-        <rect x="16" y="300" width="564" height="140" rx="6" fill="#262626" stroke="#7b64b8" stroke-dasharray="5 3"/>
-        <text x="28" y="326" font-size="11" fill="#c4b5e0">«struct» OhlcvPanel</text>
-        <text x="28" y="352" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ open, high, low, close, volume: Vec&lt;f64&gt;</text>
-        <text x="28" y="370" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ n_rows: usize</text>
-        <text x="28" y="388" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ n_cols: usize</text>
-        <text x="28" y="416" font-size="10" fill="#909090">列主序 f64。不是 Vec&lt;Bar&gt;，也不持有 Price</text>
+          <!-- enums -->
+          <rect x="808" y="16" width="216" height="398" rx="6" fill="#262626" stroke="#e07a3d"/>
+          <rect x="808" y="16" width="216" height="24" rx="6" fill="#33200f"/>
+          <text x="916" y="33" text-anchor="middle" fill="#f0f0f0" font-weight="600">mod enums（repr i8）</text>
+          <text x="818" y="56" fill="#f0b088">SizeType</text>
+          <text x="818" y="70" fill="#909090"> Amount=0 … TargetPercent=5</text>
+          <text x="818" y="88" fill="#f0b088">Direction</text>
+          <text x="818" y="102" fill="#909090"> LongOnly · ShortOnly · Both</text>
+          <text x="818" y="120" fill="#f0b088">OrderSide · OrderStatus</text>
+          <text x="818" y="134" fill="#909090"> Filled · Ignored · Rejected</text>
+          <text x="818" y="152" fill="#f0b088">StatusInfo（14 种）</text>
+          <text x="818" y="166" fill="#909090"> from_discriminant(i64)</text>
+          <text x="818" y="180" fill="#909090"> describe() → &amp;str</text>
+          <text x="818" y="198" fill="#f0b088">AccumulationMode</text>
+          <text x="818" y="214" fill="#f0b088">ConflictMode</text>
+          <text x="818" y="230" fill="#f0b088">DirectionConflictMode</text>
+          <text x="818" y="246" fill="#f0b088">OppositeEntryMode</text>
+          <text x="818" y="264" fill="#f0b088">StopEntryPrice · StopExitPrice</text>
+          <text x="818" y="280" fill="#f0b088">StopExitMode · StopUpdateMode</text>
+          <text x="818" y="298" fill="#f0b088">TradeDirection · TradeStatus</text>
+          <text x="818" y="316" fill="#f0b088">TradesType</text>
+          <text x="818" y="330" fill="#909090"> EntryTrades · ExitTrades · Positions</text>
+          <text x="818" y="348" fill="#f0b088">CashFlowKind</text>
+          <text x="818" y="362" fill="#909090"> Deposit · Earning · Dividend</text>
+          <line x1="808" y1="374" x2="1024" y2="374" stroke="#3d3d3d"/>
+          <text x="818" y="392" fill="#909090">全部 Copy + Eq + Hash</text>
+          <text x="818" y="406" fill="#909090">判别值由测试固定</text>
+        </g>
+        <path d="M70 120 V150" stroke="#8a8a8a" marker-start="url(#kdia)"/>
+        <path d="M192 120 V150" stroke="#8a8a8a" marker-start="url(#kdia)"/>
+        <path d="M131 236 V200" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#karr)"/>
+        <text x="138" y="222" font-size="10" fill="#909090">instrument</text>
+        <path d="M290 56 C 268 56, 268 60, 246 60" fill="none" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#karr)"/>
+        <path d="M520 80 H564" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#karr)"/>
+        <path d="M520 104 C 545 104, 545 270, 564 280" fill="none" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#karr)"/>
       </svg>
     </div>
-    <div class="foot"><p class="small" style="margin:0">来源：<code>crates/phasor-model/src/ids.rs</code>、<code>bar.rs</code>。其他 crate 的 src 使用 <code>OhlcvPanel</code>、<code>BarType</code>、<code>InstrumentId</code>。<code>Bar</code> 本身没有被它们引用，它留给阶段 2 一次一根的 <code>on_bar</code>。</p></div>
   </div>
 
-  <div class="panel">
-    <div class="cap">执行枚举。全部 repr(i8)，判别值即记录里的存储值。OrderStatus 在被忽略或拒绝时才带 StatusInfo</div>
-    <div class="body">
-      <svg width="1040" height="900" viewBox="0 0 1040 900" role="img" aria-label="执行枚举类图">
-        <defs>
-          <marker id="umlDep2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-            <path d="M1,1 L9,5 L1,9" fill="none" stroke="#b8b8b8" stroke-width="1.2"/>
-          </marker>
-        </defs>
-        <text x="16" y="18" font-size="11" fill="#909090">下单</text>
-
-        <rect x="16" y="28" width="250" height="176" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="28" y="48" font-size="11" fill="#e6c35c">«enum» SizeType</text>
-        <text x="28" y="72" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Amount = 0</text>
-        <text x="28" y="90" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Value = 1</text>
-        <text x="28" y="108" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Percent = 2</text>
-        <text x="28" y="126" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ TargetAmount = 3</text>
-        <text x="28" y="144" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ TargetValue = 4</text>
-        <text x="28" y="162" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ TargetPercent = 5</text>
-        <text x="28" y="186" font-size="10" fill="#909090">级联停在 Amount</text>
-
-        <rect x="280" y="28" width="180" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="292" y="48" font-size="11" fill="#e6c35c">«enum» Direction</text>
-        <text x="292" y="72" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ LongOnly = 0</text>
-        <text x="292" y="90" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ShortOnly = 1</text>
-        <text x="292" y="108" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Both = 2</text>
-
-        <rect x="474" y="28" width="160" height="104" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="486" y="48" font-size="11" fill="#e6c35c">«enum» OrderSide</text>
-        <text x="486" y="72" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Buy = 0</text>
-        <text x="486" y="90" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Sell = 1</text>
-
-        <rect x="648" y="28" width="200" height="136" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="660" y="48" font-size="11" fill="#e6c35c">«enum» OrderStatus</text>
-        <text x="660" y="72" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Filled = 0</text>
-        <text x="660" y="90" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Ignored = 1</text>
-        <text x="660" y="108" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Rejected = 2</text>
-        <text x="660" y="136" font-size="10" fill="#909090">Rejected 不是 Err</text>
-
-        <path d="M 748 164 V 214" fill="none" stroke="#b8b8b8" stroke-dasharray="4 3" marker-end="url(#umlDep2)"/>
-        <text x="756" y="194" font-size="10" fill="#b8b8b8">Ignored / Rejected 才有原因</text>
-
-        <rect x="16" y="214" width="1008" height="150" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="28" y="236" font-size="11" fill="#e6c35c">«enum» StatusInfo</text>
-        <text x="150" y="236" font-size="10" fill="#909090">from_discriminant(i64) -&gt; Option；未知值和 -1 都是 None</text>
-        <text x="28" y="262" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">0 SizeNaN</text>
-        <text x="200" y="262" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">1 PriceNaN</text>
-        <text x="380" y="262" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">2 ValPriceNaN</text>
-        <text x="580" y="262" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">3 ValueNaN</text>
-        <text x="760" y="262" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">4 ValueZeroNeg</text>
-        <text x="28" y="282" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">5 SizeZero</text>
-        <text x="200" y="282" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">6 NoCashShort</text>
-        <text x="380" y="282" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">7 NoCashLong</text>
-        <text x="580" y="282" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">8 NoOpenPosition</text>
-        <text x="760" y="282" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">9 MaxSizeExceeded</text>
-        <text x="28" y="302" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">10 RandomEvent</text>
-        <text x="200" y="302" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">11 CantCoverFees</text>
-        <text x="380" y="302" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">12 MinSizeNotReached</text>
-        <text x="580" y="302" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">13 PartialFill</text>
-        <text x="28" y="336" font-size="10" fill="#909090">+ describe() -&gt; &amp;'static str。日志里已成交的订单位写 -1，因为没有需要解释的原因。</text>
-
-        <text x="16" y="392" font-size="11" fill="#909090">同一根 K 线上的信号</text>
-        <rect x="16" y="404" width="246" height="132" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="28" y="424" font-size="11" fill="#e6c35c">«enum» AccumulationMode</text>
-        <text x="28" y="448" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Disabled = 0</text>
-        <text x="28" y="466" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Both = 1</text>
-        <text x="28" y="484" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ AddOnly = 2</text>
-        <text x="28" y="502" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ RemoveOnly = 3</text>
-
-        <rect x="274" y="404" width="246" height="148" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="286" y="424" font-size="11" fill="#e6c35c">«enum» ConflictMode</text>
-        <text x="286" y="448" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Ignore = 0</text>
-        <text x="286" y="466" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Entry = 1</text>
-        <text x="286" y="484" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Exit = 2</text>
-        <text x="286" y="502" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Adjacent = 3</text>
-        <text x="286" y="520" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Opposite = 4</text>
-
-        <rect x="532" y="404" width="246" height="148" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="544" y="424" font-size="11" fill="#e6c35c">«enum» DirectionConflictMode</text>
-        <text x="544" y="448" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Ignore = 0</text>
-        <text x="544" y="466" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Long = 1</text>
-        <text x="544" y="484" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Short = 2</text>
-        <text x="544" y="502" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Adjacent = 3</text>
-        <text x="544" y="520" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Opposite = 4</text>
-
-        <rect x="790" y="404" width="234" height="148" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="802" y="424" font-size="11" fill="#e6c35c">«enum» OppositeEntryMode</text>
-        <text x="802" y="448" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Ignore = 0</text>
-        <text x="802" y="466" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Close = 1</text>
-        <text x="802" y="484" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ CloseReduce = 2</text>
-        <text x="802" y="502" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Reverse = 3</text>
-        <text x="802" y="520" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ReverseReduce = 4</text>
-
-        <text x="16" y="580" font-size="11" fill="#909090">止损</text>
-        <rect x="16" y="592" width="246" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="28" y="612" font-size="11" fill="#e6c35c">«enum» StopEntryPrice</text>
-        <text x="28" y="636" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ValPrice = 0</text>
-        <text x="28" y="654" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Price = 1</text>
-        <text x="28" y="672" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ FillPrice = 2</text>
-        <text x="28" y="690" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Close = 3</text>
-
-        <rect x="274" y="592" width="246" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="286" y="612" font-size="11" fill="#e6c35c">«enum» StopExitPrice</text>
-        <text x="286" y="636" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ StopLimit = 0</text>
-        <text x="286" y="654" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ StopMarket = 1</text>
-        <text x="286" y="672" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Price = 2</text>
-        <text x="286" y="690" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Close = 3</text>
-
-        <rect x="532" y="592" width="246" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="544" y="612" font-size="11" fill="#e6c35c">«enum» StopExitMode</text>
-        <text x="544" y="636" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Close = 0</text>
-        <text x="544" y="654" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ CloseReduce = 1</text>
-        <text x="544" y="672" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Reverse = 2</text>
-        <text x="544" y="690" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ReverseReduce = 3</text>
-
-        <rect x="790" y="592" width="234" height="104" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="802" y="612" font-size="11" fill="#e6c35c">«enum» StopUpdateMode</text>
-        <text x="802" y="636" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Keep = 0</text>
-        <text x="802" y="654" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Override = 1</text>
-        <text x="802" y="672" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ OverrideNaN = 2</text>
-
-        <text x="16" y="740" font-size="11" fill="#909090">成交视图与现金</text>
-        <rect x="16" y="752" width="246" height="104" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="28" y="774" font-size="11" fill="#e6c35c">«enum» TradeDirection</text>
-        <text x="28" y="798" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Long = 0</text>
-        <text x="28" y="816" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Short = 1</text>
-
-        <rect x="274" y="752" width="246" height="104" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="286" y="774" font-size="11" fill="#e6c35c">«enum» TradeStatus</text>
-        <text x="286" y="798" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Open = 0</text>
-        <text x="286" y="816" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Closed = 1</text>
-
-        <rect x="532" y="752" width="246" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="544" y="774" font-size="11" fill="#e6c35c">«enum» TradesType</text>
-        <text x="544" y="798" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ EntryTrades = 0</text>
-        <text x="544" y="816" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ ExitTrades = 1</text>
-        <text x="544" y="834" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Positions = 2</text>
-
-        <rect x="790" y="752" width="234" height="120" rx="6" fill="#262626" stroke="#c9a227"/>
-        <text x="802" y="774" font-size="11" fill="#e6c35c">«enum» CashFlowKind</text>
-        <text x="802" y="798" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Deposit = 0</text>
-        <text x="802" y="816" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Earning = 1</text>
-        <text x="802" y="834" font-size="11" font-family="ui-monospace, Menlo, monospace" fill="#d0d0d0">+ Dividend = 2</text>
-      </svg>
-    </div>
-    <div class="foot"><p class="small" style="margin:0">来源：<code>crates/phasor-model/src/enums.rs</code>。十七个枚举都是 <code>repr(i8)</code>。判别值写进记录数组，测试把其中几个钉死，改数字就是记录格式的变更。</p></div>
-  </div>
-
-  <h2 id="types">核心类型</h2>
-  <p class="muted">成员与 <code>crates/phasor-model/src</code> 一致。crate 根再导出 <code>Bar</code>、<code>BarType</code>、<code>OhlcvPanel</code> 和全部枚举。</p>
-
-  <h3>Price、Quantity</h3>
-  <p class="small">types.rs · 缩放整数。阶段 1 的模拟循环仍用 f64；这两个类型由门面再导出</p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>成员</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">PriceRaw / QuantityRaw</td><td>别名，现在是 <code>i64</code> 和 <code>u64</code>。高精度（例如 18 位链上数量）把价格改成 <code>i128</code> 时，改的是别名。</td></tr>
-        <tr><td class="mono">PRECISION / SCALAR</td><td>默认 9 位小数。<code>SCALAR</code> 是 <code>1e9</code> 的 f64，给需要标度的调用方用。每个实例仍可以带自己的 precision。</td></tr>
-        <tr><td class="mono">Price::UNDEF</td><td><code>raw = i64::MAX</code>，precision 0。表示没有价格。和 0、和 NaN 都不同。</td></tr>
-        <tr><td class="mono">Price::ERROR</td><td><code>raw = i64::MIN</code>，precision 0。表示价格算不出来。<code>is_sentinel</code> 对这两个 raw 返回 true。</td></tr>
-        <tr><td class="mono">from_raw / raw / precision</td><td>唯一的构造和读取路径。没有从 f64 来回转换的方法，也没有加减。</td></tr>
-        <tr><td class="mono">Quantity</td><td>无符号。没有哨兵。空头还是多头由 <code>OrderSide</code> 表示，数量本身不为负。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>Symbol、Venue、InstrumentId</h3>
-  <p class="small">ids.rs · <code>FromStr</code> 的错误类型是 <code>String</code></p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>成员</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">Symbol::new / Venue::new</td><td>把名字放进 <code>Arc&lt;str&gt;</code>。<code>as_str</code> 借出内容。同名比较相等。</td></tr>
-        <tr><td class="mono">InstrumentId::new</td><td>直接组装两部分，不重新解释字符串。</td></tr>
-        <tr><td class="mono">from_parts(symbol, venue)</td><td>要求两边都非空，且 venue 不含 <code>.</code>。然后走 <code>SYMBOL.VENUE</code> 的解析。</td></tr>
-        <tr><td class="mono">FromStr</td><td>从右边第一个 <code>.</code> 切开。任一侧为空，或出现空白、控制字符、<code>/</code>、<code>\</code>，都拒绝。品种名因此可以含点，场地名不能。</td></tr>
-        <tr><td class="mono">Display</td><td><code>SYMBOL.VENUE</code>。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>Bar、BarType、OhlcvPanel</h3>
-  <p class="small">bar.rs · <code>UnixNanos = u64</code></p>
-  <div class="wrap types">
-    <table>
-      <thead><tr><th>类型</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">Bar</td><td>一根 K 线。四个价格是 <code>Price</code>，成交量是 <code>Quantity</code>，品种是 <code>InstrumentId</code>。<code>ts_event</code> 是交易所收盘时刻，<code>ts_init</code> 是引擎看得到它的时刻。其他 crate 的 src 目前不读这个结构体。</td></tr>
-        <tr><td class="mono">OhlcvPanel</td><td>五块 <code>Vec&lt;f64&gt;</code> 加上 <code>n_rows</code>、<code>n_cols</code>，派生 <code>Default</code>。列主序，一列的历史是连续的。因子输入和数据准备读的是它。</td></tr>
-        <tr><td class="mono">BarType</td><td>一条序列的身份：品种、步长、聚合方式、价格类型、来源。显示为 <code>SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE</code>。</td></tr>
-        <tr><td class="mono">BarType::from_str</td><td>从右边按 <code>-</code> 切四刀，剩下的整段再解析成 <code>InstrumentId</code>，所以品种名可以含 <code>-</code>。step 必须非 0。来源只接受 INTERNAL、EXTERNAL。价格只接受 BID、ASK、MID、LAST。聚合方式是固定的时间桶或 TICK / VOLUME / VALUE 及其 IMBALANCE、RUNS。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h3>枚举</h3>
-  <p class="small">enums.rs · 全部 <code>Copy + Eq + Hash + repr(i8)</code>。只有 <code>StatusInfo</code> 有方法</p>
-  <div class="wrap types-3">
-    <table>
-      <thead><tr><th>枚举</th><th>判别值</th><th>含义</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">SizeType</td><td class="mono">Amount 0 · Value 1 · Percent 2 · TargetAmount 3 · TargetValue 4 · TargetPercent 5</td><td>请求规模怎么解释。Amount 是单位个数，也是级联的终点。Value 是现金，要除以估值价。Percent 是可用现金的比例，落在 [0, 1]。三个 Target 是相对当前持仓或组合价值的目标，先变成差额。改写发生在 phasor-exec，不在这个类型里。</td></tr>
-        <tr><td class="mono">Direction</td><td class="mono">LongOnly 0 · ShortOnly 1 · Both 2</td><td>一列允许哪一侧。LongOnly 拒绝做空，ShortOnly 拒绝做多，Both 可以穿过零反手。</td></tr>
-        <tr><td class="mono">OrderSide</td><td class="mono">Buy 0 · Sell 1</td><td>这笔订单实际打在哪一侧。记录里的 side 存的就是这个判别值。</td></tr>
-        <tr><td class="mono">OrderStatus</td><td class="mono">Filled 0 · Ignored 1 · Rejected 2</td><td>Filled 是全部或部分成交。Ignored 是无事可做。Rejected 是做不了，原因另记。三者都是返回值。</td></tr>
-        <tr><td class="mono">StatusInfo</td><td class="mono">0 SizeNaN … 13 PartialFill</td><td>十四条原因，见类图上的名字。<code>describe</code> 返回英文短句。<code>from_discriminant</code> 接受 i64，因为记录数组加宽了存储；<code>-1</code> 和任何未列出的值返回 <code>None</code>。</td></tr>
-        <tr><td class="mono">AccumulationMode</td><td class="mono">Disabled 0 · Both 1 · AddOnly 2 · RemoveOnly 3</td><td>同向信号遇到已有持仓时：不动、可加可减、只加、只减。</td></tr>
-        <tr><td class="mono">ConflictMode</td><td class="mono">Ignore 0 · Entry 1 · Exit 2 · Adjacent 3 · Opposite 4</td><td>同一根 K 线上入场和出场同时出现。Adjacent 让贴近当前持仓的一侧赢，Opposite 让相反的一侧赢。</td></tr>
-        <tr><td class="mono">DirectionConflictMode</td><td class="mono">Ignore 0 · Long 1 · Short 2 · Adjacent 3 · Opposite 4</td><td>多头信号和空头信号同时出现。Adjacent / Opposite 相对当前持仓的方向。</td></tr>
-        <tr><td class="mono">OppositeEntryMode</td><td class="mono">Ignore 0 · Close 1 · CloseReduce 2 · Reverse 3 · ReverseReduce 4</td><td>入场信号和持仓方向相反。Close 只平仓。Reverse 平掉再开反向。带 Reduce 的两个在平仓或反手之后再走累积规则。</td></tr>
-        <tr><td class="mono">StopEntryPrice</td><td class="mono">ValPrice 0 · Price 1 · FillPrice 2 · Close 3</td><td>开仓时止损锚定哪一个价：估值价、请求价、实际成交价、这根 K 线的收盘价。</td></tr>
-        <tr><td class="mono">StopExitPrice</td><td class="mono">StopLimit 0 · StopMarket 1 · Price 2 · Close 3</td><td>止损触发后以什么价成交。StopLimit 是止损价本身，不加滑点。StopMarket 在止损价上加滑点。</td></tr>
-        <tr><td class="mono">StopExitMode</td><td class="mono">Close 0 · CloseReduce 1 · Reverse 2 · ReverseReduce 3</td><td>触发后对持仓做什么。语义和 OppositeEntryMode 里同名的变体一样，只是起因是止损而不是反向信号。</td></tr>
-        <tr><td class="mono">StopUpdateMode</td><td class="mono">Keep 0 · Override 1 · OverrideNaN 2</td><td>新的止损值要不要替换已经生效的。Keep 保留旧的。Override 替换，但新值是 NaN 时不动。OverrideNaN 连 NaN 也接受，NaN 用来清除止损。</td></tr>
-        <tr><td class="mono">TradeDirection</td><td class="mono">Long 0 · Short 1</td><td>一笔成交记录在哪一侧。和 OrderSide 不是同一个枚举：后者是买单或卖单，前者是这笔交易的多空。</td></tr>
-        <tr><td class="mono">TradeStatus</td><td class="mono">Open 0 · Closed 1</td><td>模拟结束时这笔交易是否还开着。</td></tr>
-        <tr><td class="mono">TradesType</td><td class="mono">EntryTrades 0 · ExitTrades 1 · Positions 2</td><td>同一套记录的三种看法。EntryTrades 每次入场一条，出场按 FIFO 分回。ExitTrades 每次出场一条，入场成本平均进去。Positions 把共享父单的成交合成一个持仓。</td></tr>
-        <tr><td class="mono">CashFlowKind</td><td class="mono">Deposit 0 · Earning 1 · Dividend 2</td><td>没有成交却动了现金。Deposit 是开盘的入金或出金，改变价值，不算收益。Earning 是收盘计入的利息、费用或其他损益。Dividend 是开盘持仓乘以每股分红，空头支付它。后两种算进收益。</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <h2>三条不能绕开的规则</h2>
-  <div class="note" style="margin-bottom:10px">
-    判别值是记录格式的一部分。<code>enums.rs</code> 的测试把 <code>SizeType::TargetPercent = 5</code>、<code>Direction::Both = 2</code>、<code>OrderStatus::Rejected = 2</code>、<code>StatusInfo::PartialFill = 13</code>、<code>TradesType::Positions = 2</code> 和三种 <code>CashFlowKind</code> 钉死。改数字就要同时改已经写出去的记录和对照夹具。
-  </div>
-  <pre>OrderStatus::Rejected  !=  Err          // 拒单是状态，不变量破坏才是 Error
-Price::UNDEF.raw        ==  i64::MAX     // 不是 Option，也不是 NaN
-OhlcvPanel.close        :   Vec&lt;f64&gt;     // 阶段 1 不走 Price
-ts_init                                  // 回放排序；ts_event 是交易所时间</pre>
-
+  <!-- ============================================================ -->
   <h2 id="table">谁依赖它，用来做什么</h2>
   <div class="wrap">
     <table>
@@ -567,253 +531,413 @@ ts_init                                  // 回放排序；ts_event 是交易所
       <tbody id="rows"></tbody>
     </table>
   </div>
-  <p class="small" style="margin-top:8px">phasor 的 prelude 再导出全部枚举、InstrumentId、Symbol、Venue、Price、Quantity。<code>pub use phasor_model as model</code> 让其余类型从 <code>phasor::model</code> 出去。prelude 不导出 Bar、BarType、OhlcvPanel。</p>
+
+  <h2 id="rules">不能绕开的规则</h2>
+  <div class="grid2">
+    <article class="card"><h3>判别值是磁盘格式</h3><p>枚举以整数写进 <code>OrderRecords</code>、日志和 <code>CashRecords</code>，被 Python 层和差分测试读回。测试 <code>discriminants_are_pinned</code> 固定了其中几个；新增变体只能追加在末尾，不能重排。</p></div>
+    <article class="card"><h3>撮合枚举的语义跟参考实现走</h3><p>除了 <code>CashFlowKind</code>，每个撮合枚举的变体和含义都对应 vectorbt。想“改进”某个模式的语义，等于让 <code>tests/fixtures/*.tsv</code> 对不上——那些夹具不能为了让改动通过而重新生成。</p></div>
+    <article class="card"><h3>解析从右边切</h3><p><code>InstrumentId</code> 用 <code>rsplit_once('.')</code>，<code>BarType</code> 用 <code>rsplitn(5, '-')</code>：标的名可以含 <code>.</code> 和 <code>-</code>，交易所名不能含 <code>.</code>（<code>from_parts</code> 显式拒绝）。改成从左边切会让 <code>BTC-USDT</code> 这类标的全部解析错。</p></div>
+    <article class="card"><h3>定点类型先别拿来算</h3><p>阶段 1 没有任何地方构造 <code>Price</code> / <code>Quantity</code>，也没有对齐精度的运算。要用它们之前，先补上“按精度对齐”的比较与算术，否则 derive 出的 <code>Ord</code> 会在精度不同时给出错误的大小关系。</p></div>
+  </div>
 
   <h2>源文件</h2>
   <div class="wrap">
     <table>
       <thead><tr><th>文件</th><th>内容</th></tr></thead>
       <tbody>
-        <tr><td class="mono">crates/phasor-model/src/lib.rs</td><td>两条谱系的说明，以及模块和再导出。</td></tr>
-        <tr><td class="mono">src/types.rs</td><td>Price、Quantity、PriceRaw、QuantityRaw、PRECISION、SCALAR。</td></tr>
-        <tr><td class="mono">src/ids.rs</td><td>Symbol、Venue、InstrumentId。</td></tr>
-        <tr><td class="mono">src/enums.rs</td><td>十七个 repr(i8) 枚举。StatusInfo::from_discriminant 和 describe。</td></tr>
-        <tr><td class="mono">src/bar.rs</td><td>Bar、OhlcvPanel、BarType、UnixNanos。</td></tr>
+        <tr><td class="mono">crates/phasor-model/src/lib.rs</td><td>两条血统的说明；把 Bar、BarType、OhlcvPanel 和全部枚举再导出到 crate 根。</td></tr>
+        <tr><td class="mono">src/enums.rs</td><td>17 个枚举：SizeType（:14）… StatusInfo（:73，from_discriminant :113，describe :135）… TradesType（:298）、CashFlowKind（:315）；判别值测试。</td></tr>
+        <tr><td class="mono">src/ids.rs</td><td>Symbol（:17）、Venue（:34）、InstrumentId（:54，from_parts :63）、Display 与 FromStr。</td></tr>
+        <tr><td class="mono">src/bar.rs</td><td>UnixNanos（:16）、Bar（:24）、OhlcvPanel（:48）、BarType（:67）及其 FromStr / Display。</td></tr>
+        <tr><td class="mono">src/types.rs</td><td>PriceRaw / QuantityRaw 别名、PRECISION、SCALAR、Price（:42，UNDEF / ERROR 哨兵）、Quantity（:87）。</td></tr>
+        <tr><td class="mono">docs/ARCHITECTURE.zh-CN.md §3.6</td><td>领域模型一节；§7.3 数量换算链，§9.5 三种交易视图，§4.1 catalog 目录布局。</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small" style="margin-top:14px">数值容差和列布局在 <a href="phasor-core.html">phasor-core</a>。那里把本 crate 画成一条虚线：清单里有依赖，源码没用。</p>
 </main>
-<script>
-const COLORS = { types: "#3a7afe", ids: "#1f8a65", enums: "#c9a227", bar: "#7b64b8" };
-const MODULES = [
-  { id: "types", name: "types", blurb: "定点价格和数量。阶段 1 的循环仍用 f64。Price 和 Quantity 由门面再导出，其他 crate 的 src 不调用它们。" },
-  { id: "ids", name: "ids", blurb: "Symbol、Venue、InstrumentId。数据准备和 Python 边界用它们标识品种，门面再导出。" },
-  { id: "enums", name: "enums", blurb: "执行状态机的判别值。写进记录，也被模拟、分析和 Python 解析读取。拒单不是 Error。" },
-  { id: "bar", name: "bar", blurb: "OhlcvPanel 是阶段 1 的列主序 f64 面板。BarType 标识一条序列。Bar 结构体留给阶段 2，其他 crate 的 src 还没有引用它。" },
-];
-const CRATES = [
-  {
-    id: "phasor-exec",
-    uses: ["enums"],
-    role: "执行内核。订单和账户状态携带 Direction、SizeType、OrderSide、OrderStatus、StatusInfo。kernel 把 SizeType 逐级改写，直到剩下 Amount，并用 Direction 拒绝不允许的一侧。成交、忽略、拒绝都写成 OrderStatus。lib.rs 再导出这五个枚举。",
-  },
-  {
-    id: "phasor-sim",
-    uses: ["enums"],
-    role: "模拟循环。groups 用 Direction 和 SizeType 描述一列。signals 用 AccumulationMode、ConflictMode、DirectionConflictMode、OppositeEntryMode、StopExitMode 解同一根 K 线。from_signals 还读 StopEntryPrice、StopExitPrice、StopUpdateMode。cash 把入金、收益、分红记成 CashFlowKind。from_orders 用 OrderStatus::Filled 判断成交，用 StatusInfo::describe 写原因。",
-  },
-  {
-    id: "phasor-records",
-    uses: ["enums"],
-    role: "记录。RecordSink 的 side 是 OrderSide。日志保存 OrderStatus 和 StatusInfo 的判别值。现金记录用 CashFlowKind。trades 按 OrderSide 配对，写出 TradeDirection 和 TradeStatus。excursions 用这两个枚举算 MAE 和 MFE。StatusInfo 以 StatusInfoLookup 再导出，用来把存盘的整数还原成原因。",
-  },
-  {
-    id: "phasor-analysis",
-    uses: ["enums"],
-    role: "分析。series 用 OrderSide 的判别值恢复持仓符号，并用 Direction 解释一列允许的方向。portfolio 按 TradesType 在三种成交视图之间选择。stats 用 TradeStatus 区分模拟结束时仍开着的交易。",
-  },
-  {
-    id: "phasor-expr",
-    uses: ["bar"],
-    role: "因子输入。FactorInputs::from_ohlcv 从 OhlcvPanel 取出 open、high、low、close、volume。空的字段会跳过。不用 Price，也不读 Bar。",
-  },
-  {
-    id: "phasor-data",
-    uses: ["bar", "ids"],
-    role: "本地数据准备。源的键解析成 BarType，列上的 symbol 和 venue 用 Symbol、Venue 和 InstrumentId::from_parts 拼成品种。对齐后的行情写成 OhlcvPanel。",
-  },
-  {
-    id: "phasor-py",
-    uses: ["enums", "ids", "bar"],
-    role: "Python 边界。parse 把字符串映射成 SizeType、Direction、AccumulationMode、TradesType，拼写表逐项测试。信号入口只接受 Amount、Value、Percent，目标规模要走 from_orders。data 导出 InstrumentId 和 BarType。",
-  },
-  {
-    id: "phasor",
-    uses: ["enums", "ids", "types"],
-    role: "门面。prelude 再导出全部枚举、InstrumentId、Symbol、Venue、Price、Quantity。pub use phasor_model as model 把整个 crate 暴露为 phasor::model。prelude 本身不导出 Bar、BarType、OhlcvPanel。",
-  },
-];
 
-const svg = document.getElementById("dep-graph");
+<script>
+/* ---------------- shared helpers ---------------- */
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (name, attrs) => { const n = document.createElementNS(NS, name); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+function seg(hostId, items, onPick) {
+  const host = document.getElementById(hostId);
+  const lbl = host.querySelector(".lbl");
+  host.innerHTML = "";
+  if (lbl) host.appendChild(lbl);
+  const buttons = items.map((it, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = it.name;
+    b.addEventListener("click", () => select(i));
+    host.appendChild(b);
+    return b;
+  });
+  function select(i) {
+    buttons.forEach((b, k) => b.classList.toggle("on", k === i));
+    onPick(items[i], i);
+  }
+  return { select };
+}
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/* ---------------- dependency graph ---------------- */
+const COLORS = { enums: "#e07a3d", ids: "#2fbfa8", bar: "#3a7afe", types: "#c9a227" };
+const MODULES = [
+  { id: "enums", sub: "17 个 repr(i8) 枚举", blurb: "撮合状态机的全部选项和结果。每个下游的模拟、记录、分析都按它们分支，并把判别值写进记录。" },
+  { id: "ids", sub: "InstrumentId · Symbol · Venue", blurb: "标的标识。phasor-data 用它做 catalog 的目录键和按标的对齐；Python 层把字符串解析成它。" },
+  { id: "bar", sub: "OhlcvPanel · BarType · Bar", blurb: "行情。OhlcvPanel 是因子求值和数据加载之间的接口；BarType 是 K 线序列的身份。Bar 结构体还没有使用者。" },
+  { id: "types", sub: "Price · Quantity（定点）", blurb: "定点数值类型，为阶段 2 的事件驱动层预留。工作区里没有任何地方构造它们，只有门面的 prelude 再导出。" },
+];
+const DOWN = [
+  { id: "phasor-exec", sub: "撮合内核", uses: ["enums"],
+    role: "kernel.rs、types.rs：Order 带 SizeType / Direction，OrderResult 带 OrderSide / OrderStatus / StatusInfo；lib.rs 把这五个枚举再导出给调用方。" },
+  { id: "phasor-sim", sub: "模拟循环", uses: ["enums"],
+    role: "from_signals.rs、signals.rs 用 AccumulationMode、ConflictMode、DirectionConflictMode、OppositeEntryMode 和四个 Stop* 枚举；from_orders.rs 用 OrderStatus::Filled 与 StatusInfo::describe 报原因；cash.rs 用 CashFlowKind。" },
+  { id: "phasor-records", sub: "记录与交易", uses: ["enums"],
+    role: "logs.rs 把 SizeType、Direction、OrderStatus、StatusInfo 存成整数并用 from_discriminant 读回；trades.rs、excursions.rs 用 TradeDirection / TradeStatus；cash.rs 的 CashRecords 存 CashFlowKind。" },
+  { id: "phasor-analysis", sub: "分析", uses: ["enums"],
+    role: "portfolio.rs 用 TradesType 选交易视图（默认 ExitTrades），series.rs 用 Direction / OrderSide 重建仓位，stats.rs 用 TradeStatus 区分已平仓交易。" },
+  { id: "phasor-data", sub: "数据加载", uses: ["ids", "bar"],
+    role: "lib.rs 把 catalog 的键解析成 BarType（K 线）或 InstrumentId（辅助数据），用 InstrumentId::from_parts 校验每行的标的，输出 OhlcvPanel。" },
+  { id: "phasor-expr", sub: "因子 DSL", uses: ["bar"],
+    role: "eval.rs 的 FactorInputs::from_ohlcv(&OhlcvPanel) 把面板借成因子的输入；alpha360.rs、polars_backend.rs 同样从 OhlcvPanel 取列。" },
+  { id: "phasor-py", sub: "Python 绑定", uses: ["enums", "ids", "bar"],
+    role: "parse.rs 把 Python 传来的字符串解析成 SizeType、Direction、AccumulationMode、TradesType；data.rs 用 BarType 和 InstrumentId 暴露 catalog。" },
+  { id: "phasor", sub: "门面 · prelude", uses: ["enums", "ids", "types", "bar"],
+    role: "pub use phasor_model as model；prelude 放 enums::*、InstrumentId / Symbol / Venue、Price / Quantity。examples/factor_sweep.rs 和 tests/factor_path.rs 构造 OhlcvPanel。" },
+];
+const depSvg = document.getElementById("dep-graph");
 const detail = document.getElementById("detail");
 let pinned = null;
-let paths = [];
-let nodes = [];
-
+const paths = [], gnodes = [];
 function nodeBox(id) {
-  if (id === "std") return { x: 16, y: 150, w: 128, h: 40 };
-  if (id === "phasor-core") return { x: 16, y: 230, w: 128, h: 52 };
-  if (id === "model") return { x: 176, y: 28, w: 196, h: 504 };
+  if (id === "phasor-core") return { x: 16, y: 206, w: 170, h: 56 };
   const mi = MODULES.findIndex((m) => m.id === id);
-  if (mi >= 0) return { x: 190, y: 112 + mi * 88, w: 168, h: 72 };
-  const ci = CRATES.findIndex((c) => c.id === id);
-  const h = 46, gap = 8;
-  const total = CRATES.length * h + (CRATES.length - 1) * gap;
-  const y0 = (560 - total) / 2;
-  return { x: 748, y: y0 + ci * (h + gap), w: 268, h };
+  if (mi >= 0) return { x: 300, y: 92 + mi * 80, w: 248, h: 56 };
+  const di = DOWN.findIndex((d) => d.id === id);
+  return { x: 790, y: 36 + di * 54, w: 234, h: 44 };
 }
-
 function edgeList() {
-  const edges = [
-    { from: "std", to: "model", kind: "std" },
-    { from: "phasor-core", to: "model", kind: "declared" },
-  ];
-  for (const c of CRATES) for (const u of c.uses) edges.push({ from: u, to: c.id, kind: u });
+  const edges = MODULES.map((m) => ({ from: "phasor-core", to: m.id, mod: m.id, up: true }));
+  for (const d of DOWN) for (const u of d.uses) edges.push({ from: u, to: d.id, mod: u });
   return edges;
 }
-
-function active(focus, edge) {
-  if (!focus) {
-    if (edge.kind === "enums") return 0.22;
-    if (edge.kind === "declared") return 0.85;
-    return 0.75;
-  }
-  if (focus.kind === "mod") return edge.kind === focus.id ? 0.95 : 0.06;
-  if (focus.kind === "std") return edge.kind === "std" ? 0.95 : 0.06;
-  if (focus.kind === "up") return edge.kind === "declared" ? 0.95 : 0.06;
-  if (focus.kind === "crate") {
-    const crate = CRATES.find((c) => c.id === focus.id);
-    return edge.to === focus.id && crate.uses.includes(edge.kind) ? 0.95 : 0.06;
-  }
-  return 0.2;
+function edgeOpacity(focus, e) {
+  if (!focus) return e.up ? 0.3 : 0.6;
+  if (focus.kind === "mod") return e.mod === focus.id ? 0.95 : 0.04;
+  if (focus.kind === "up") return e.up ? 0.85 : 0.04;
+  return e.to === focus.id ? 0.95 : 0.04;
 }
-
 function applyFocus(focus) {
-  for (const p of paths) p.el.setAttribute("opacity", String(active(focus, p)));
-  for (const n of nodes) {
+  for (const p of paths) p.el.setAttribute("opacity", String(edgeOpacity(focus, p)));
+  for (const n of gnodes) {
     const on = focus && focus.id === n.id;
     n.rect.setAttribute("stroke-width", on ? "1.8" : "1");
-    if (n.kind === "mod") {
-      n.rect.setAttribute("fill", on ? COLORS[n.id] : "#262626");
-      n.title.setAttribute("fill", on ? "#ffffff" : "#f0f0f0");
-    } else {
-      n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d");
-      n.rect.setAttribute("fill", on ? "#303030" : "#262626");
-    }
+    if (n.kind === "mod") n.rect.setAttribute("fill", on ? COLORS[n.id] + "44" : "#262626");
+    else { n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d"); n.rect.setAttribute("fill", on ? "#303030" : "#262626"); }
   }
-  for (const b of document.querySelectorAll("#legend button")) {
-    b.classList.toggle("on", Boolean(focus && focus.kind === "mod" && b.dataset.id === focus.id));
-  }
+  for (const b of document.querySelectorAll("#legend button")) b.classList.toggle("on", Boolean(focus && focus.kind === "mod" && b.dataset.id === focus.id));
 }
-
-function build() {
-  const ns = "http://www.w3.org/2000/svg";
-  function el(name, attrs) {
-    const node = document.createElementNS(ns, name);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-    return node;
-  }
-  svg.appendChild(el("rect", { x: 176, y: 28, width: 196, height: 504, rx: 10, fill: "#181818", stroke: "#303030" }));
-  svg.appendChild(el("text", { x: 274, y: 52, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-model";
-  svg.appendChild(el("text", { x: 274, y: 68, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "src/ 四个模块";
-
+function buildGraph() {
+  depSvg.appendChild(svgEl("rect", { x: 284, y: 40, width: 280, height: 390, rx: 10, fill: "#181818", stroke: "#303030" }));
+  depSvg.appendChild(svgEl("text", { x: 424, y: 62, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-model";
+  depSvg.appendChild(svgEl("text", { x: 424, y: 78, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "src/ 四个模块，lib.rs 再导出 Bar / BarType / OhlcvPanel 与全部枚举";
+  depSvg.appendChild(svgEl("text", { x: 101, y: 196, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "上游（只是声明）";
+  depSvg.appendChild(svgEl("text", { x: 907, y: 24, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "下游（只统计 src/）";
   for (const e of edgeList()) {
-    const a = nodeBox(e.from);
-    const b = nodeBox(e.to);
-    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2;
-    const mid = (x1 + x2) / 2;
-    const path = el("path", {
-      d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-      fill: "none",
-      stroke: COLORS[e.kind] || "#888",
-      "stroke-width": e.kind === "declared" ? "1.2" : "1.5",
-      "stroke-dasharray": e.kind === "declared" ? "4 3" : "",
-    });
-    svg.appendChild(path);
+    const a = nodeBox(e.from), b = nodeBox(e.to);
+    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mid = (x1 + x2) / 2;
+    const path = svgEl("path", { d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`, fill: "none", stroke: e.up ? "#8a8a8a" : COLORS[e.mod], "stroke-width": "1.5" });
+    if (e.up) path.setAttribute("stroke-dasharray", "5 4");
+    depSvg.appendChild(path);
     paths.push({ el: path, ...e });
   }
-
-  function addNode(id, kind, box, title, sub) {
-    const g = el("g", { style: "cursor:pointer" });
-    const stroke = kind === "mod" ? COLORS[id] : "#3d3d3d";
-    const rect = el("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 6, fill: "#262626", stroke, "stroke-width": 1 });
-    const ty = sub ? box.y + box.h / 2 - 1 : box.y + box.h / 2 + 4;
-    const label = el("text", { x: box.x + box.w / 2, y: ty, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" });
+  const addNode = (id, kind, title, sub) => {
+    const box = nodeBox(id);
+    const g = svgEl("g", { style: "cursor:pointer" });
+    const rect = svgEl("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 6, fill: "#262626", stroke: kind === "mod" ? COLORS[id] : "#3d3d3d", "stroke-width": 1 });
+    if (kind === "up" || (kind === "mod" && id === "types")) rect.setAttribute("stroke-dasharray", "4 3");
+    const label = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 - 2, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" });
     label.textContent = title;
-    g.append(rect, label);
-    if (sub) {
-      const s = el("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 + 14, "text-anchor": "middle", "font-size": 10, fill: "#909090" });
-      s.textContent = sub;
-      g.appendChild(s);
-    }
-    g.addEventListener("click", () => {
-      pinned = pinned && pinned.id === id ? null : { kind, id };
-      show(pinned);
-      applyFocus(pinned);
-    });
-    g.addEventListener("mouseenter", () => {
-      if (pinned) return;
-      show({ kind, id });
-      applyFocus({ kind, id });
-    });
-    svg.appendChild(g);
-    nodes.push({ id, kind, rect, title: label });
-  }
-
-  addNode("std", "std", nodeBox("std"), "std", "唯一上游");
-  addNode("phasor-core", "up", nodeBox("phasor-core"), "phasor-core", "未使用");
-  for (const m of MODULES) addNode(m.id, "mod", nodeBox(m.id), m.name, "");
-  for (const c of CRATES) addNode(c.id, "crate", nodeBox(c.id), c.id, "");
-  svg.addEventListener("mouseleave", () => {
-    if (pinned) return;
-    show(null);
-    applyFocus(null);
-  });
+    const s = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 + 12, "text-anchor": "middle", "font-size": 10, fill: "#b0b0b0" });
+    s.textContent = sub;
+    g.append(rect, label, s);
+    g.addEventListener("click", () => { pinned = pinned && pinned.id === id ? null : { kind, id }; showDetail(pinned); applyFocus(pinned); });
+    g.addEventListener("mouseenter", () => { if (pinned) return; showDetail({ kind, id }); applyFocus({ kind, id }); });
+    depSvg.appendChild(g);
+    gnodes.push({ id, kind, rect });
+  };
+  addNode("phasor-core", "up", "phasor-core", "Cargo.toml 声明，src 未用");
+  for (const m of MODULES) addNode(m.id, "mod", m.id, m.sub);
+  for (const d of DOWN) addNode(d.id, "down", d.id, d.sub);
+  depSvg.addEventListener("mouseleave", () => { if (pinned) return; showDetail(null); applyFocus(null); });
   applyFocus(null);
 }
-
-function chips(uses) {
-  return `<div class="uses">${uses.map((u) => `<span class="chip"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join("")}</div>`;
-}
-
-function show(focus) {
-  if (!focus) {
-    detail.innerHTML = `<h3>点一个节点</h3><p class="muted" style="margin:0">模块说明它被谁使用；crate 说明它拿 phasor-model 的哪一部分去做什么。</p>`;
-    return;
-  }
-  if (focus.kind === "std") {
-    detail.innerHTML = `<h3>std</h3><p class="muted" style="margin:0">真正用到的上游只有标准库：Arc、字符串、FromStr、Display。没有 thiserror、serde，也没有 phasor-core 的数学函数。</p>`;
-    return;
-  }
-  if (focus.kind === "up") {
-    detail.innerHTML = `<h3>phasor-core</h3><p class="muted" style="margin:0">Cargo.toml 写了 phasor-core = { workspace = true }，四个模块的源码都没有 phasor_core 引用。定点类型和枚举目前不走容差、FlexArray 或 Matrix。</p>`;
-    return;
-  }
+const chip = (m) => `<span class="chip" style="cursor:default"><i class="dot" style="background:${COLORS[m]}"></i>${m}</span>`;
+function showDetail(focus) {
+  if (!focus) { detail.innerHTML = `<h3>点一个节点</h3><p class="muted" style="margin:0">模块：它定义了什么、谁在用。下游：用到了哪些类型、在哪些文件。</p>`; return; }
   if (focus.kind === "mod") {
     const m = MODULES.find((x) => x.id === focus.id);
-    const users = CRATES.filter((c) => c.uses.includes(m.id)).map((c) => c.id);
-    detail.innerHTML = `<h3>${m.name}</h3><p class="muted" style="margin:0">${m.blurb}</p><p class="small" style="margin:8px 0 0">src 引用方：${users.join("、") || "无"}</p>`;
+    const users = DOWN.filter((d) => d.uses.includes(m.id)).map((d) => d.id);
+    detail.innerHTML = `<h3>${m.id}</h3><p class="muted" style="margin:0 0 6px">${m.blurb}</p><p class="small" style="margin:0">src/ 里直接使用它的 crate（${users.length}）：${users.join("、") || "无"}</p>`;
     return;
   }
-  const c = CRATES.find((x) => x.id === focus.id);
-  detail.innerHTML = `<h3>${c.id}</h3><p class="muted" style="margin:0">${c.role}</p>${chips(c.uses)}`;
+  if (focus.kind === "up") { detail.innerHTML = `<h3>phasor-core</h3><p class="muted" style="margin:0">Cargo.toml 的 [dependencies] 写了 phasor-core = { workspace = true }，但 src/ 里没有任何 use phasor_core。领域模型不需要容差、矩阵或列标签；这条声明只是让“model 在 core 之上”的分层成立。如果以后定点类型要和 f64 互转并比较，就会用到 math。</p>`; return; }
+  const d = DOWN.find((x) => x.id === focus.id);
+  detail.innerHTML = `<h3>${d.id}</h3><p class="muted" style="margin:0">${d.role}</p><div class="uses">${d.uses.map(chip).join("")}</div>`;
 }
-
-function legend() {
+function buildLegend() {
   const host = document.getElementById("legend");
-  host.innerHTML = MODULES.map((m) => `<button type="button" data-id="${m.id}"><i class="dot" style="background:${COLORS[m.id]}"></i>${m.name}</button>`).join("");
-  for (const btn of host.querySelectorAll("button")) {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.id;
-      pinned = pinned && pinned.id === id ? null : { kind: "mod", id };
-      show(pinned);
-      applyFocus(pinned);
-    });
-  }
+  host.innerHTML = MODULES.map((m) => `<button type="button" data-id="${m.id}"><i class="dot" style="background:${COLORS[m.id]}"></i>${m.id}</button>`).join("");
+  for (const btn of host.querySelectorAll("button")) btn.addEventListener("click", () => {
+    const id = btn.dataset.id;
+    pinned = pinned && pinned.id === id ? null : { kind: "mod", id };
+    showDetail(pinned); applyFocus(pinned);
+  });
+}
+function buildTable() {
+  document.getElementById("rows").innerHTML = DOWN.map((d) =>
+    `<tr><td class="mono">${d.id}</td><td>${d.uses.map((u) => `<span class="chip" style="padding:1px 8px;cursor:default"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join(" ")}</td><td>${d.role}</td></tr>`).join("");
 }
 
-function table() {
-  const body = document.getElementById("rows");
-  body.innerHTML = CRATES.map((c) => {
-    const mods = c.uses.map((u) => `<span class="chip" style="padding:1px 8px"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join(" ");
-    return `<tr><td class="mono">${c.id}</td><td>${mods}</td><td>${c.role}</td></tr>`;
+/* ---------------- enums browser ---------------- */
+const ENUMS = {
+  SizeType: { group: "order", line: 14, doc: "请求的数量怎么解释。phasor-exec 按固定顺序把它逐级改写成 Amount（§7.3）。", users: ["phasor-exec", "phasor-sim", "phasor-records", "phasor-py"],
+    v: [["Amount", "单位数"], ["Value", "现金金额，除以估值价得到单位数"], ["Percent", "可用现金的比例，[0, 1]"], ["TargetAmount", "目标单位数；与当前仓位求差"], ["TargetValue", "目标现金价值"], ["TargetPercent", "目标占组合价值的比例"]] },
+  Direction: { group: "order", line: 32, doc: "一列能做哪一边。", users: ["phasor-exec", "phasor-sim", "phasor-records", "phasor-analysis", "phasor-py"],
+    v: [["LongOnly", "只做多；做空被拒"], ["ShortOnly", "只做空"], ["Both", "多空都可以，包括穿过零反手"]] },
+  OrderSide: { group: "order", line: 44, doc: "订单在哪一边成交。数量是无符号的，方向只在这里。", users: ["phasor-exec", "phasor-records", "phasor-analysis"],
+    v: [["Buy", "买入"], ["Sell", "卖出"]] },
+  OrderStatus: { group: "result", line: 58, doc: "一次下单请求的结果。Rejected 是普通的返回值，不是 Err。", users: ["phasor-exec", "phasor-sim", "phasor-records"],
+    v: [["Filled", "全部或部分成交"], ["Ignored", "无事可做（没有信号、数量为零）"], ["Rejected", "无法执行；原因在 StatusInfo"]] },
+  StatusInfo: { group: "result", line: 73, doc: "为什么被忽略或拒绝。14 种原因分开放，因为“这次扫描为什么不交易”是用户最常问的问题。", users: ["phasor-exec", "phasor-sim", "phasor-records"],
+    v: [["SizeNaN", "size is NaN"], ["PriceNaN", "price is NaN"], ["ValPriceNaN", "valuation price is NaN"], ["ValueNaN", "portfolio value is NaN"], ["ValueZeroNeg", "portfolio value is zero or negative"], ["SizeZero", "size is zero"], ["NoCashShort", "not enough cash to short"], ["NoCashLong", "not enough cash to go long"], ["NoOpenPosition", "no open position to close"], ["MaxSizeExceeded", "size exceeds the maximum"], ["RandomEvent", "randomly rejected"], ["CantCoverFees", "proceeds do not cover fees"], ["MinSizeNotReached", "size is below the minimum"], ["PartialFill", "partial fill required but not allowed"]] },
+  AccumulationMode: { group: "signal", line: 158, doc: "同方向的信号是加仓还是被忽略。", users: ["phasor-sim", "phasor-py"],
+    v: [["Disabled", "信号从不改变已有仓位的大小"], ["Both", "信号既能加也能减"], ["AddOnly", "只加"], ["RemoveOnly", "只减"]] },
+  ConflictMode: { group: "signal", line: 172, doc: "同一根 K 线上进场和出场同时触发时怎么办。", users: ["phasor-sim"],
+    v: [["Ignore", "什么都不做"], ["Entry", "进场优先"], ["Exit", "出场优先"], ["Adjacent", "与当前仓位相邻的一方优先"], ["Opposite", "与当前仓位相反的一方优先"]] },
+  DirectionConflictMode: { group: "signal", line: 188, doc: "同一根 K 线上做多和做空信号同时触发时怎么办。", users: ["phasor-sim"],
+    v: [["Ignore", "什么都不做"], ["Long", "做多优先"], ["Short", "做空优先"], ["Adjacent", "与当前仓位同向的一方优先"], ["Opposite", "与当前仓位反向的一方优先"]] },
+  OppositeEntryMode: { group: "signal", line: 204, doc: "与持仓方向相反的进场信号该做什么。", users: ["phasor-sim"],
+    v: [["Ignore", "什么都不做"], ["Close", "平仓"], ["CloseReduce", "平仓，再套用加减仓规则"], ["Reverse", "平仓并反向开仓"], ["ReverseReduce", "反手，再套用加减仓规则"]] },
+  StopEntryPrice: { group: "stop", line: 220, doc: "开仓时止损锚定在哪个价格上。", users: ["phasor-sim"],
+    v: [["ValPrice", "估值价"], ["Price", "订单请求的价格"], ["FillPrice", "实际成交价"], ["Close", "当根 K 线收盘价"]] },
+  StopExitPrice: { group: "stop", line: 234, doc: "止损触发后按哪个价格成交。", users: ["phasor-sim"],
+    v: [["StopLimit", "止损价本身，无滑点"], ["StopMarket", "止损价加滑点"], ["Price", "配置的订单价格"], ["Close", "当根 K 线收盘价"]] },
+  StopExitMode: { group: "stop", line: 248, doc: "止损触发后对仓位做什么。", users: ["phasor-sim"],
+    v: [["Close", "平仓"], ["CloseReduce", "平仓，再套用加减仓规则"], ["Reverse", "反手"], ["ReverseReduce", "反手，再套用加减仓规则"]] },
+  StopUpdateMode: { group: "stop", line: 262, doc: "新的止损值是否替换正在生效的那个。", users: ["phasor-sim"],
+    v: [["Keep", "保留现有止损"], ["Override", "替换，除非新值是 NaN"], ["OverrideNaN", "替换，即使是 NaN（等于清除止损）"]] },
+  TradeDirection: { group: "record", line: 274, doc: "一笔交易在哪一边。", users: ["phasor-records"],
+    v: [["Long", "多头"], ["Short", "空头"]] },
+  TradeStatus: { group: "record", line: 284, doc: "模拟结束时交易是否还开着。", users: ["phasor-records", "phasor-analysis"],
+    v: [["Open", "仍未平仓"], ["Closed", "已平仓"]] },
+  TradesType: { group: "record", line: 298, doc: "交易记录的哪种视图。三者共用一个 schema，只是成交归属的方式不同（§9.5）。", users: ["phasor-analysis", "phasor-py"],
+    v: [["EntryTrades", "每笔进场成交一条；出场按 FIFO 分配回去"], ["ExitTrades", "每笔出场成交一条；进场平均进来"], ["Positions", "同一父仓位的交易聚合成一个仓位"]] },
+  CashFlowKind: { group: "record", line: 315, doc: "现金为什么在没有成交的情况下变动。分析层据此区分“带进来的钱”和“赚到的钱”：入金改变净值但不是收益，其余都算收益。phasor 自己加的，不来自 vectorbt。", users: ["phasor-records", "phasor-sim"],
+    v: [["Deposit", "在 K 线开盘时入金或出金"], ["Earning", "利息、费用等收支，在收盘时记入"], ["Dividend", "每股分红 × 开盘时的持仓；空头要支付"]] },
+};
+const GROUPS = [
+  { id: "order", name: "下单请求" }, { id: "result", name: "撮合结果" }, { id: "signal", name: "信号冲突" },
+  { id: "stop", name: "止损" }, { id: "record", name: "记录与分析" },
+];
+const PINNED = { SizeType: [5], Direction: [2], OrderStatus: [2], StatusInfo: [13], TradesType: [2], CashFlowKind: [0, 1, 2] };
+let enumSeg = null;
+function renderEnum(name) {
+  const e = ENUMS[name];
+  const pinned = PINNED[name] || [];
+  document.getElementById("en-body").innerHTML =
+    `<p class="muted" style="margin:0 0 8px"><code>pub enum ${name}</code>（enums.rs:${e.line}）— ${e.doc}</p>` +
+    `<div class="wrap"><table><thead><tr><th style="width:70px">判别值</th><th style="width:200px">变体</th><th>含义</th></tr></thead><tbody>` +
+    e.v.map(([n, d], i) => `<tr><td class="mono">${i}${pinned.includes(i) ? ` <span class="chip" style="padding:0 6px;cursor:default;font-size:10px">测试固定</span>` : ""}</td><td class="mono" style="color:#f0f0f0">${n}</td><td>${esc(d)}</td></tr>`).join("") +
+    `</tbody></table></div><div class="uses">${e.users.map((u) => `<span class="chip" style="cursor:default">${u}</span>`).join("")}</div>`;
+  document.getElementById("en-note").textContent = `src/ 里读它的 crate：${e.users.join("、")}。${pinned.length ? "" : "这个枚举的判别值没有专门的断言，但同样写进记录，改动一样是破坏性的。"}`;
+}
+function buildEnums() {
+  seg("en-group", GROUPS, (g) => {
+    const names = Object.keys(ENUMS).filter((k) => ENUMS[k].group === g.id).map((k) => ({ name: k }));
+    enumSeg = seg("en-pick", names, (it) => renderEnum(it.name));
+    enumSeg.select(0);
+  }).select(0);
+}
+
+/* ---------------- StatusInfo decoder ---------------- */
+const STATUS = ENUMS.StatusInfo.v;
+const fromDiscriminant = (v) => (Number.isInteger(v) && v >= 0 && v <= 13 ? STATUS[v] : null);
+function renderStatus() {
+  const raw = document.getElementById("st-in").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const vals = raw.map((s) => (/^-?\d+$/.test(s) ? Number(s) : NaN));
+  document.getElementById("st-rows").innerHTML = vals.map((v, i) => {
+    const r = fromDiscriminant(v);
+    const what = Number.isNaN(v) ? `<span class="no">不是整数</span>` : r ? `<span class="mono">Some(${r[0]})</span>` : `<span class="mono" style="color:#909090">None</span>`;
+    const desc = r ? esc(r[1]) : v === -1 ? `<span style="color:#909090">（成交，无需解释）</span>` : Number.isNaN(v) ? "" : `<span style="color:#909090">不是任何原因</span>`;
+    return `<tr><td class="mono">${i}</td><td class="mono">${esc(raw[i])}</td><td>${what}</td><td>${desc}</td></tr>`;
   }).join("");
+  const counts = new Map();
+  for (const v of vals) { const r = fromDiscriminant(v); const k = r ? r[0] : v === -1 ? "（成交）" : "（无法解释）"; counts.set(k, (counts.get(k) || 0) + 1); }
+  const max = Math.max(1, ...counts.values());
+  document.getElementById("st-bars").innerHTML = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) =>
+    `<div style="display:grid;grid-template-columns:150px 1fr 30px;gap:8px;align-items:center;margin:3px 0"><span class="mono" style="color:#b8b8b8;font-size:11px">${k}</span><div style="background:#262626;border-radius:3px;height:14px"><div style="width:${(n / max) * 100}%;height:100%;border-radius:3px;background:${k.startsWith("（成交") ? "#4caf7a" : k.startsWith("（无法") ? "#666" : "#e07a3d"}"></div></div><span class="mono">${n}</span></div>`).join("");
 }
 
-legend();
-table();
-build();
+/* ---------------- ids / BarType FromStr, ported ---------------- */
+function rsplitn(s, n, sep) {
+  const out = [];
+  let rest = s;
+  while (out.length < n - 1) {
+    const i = rest.lastIndexOf(sep);
+    if (i < 0) break;
+    out.push(rest.slice(i + sep.length));
+    rest = rest.slice(0, i);
+  }
+  out.push(rest);
+  return out;
+}
+function parseInstrument(value) {
+  const i = value.lastIndexOf(".");
+  if (i < 0) return { err: "expected SYMBOL.VENUE" };
+  const symbol = value.slice(0, i), venue = value.slice(i + 1);
+  // eslint-disable-next-line no-control-regex
+  if (!symbol || !venue || /[\s\u0000-\u001f\u007f-\u009f/\\]/.test(value)) return { err: "instrument requires nonempty symbol and venue, without whitespace or path separators" };
+  return { ok: { symbol, venue } };
+}
+const AGGS = ["MILLISECOND", "SECOND", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH", "TICK", "VOLUME", "VALUE", "TICK_IMBALANCE", "TICK_RUNS", "VOLUME_IMBALANCE", "VOLUME_RUNS", "VALUE_IMBALANCE", "VALUE_RUNS"];
+function parseBarType(value) {
+  const parts = rsplitn(value, 5, "-");
+  if (parts.length !== 5) return { err: "expected SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE", parts };
+  if (!/^\+?\d+$/.test(parts[3]) || BigInt(parts[3].replace("+", "")) > 18446744073709551615n) return { err: "bar step must be positive", parts };
+  const step = BigInt(parts[3].replace("+", ""));
+  if (step === 0n || !["INTERNAL", "EXTERNAL"].includes(parts[0]) || !["BID", "ASK", "MID", "LAST"].includes(parts[1]) || !AGGS.includes(parts[2]))
+    return { err: "invalid bar step, aggregation, price type or source", parts };
+  const inst = parseInstrument(parts[4]);
+  if (inst.err) return { err: inst.err, parts };
+  return { ok: { instrument: inst.ok, step: step.toString(), aggregation: parts[2], price_type: parts[1], source: parts[0] }, parts };
+}
+const ID_PRESETS = [
+  { name: "BTC-USDT 分钟线", s: "BTC-USDT.BINANCE-1-MINUTE-LAST-EXTERNAL", note: "rsplitn 从右边切 4 刀，剩下的 BTC-USDT.BINANCE 整体是标的：标的名里的 - 不会被误切。" },
+  { name: "BRK.B", s: "BRK.B.NYSE", note: "rsplit_once('.') 从右边切：标的是 BRK.B，交易所是 NYSE。按 BarType 解析失败：只有 0 个 -。" },
+  { name: "step = 0", s: "BTC.BINANCE-0-MINUTE-LAST-EXTERNAL", note: "步长能解析成 u64，但 0 被拒绝；错误消息不区分是哪个字段不对。" },
+  { name: "未知聚合", s: "BTC.BINANCE-1-WHATEVER-LAST-EXTERNAL", note: "aggregation 必须是 16 个固定值之一，大小写敏感。" },
+  { name: "路径分隔符", s: "ETH/USD.KRAKEN", note: "标识会成为 catalog 的目录名，所以 / 和 \\ 被拒绝，否则 ETH/USD 会变成两级目录。" },
+  { name: "缺交易所", s: "BTCUSDT", note: "没有 '.'：expected SYMBOL.VENUE。" },
+];
+function kv(obj) { return `<table style="font-size:12px">${Object.entries(obj).map(([k, v]) => `<tr><td class="mono" style="width:110px;color:#909090">${k}</td><td class="mono" style="color:#f0f0f0">${esc(v)}</td></tr>`).join("")}</table>`; }
+function renderIds(note) {
+  const s = document.getElementById("id-in").value;
+  const b = parseBarType(s);
+  const partsRow = b.parts ? `<p class="small" style="margin:6px 0 0">rsplitn(5, '-') → [${b.parts.map((p) => `"${esc(p)}"`).join(", ")}]</p>` : "";
+  if (b.ok) {
+    const disp = `${b.ok.instrument.symbol}.${b.ok.instrument.venue}-${b.ok.step}-${b.ok.aggregation}-${b.ok.price_type}-${b.ok.source}`;
+    document.getElementById("id-bar").innerHTML = kv({ "instrument.symbol": b.ok.instrument.symbol, "instrument.venue": b.ok.instrument.venue, step: b.ok.step, aggregation: b.ok.aggregation, price_type: b.ok.price_type, source: b.ok.source }) +
+      `<p class="small" style="margin:6px 0 0">Display 写回：<code>${esc(disp)}</code> <span class="${disp === s ? "yes" : "no"}">${disp === s ? "与输入一致" : "与输入不同"}</span></p>` + partsRow;
+  } else document.getElementById("id-bar").innerHTML = `<p class="no" style="margin:0">Err("${esc(b.err)}")</p>` + partsRow;
+  const i = parseInstrument(s);
+  document.getElementById("id-inst").innerHTML = i.ok
+    ? kv({ symbol: i.ok.symbol, venue: i.ok.venue }) + `<p class="small" style="margin:6px 0 0">Display：<code>${esc(i.ok.symbol)}.${esc(i.ok.venue)}</code></p>`
+    : `<p class="no" style="margin:0">Err("${esc(i.err)}")</p>`;
+  if (note !== undefined) document.getElementById("id-note").textContent = note;
+}
+function buildIds() {
+  seg("id-presets", ID_PRESETS, (p) => { document.getElementById("id-in").value = p.s; renderIds(p.note); }).select(0);
+  document.getElementById("id-in").addEventListener("input", () => renderIds(""));
+}
+
+/* ---------------- AoS vs SoA ---------------- */
+function buildBar() {
+  const s = document.getElementById("bar-svg");
+  const t = (x, y, txt, attrs = {}) => { const e = svgEl("text", { x, y, "font-size": 11, fill: "#b8b8b8", ...attrs }); e.textContent = txt; s.appendChild(e); };
+  const F = ["open", "high", "low", "close", "volume"];
+  const col = { open: "#3a7afe", high: "#2fbfa8", low: "#d35d5d", close: "#c9a227", volume: "#8a8a8a" };
+  const w = 58, h = 26;
+  t(16, 18, "Vec<Bar>：一根 K 线一个结构体（另有 instrument_id、ts_event、ts_init）", { fill: "#909090" });
+  for (let r = 0; r < 3; r++) for (let f = 0; f < 5; f++) {
+    const x = 16 + (r * 5 + f) * (w + 3), y = 28;
+    const isLow = F[f] === "low";
+    s.appendChild(svgEl("rect", { x, y, width: w, height: h, rx: 4, fill: col[F[f]] + (isLow ? "77" : "22"), stroke: col[F[f]], "stroke-width": isLow ? 2 : 1 }));
+    t(x + w / 2, y + 17, `${F[f]}[${r}]`, { "text-anchor": "middle", fill: isLow ? "#f0f0f0" : "#909090", "font-family": "ui-monospace, Menlo, monospace", "font-size": 10 });
+  }
+  t(16, 76, "读 3 个 low 要跨过 15 个字段：每次都把整行拉进缓存，大部分字节用不上。", { fill: "#f0a0a0" });
+  t(16, 112, "OhlcvPanel：每个字段一块 n_rows × n_cols 的列主序缓冲区", { fill: "#909090" });
+  F.forEach((f, fi) => {
+    const x0 = 16 + fi * (3 * (w + 3) + 14);
+    const isLow = f === "low";
+    t(x0, 134, f, { fill: col[f], "font-family": "ui-monospace, Menlo, monospace" });
+    for (let r = 0; r < 3; r++) {
+      const x = x0 + r * (w + 3);
+      s.appendChild(svgEl("rect", { x, y: 142, width: w, height: h, rx: 4, fill: col[f] + (isLow ? "77" : "22"), stroke: col[f], "stroke-width": isLow ? 2 : 1 }));
+      t(x + w / 2, 159, `${f}[${r}]`, { "text-anchor": "middle", fill: isLow ? "#f0f0f0" : "#909090", "font-family": "ui-monospace, Menlo, monospace", "font-size": 10 });
+    }
+  });
+  t(16, 196, "读 3 个 low 就是顺序读一段连续内存；止损引擎对 open、high、low 分别扫一趟，每趟都只碰自己那一块。", { fill: "#9be0b6" });
+}
+
+/* ---------------- Price fixed point ---------------- */
+const I64_MAX = 9223372036854775807n, I64_MIN = -9223372036854775808n;
+function toRaw(str, p) {
+  const m = /^\s*(-?)(\d*)(?:\.(\d*))?\s*$/.exec(str);
+  if (!m || (m[2] === "" && (m[3] ?? "") === "")) throw new Error("请输入十进制数，例如 65000.12345678");
+  const frac = (m[3] || "");
+  if (frac.length > p && /[1-9]/.test(frac.slice(p))) throw new Error(`“${str}”的小数位多于精度 ${p}，from_raw 不做舍入，这里拒绝`);
+  const digits = (m[2] || "0") + frac.slice(0, p).padEnd(p, "0");
+  let raw = BigInt(digits);
+  if (m[1]) raw = -raw;
+  if (raw > I64_MAX || raw < I64_MIN) throw new Error(`raw = ${raw} 超出 i64`);
+  return raw;
+}
+const fmtRaw = (raw, p) => {
+  const neg = raw < 0n; let d = (neg ? -raw : raw).toString().padStart(p + 1, "0");
+  const s = p ? `${d.slice(0, d.length - p)}.${d.slice(d.length - p)}` : d;
+  return (neg ? "-" : "") + s;
+};
+const PX_PRESETS = [
+  { name: "同值不同精度", a: "1.00", ap: 2, b: "1.000", bp: 3, note: "数值相等，但 derive 的 Eq 比较 (raw, precision)：100 ≠ 1000，所以“不相等”。" },
+  { name: "Ord 排反", a: "1.00", ap: 2, b: "5.0", bp: 1, note: "raw 100 > 50，所以 derive 的 Ord 说 1.00 > 5.0。精度不同的价格必须先对齐再比较。" },
+  { name: "同精度", a: "65000.12345678", ap: 8, b: "64999.5", bp: 8, note: "精度相同时，raw 的顺序就是数值的顺序：derive 的 Eq / Ord 都可靠。" },
+  { name: "接近上限", a: "9223372036.854775807", ap: 9, b: "9223372036.854775806", bp: 9, note: "9 位小数下 i64 的上限约 92.2 亿：价格够用，但价格 × 数量的名义金额会溢出——这是准备 i128 变体的原因。A 的 raw 恰好是 i64::MAX，所以它被当成 UNDEF 哨兵。" },
+];
+function renderPrice(note) {
+  const err = document.getElementById("px-err");
+  const ap = Number(document.getElementById("px-ap").value), bp = Number(document.getElementById("px-bp").value);
+  let ar, br;
+  try {
+    if (!Number.isInteger(ap) || !Number.isInteger(bp) || ap < 0 || bp < 0 || ap > 18 || bp > 18) throw new Error("精度是 0..=18 的整数（u8，这里限制在 i64 可表示的范围）");
+    ar = toRaw(document.getElementById("px-a").value, ap); br = toRaw(document.getElementById("px-b").value, bp); err.textContent = "";
+  } catch (e) { err.textContent = e.message; return; }
+  const sent = (r) => r === I64_MAX || r === I64_MIN;
+  const cap = (p) => fmtRaw(I64_MAX, p);
+  document.getElementById("px-rows").innerHTML = [["A", ar, ap], ["B", br, bp]].map(([n, r, p]) =>
+    `<tr><td>${n}</td><td class="mono">${r}</td><td class="mono">${p}</td><td>${sent(r) ? `<span class="no">true</span>` : "false"}</td><td class="mono">${cap(p)}</td></tr>`).join("");
+  // derived Ord: compare raw, then precision
+  const dOrd = ar < br ? "Less" : ar > br ? "Greater" : ap < bp ? "Less" : ap > bp ? "Greater" : "Equal";
+  // true numeric: scale to common precision
+  const P = Math.max(ap, bp);
+  const as = ar * 10n ** BigInt(P - ap), bs = br * 10n ** BigInt(P - bp);
+  const tOrd = as < bs ? "Less" : as > bs ? "Greater" : "Equal";
+  const agree = dOrd === tOrd;
+  document.getElementById("px-kpis").innerHTML =
+    `<span class="kpi">derive: A == B <b>${ar === br && ap === bp}</b></span>` +
+    `<span class="kpi">derive: A.cmp(B) <b class="${agree ? "" : "no"}">${dOrd}</b></span>` +
+    `<span class="kpi">数值：A vs B <b>${tOrd}</b></span>` +
+    `<span class="kpi">对齐到精度 ${P} <b>${as} vs ${bs}</b></span>` +
+    `<span class="kpi">一致 <b class="${agree ? "yes" : "no"}">${agree ? "是" : "否"}</b></span>`;
+  if (note !== undefined) document.getElementById("px-note").textContent = note;
+}
+function buildPrice() {
+  seg("px-presets", PX_PRESETS, (p) => {
+    document.getElementById("px-a").value = p.a; document.getElementById("px-ap").value = p.ap;
+    document.getElementById("px-b").value = p.b; document.getElementById("px-bp").value = p.bp;
+    renderPrice(p.note);
+  }).select(1);
+  for (const id of ["px-a", "px-ap", "px-b", "px-bp"]) document.getElementById(id).addEventListener("input", () => renderPrice(""));
+}
+
+buildLegend(); buildGraph(); buildTable();
+buildEnums();
+document.getElementById("st-in").addEventListener("input", renderStatus); renderStatus();
+buildIds();
+buildBar();
+buildPrice();
 </script>
 </body>
 </html>
