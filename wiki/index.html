@@ -107,6 +107,8 @@
     <a href="phasor-generic.html">phasor-generic</a>
     <a href="phasor-exec.html">phasor-exec</a>
     <a href="phasor-expr.html">phasor-expr</a>
+    <a href="phasor-indicators.html">phasor-indicators</a>
+    <a href="phasor-analysis.html">phasor-analysis</a>
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
@@ -128,7 +130,7 @@
     <div class="stat"><b>13 个 crate</b><span>7 层：地基 → 领域与数组 → 内核与数据 → 记录 → 模拟 → 分析 → 门面</span></div>
     <div class="stat"><b>约 2.9 万行 Rust</b><span>各 crate <code>src/</code> 合计；最大的是 phasor-analysis（5,584 行）</span></div>
     <div class="stat"><b>2 层执行</b><span>向量化层（阶段 1）与事件驱动层（阶段 2，计划中）共享同一个撮合内核和记录格式</span></div>
-    <div class="stat"><b>8 / 13 有页面</b><span>core、model、generic、signals、exec、expr、records、sim 有独立的 crate 页；其余见 ARCHITECTURE</span></div>
+    <div class="stat"><b>10 / 13 有页面</b><span>只有 data、py 和门面 phasor 还没有独立的 crate 页；它们见 ARCHITECTURE §4、§12、§6.1</span></div>
   </div>
 
   <!-- ============================================================ -->
@@ -178,9 +180,11 @@
             <text x="373" y="151" text-anchor="middle" font-weight="600" fill="#f0f0f0">phasor-expr</text>
             <text x="373" y="166" text-anchor="middle" font-size="10" fill="#909090">表达式 DSL · Alpha158/360</text>
           </a>
-          <rect x="288" y="184" width="170" height="44" rx="6" fill="#262626" stroke="#3d3d3d"/>
-          <text x="373" y="203" text-anchor="middle" font-weight="600" fill="#f0f0f0">phasor-indicators</text>
-          <text x="373" y="218" text-anchor="middle" font-size="10" fill="#909090">MA · RSI · MACD … + 参数扫描</text>
+          <a href="phasor-indicators.html">
+            <rect x="288" y="184" width="170" height="44" rx="6" fill="#262626" stroke="#5ea0ff"/>
+            <text x="373" y="203" text-anchor="middle" font-weight="600" fill="#f0f0f0">phasor-indicators</text>
+            <text x="373" y="218" text-anchor="middle" font-size="10" fill="#909090">MA · RSI · MACD … + 参数扫描</text>
+          </a>
 
           <a href="phasor-signals.html">
             <rect x="476" y="132" width="140" height="96" rx="6" fill="#262626" stroke="#5ea0ff"/>
@@ -209,11 +213,13 @@
             <text x="872" y="206" text-anchor="middle" font-size="10" fill="#909090">回撤 · MAE/MFE</text>
           </a>
 
-          <rect x="950" y="132" width="114" height="96" rx="6" fill="#262626" stroke="#3d3d3d"/>
-          <text x="1007" y="160" text-anchor="middle" font-weight="600" fill="#f0f0f0">phasor-analysis</text>
-          <text x="1007" y="178" text-anchor="middle" font-size="10" fill="#909090">Portfolio</text>
-          <text x="1007" y="192" text-anchor="middle" font-size="10" fill="#909090">净值 · 指标 · 统计</text>
-          <text x="1007" y="206" text-anchor="middle" font-size="10" fill="#909090">group_by 汇总</text>
+          <a href="phasor-analysis.html">
+            <rect x="950" y="132" width="114" height="96" rx="6" fill="#262626" stroke="#5ea0ff"/>
+            <text x="1007" y="160" text-anchor="middle" font-weight="600" fill="#f0f0f0">phasor-analysis</text>
+            <text x="1007" y="178" text-anchor="middle" font-size="10" fill="#909090">Portfolio</text>
+            <text x="1007" y="192" text-anchor="middle" font-size="10" fill="#909090">净值 · 指标 · 统计</text>
+            <text x="1007" y="206" text-anchor="middle" font-size="10" fill="#909090">group_by 汇总</text>
+          </a>
 
           <!-- edge labels -->
           <text x="137" y="124" text-anchor="middle" font-size="9" fill="#666">读</text>
@@ -358,19 +364,21 @@
           </a>
 
           <!-- L3 -->
-          <a href="phasor-core.html"><rect x="120" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="169" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-core</text></a>
-          <a href="phasor-model.html"><rect x="224" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="273" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-model</text></a>
-          <a href="phasor-generic.html"><rect x="328" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="377" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-generic</text></a>
-          <a href="phasor-signals.html"><rect x="432" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="481" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-signals</text></a>
-          <a href="phasor-exec.html"><rect x="536" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="585" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-exec</text></a>
-          <a href="phasor-expr.html"><rect x="640" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="689" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-expr</text></a>
-          <a href="phasor-records.html"><rect x="744" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="793" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-records</text></a>
-          <a href="phasor-sim.html"><rect x="848" y="252" width="98" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="897" y="276" text-anchor="middle" font-weight="600" font-size="9.5" fill="#f0f0f0">phasor-sim</text></a>
-          <rect x="952" y="252" width="112" height="40" rx="6" fill="#1e1e1e" stroke="#3d3d3d" stroke-dasharray="4 3"/>
-          <text x="1008" y="270" text-anchor="middle" font-size="9" fill="#909090">尚无页面：indicators</text>
-          <text x="1008" y="284" text-anchor="middle" font-size="9" fill="#909090">data · analysis · py · phasor</text>
+          <a href="phasor-core.html"><rect x="100" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="142" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-core</text></a>
+          <a href="phasor-model.html"><rect x="188" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="230" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-model</text></a>
+          <a href="phasor-generic.html"><rect x="276" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="318" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-generic</text></a>
+          <a href="phasor-signals.html"><rect x="364" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="406" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-signals</text></a>
+          <a href="phasor-exec.html"><rect x="452" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="494" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-exec</text></a>
+          <a href="phasor-expr.html"><rect x="540" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="582" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-expr</text></a>
+          <a href="phasor-indicators.html"><rect x="628" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="670" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-indicators</text></a>
+          <a href="phasor-records.html"><rect x="716" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="758" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-records</text></a>
+          <a href="phasor-sim.html"><rect x="804" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="846" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-sim</text></a>
+          <a href="phasor-analysis.html"><rect x="892" y="252" width="84" height="40" rx="6" fill="#182238" stroke="#5ea0ff"/><text x="934" y="276" text-anchor="middle" font-weight="600" font-size="8" fill="#f0f0f0">phasor-analysis</text></a>
+          <rect x="982" y="252" width="82" height="40" rx="6" fill="#1e1e1e" stroke="#3d3d3d" stroke-dasharray="4 3"/>
+          <text x="1023" y="268" text-anchor="middle" font-size="8.5" fill="#909090">尚无页面：</text>
+          <text x="1023" y="282" text-anchor="middle" font-size="8.5" fill="#909090">data · py · phasor</text>
           <text x="120" y="312" font-size="10" fill="#909090">每页同一个骨架：第一性原理 → 依赖图 → 交互演示（JS 移植的真实算法）→ 类图 → 对照表 → 规则 → 源文件</text>
-          <text x="120" y="326" font-size="10" fill="#909090">按依赖顺序排列：core 是地基，model、generic、signals 只依赖 core，exec 与 expr 在第 2 层，sim 依赖 records 和 exec</text>
+          <text x="120" y="326" font-size="10" fill="#909090">按依赖顺序排列：core 是地基，model、generic、signals 只依赖 core，exec、expr、indicators 在第 2 层，sim 依赖 records 和 exec，analysis 在最上面</text>
 
           <!-- L4 -->
           <rect x="120" y="356" width="300" height="52" rx="6" fill="#262626" stroke="#3d3d3d"/>
@@ -391,17 +399,19 @@
         <path d="M230 146 V174" stroke="#8a8a8a" marker-end="url(#d)"/>
         <path d="M705 146 C 705 160, 520 164, 500 174" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3" marker-end="url(#d)"/>
         <path d="M340 200 H360" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M169 226 V252" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M230 226 C 230 240, 270 240, 273 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 373 240, 377 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 477 240, 481 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 581 240, 585 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 685 240, 689 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 789 240, 793 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
-        <path d="M480 226 C 480 240, 893 240, 897 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M142 226 V252" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M230 226 C 230 240, 227 240, 230 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 314 240, 318 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 402 240, 406 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 490 240, 494 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 578 240, 582 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 666 240, 670 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 754 240, 758 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 842 240, 846 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
+        <path d="M480 226 C 480 240, 930 240, 934 252" fill="none" stroke="#8a8a8a" marker-end="url(#d)"/>
         <path d="M270 330 V356" stroke="#8a8a8a" marker-end="url(#d)"/>
         <path d="M760 382 H700" stroke="#2fbfa8" stroke-dasharray="3 3" marker-end="url(#d)"/>
-        <path d="M420 120 C 1008 120, 1008 240, 1008 252" fill="none" stroke="#c9a227" stroke-opacity="0.5" stroke-dasharray="3 3"/>
+        <path d="M420 120 C 1023 120, 1023 240, 1023 252" fill="none" stroke="#c9a227" stroke-opacity="0.5" stroke-dasharray="3 3"/>
         <path d="M912 356 C 912 340, 420 360, 420 380" fill="none" stroke="#2fbfa8" stroke-opacity="0.4" stroke-dasharray="3 3"/>
       </svg>
     </div>
@@ -416,7 +426,7 @@
         <li><b>ARCHITECTURE §1–§2</b>：动机、流水线、两层执行、crate 划分。</li>
         <li><b>本页</b>：一张总图，一张依赖图。</li>
         <li><b>架构页</b>：自顶向下把 §2–§15 走一遍。</li>
-        <li><b>crate 页，按依赖顺序</b>：<a href="phasor-core.html">core</a> → <a href="phasor-model.html">model</a> → <a href="phasor-generic.html">generic</a> → <a href="phasor-expr.html">expr</a> → <a href="phasor-signals.html">signals</a> → <a href="phasor-exec.html">exec</a> → <a href="phasor-records.html">records</a> → <a href="phasor-sim.html">sim</a>。</li>
+        <li><b>crate 页，按依赖顺序</b>：<a href="phasor-core.html">core</a> → <a href="phasor-model.html">model</a> → <a href="phasor-generic.html">generic</a> → <a href="phasor-expr.html">expr</a> → <a href="phasor-indicators.html">indicators</a> → <a href="phasor-signals.html">signals</a> → <a href="phasor-exec.html">exec</a> → <a href="phasor-records.html">records</a> → <a href="phasor-sim.html">sim</a> → <a href="phasor-analysis.html">analysis</a>。</li>
         <li><b>知识库</b>：要改代码时，逐文件逐行读。</li>
       </ol>
     </div>
@@ -429,9 +439,11 @@
             <tr><td>均线前几根为什么是 NaN、NaN 怎么处理</td><td><a href="phasor-generic.html#rolling">generic · 滚动窗口</a></td></tr>
             <tr><td>浮点比较为什么不能用 ==</td><td><a href="phasor-core.html#math">core · 容差</a></td></tr>
             <tr><td>因子表达式怎么编译、为什么快</td><td><a href="phasor-expr.html#compiler">expr · 编译器</a></td></tr>
+            <tr><td>参数扫描怎么变成列、为什么一次调用</td><td><a href="phasor-indicators.html#sweep">indicators · 扫描布局</a></td></tr>
             <tr><td>订单为什么被拒、原因码</td><td><a href="phasor-model.html#status">model · 拒单原因</a></td></tr>
             <tr><td>一笔订单成交多少、手续费怎么算</td><td><a href="phasor-exec.html#sim">exec · 撮合模拟器</a></td></tr>
             <tr><td>一根 K 线里模拟做了什么</td><td><a href="phasor-sim.html">phasor-sim</a></td></tr>
+            <tr><td>为什么没交易的列会排第一</td><td><a href="phasor-analysis.html#sweep">analysis · 扫描汇总</a></td></tr>
             <tr><td>成交怎么变成交易</td><td><a href="phasor-records.html">phasor-records</a></td></tr>
             <tr><td>信号怎么清洗、出场怎么生成</td><td><a href="phasor-signals.html">phasor-signals</a></td></tr>
           </tbody>
@@ -479,13 +491,21 @@
       <span class="lvl">L3 · 第 2 层</span><strong>phasor-expr</strong>
       <span class="d">因子表达式。为什么要一门语言、为什么要编译；可以输入任意因子的编译器实验台（语法树、去重后的依赖图、槽位时间线、节点表）、合成面板上的求值、Alpha158 族浏览、原生与 Polars 后端对比。</span>
     </a>
+    <a class="card" href="phasor-indicators.html">
+      <span class="lvl">L3 · 第 2 层</span><strong>phasor-indicators</strong>
+      <span class="d">八个指标与参数扫描。参数 × 标的展平成一个列轴；可以改参数的扫描布局与缓存命中图、用 fixture 十种情形跑的指标实验台、RSI 100 / STOCH NaN 等退化读数。</span>
+    </a>
     <a class="card" href="phasor-records.html">
       <span class="lvl">L3 · 第 3 层</span><strong>phasor-records</strong>
       <span class="d">记录层。七个模块与上下游；可以改成交的三种交易视图计算器、回撤和 MAE/MFE 演示；类图列出 sink、成交、日志和派生记录。</span>
     </a>
     <a class="card" href="phasor-sim.html">
       <span class="lvl">L3 · 第 4 层</span><strong>phasor-sim</strong>
-      <span class="d">两条模拟循环。依赖图标出分组、订单循环和信号循环被谁调用；流程图画出一根 K 线、信号收成订单、以及按组并行。</span>
+      <span class="d">两条模拟循环。时间方向不能并行、共享资金把列变成组、先卖后买、止损替换信号；可以设定持仓和各种模式的信号管线、用 fixture 情形逐根重放的止损与 from_orders 实验台、两种调用顺序对照、按组切线程块。</span>
+    </a>
+    <a class="card" href="phasor-analysis.html">
+      <span class="lvl">L3 · 第 5 层</span><strong>phasor-analysis</strong>
+      <span class="d">分析层。只从记录重建；用 fixture 的 37 个情形逐格重放“订单 → 成交 → 净值 → 指标”、逐位一致的指标计算器、没交易的列为什么会赢、N 个噪声策略的最好夏普与 DSR、stats 表的标签筛选。</span>
     </a>
   </div>
 </main>
@@ -500,10 +520,10 @@ const CRATES = {
   "phasor-data": { layer: 2, x: 180, loc: 560, deps: ["phasor-model"], desc: "CSV / Parquet / catalog → Arrow → 面板，按时点对齐", arch: "§4", page: null },
   "phasor-exec": { layer: 2, x: 400, loc: 1152, deps: ["phasor-core", "phasor-model"], desc: "下单撮合内核，向量化层与事件驱动层共用", arch: "§7", page: "phasor-exec.html" },
   "phasor-expr": { layer: 2, x: 660, loc: 4089, deps: ["phasor-core", "phasor-generic", "phasor-model"], desc: "表达式解析、图编译、原生与 Polars 后端、Alpha158/360", arch: "§5", page: "phasor-expr.html" },
-  "phasor-indicators": { layer: 2, x: 890, loc: 1188, deps: ["phasor-core", "phasor-generic"], desc: "MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV 及参数扫描", arch: "§6.4", page: null },
+  "phasor-indicators": { layer: 2, x: 890, loc: 1188, deps: ["phasor-core", "phasor-generic"], desc: "MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV 及参数扫描", arch: "§6.4", page: "phasor-indicators.html" },
   "phasor-records": { layer: 3, x: 400, loc: 4032, deps: ["phasor-core", "phasor-exec", "phasor-model"], desc: "记录格式、sink、成交、回撤、mapped array", arch: "§9", page: "phasor-records.html" },
   "phasor-sim": { layer: 4, x: 470, loc: 4258, deps: ["phasor-core", "phasor-exec", "phasor-model", "phasor-records"], desc: "from_orders / from_signals 循环、止损止盈、分组、并行执行", arch: "§8", page: "phasor-sim.html" },
-  "phasor-analysis": { layer: 5, x: 610, loc: 5584, deps: ["phasor-core", "phasor-generic", "phasor-model", "phasor-records", "phasor-sim"], desc: "Portfolio、净值 / 收益链、指标、统计、汇总", arch: "§10", page: null },
+  "phasor-analysis": { layer: 5, x: 610, loc: 5584, deps: ["phasor-core", "phasor-generic", "phasor-model", "phasor-records", "phasor-sim"], desc: "Portfolio、净值 / 收益链、指标、统计、汇总", arch: "§10", page: "phasor-analysis.html" },
   "phasor": { layer: 6, x: 470, loc: 364, deps: ["phasor-data", "phasor-analysis", "phasor-core", "phasor-exec", "phasor-generic", "phasor-indicators", "phasor-expr", "phasor-model", "phasor-records", "phasor-signals", "phasor-sim"], optional: ["phasor-data"], desc: "门面、prelude、SignalSweep；data feature 引入 phasor-data", arch: "§6.1", page: null },
   "phasor-py": { layer: 6, x: 770, loc: 2369, deps: ["phasor-data", "phasor-analysis", "phasor-core", "phasor-expr", "phasor-generic", "phasor-model", "phasor-records", "phasor-sim"], desc: "PyO3 扩展 phasor._phasor + Python 包 phasor", arch: "§12", page: null },
 };
