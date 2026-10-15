@@ -1,0 +1,1617 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>phasor-sim 设计</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --chrome: #181818;
+    --elev: #262626;
+    --text: #f0f0f0;
+    --secondary: #b8b8b8;
+    --muted: #909090;
+    --stroke: #303030;
+    --stroke2: #3d3d3d;
+    --fill: #2b2b2b;
+    --accent: #3a7afe;
+    --orders: #4cb3d4;
+    --signals-loop: #e06b8a;
+    --groups: #8fbf4a;
+    --signals: #c084fc;
+    --cash: #2fbfa8;
+    --random: #d4a24a;
+    --math: #1f8a65;
+    --error: #c9a227;
+    --exec: #e07a3d;
+    --model: #7b64b8;
+    --records: #c46b8a;
+    --bad: #d35d5d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.55;
+    font-size: 14px;
+  }
+  a { color: #8eb6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header.top {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 10px 22px;
+    background: var(--chrome);
+    border-bottom: 1px solid var(--stroke);
+    font-size: 13px;
+  }
+  header.top strong { font-size: 14px; }
+  header.top nav { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+  header.top nav a { color: var(--secondary); }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 22px 72px; }
+  h1 { font-size: 24px; line-height: 30px; font-weight: 600; margin: 0 0 8px; }
+  h2 { font-size: 18px; line-height: 24px; font-weight: 600; margin: 32px 0 10px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 18px 0 4px; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--secondary); }
+  .small { color: var(--muted); font-size: 12px; line-height: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 8px; }
+  .stat { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  .stat b { display: block; font-size: 20px; font-weight: 650; margin-bottom: 2px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .panel { border: 1px solid var(--stroke); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+  .panel .cap { padding: 8px 12px; background: #242424; border-bottom: 1px solid var(--stroke); font-size: 12px; font-weight: 600; }
+  .panel .body { padding: 12px; background: var(--bg); overflow-x: auto; }
+  .panel .foot { padding: 8px 12px; border-top: 1px solid var(--stroke); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 8px; }
+  .legend button, .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--stroke2); background: transparent; color: var(--secondary);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .legend button.on { color: var(--text); background: var(--fill); }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  #detail { min-height: 72px; border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  #detail h3 { margin: 0 0 4px; }
+  .uses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; vertical-align: top; border-top: 1px solid var(--stroke); }
+  th { color: var(--text); font-weight: 600; background: var(--elev); border-top: none; }
+  td { color: var(--secondary); }
+  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; }
+  .types td:first-child, .types td:nth-child(2) { white-space: nowrap; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: #202020; }
+  .card p { color: var(--secondary); font-size: 13px; margin: 0; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  pre {
+    margin: 0; padding: 10px 12px; background: var(--fill); border: 1px solid var(--stroke);
+    border-radius: 6px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px;
+  }
+  .note { border-left: 3px solid var(--accent); background: #242424; border-radius: 6px; padding: 10px 12px; color: var(--secondary); font-size: 13px; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+  @media (max-width: 800px) { .stats, .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <strong>phasor-sim</strong>
+  <nav>
+    <a href="index.html">wiki</a>
+    <a href="architecture.html">架构</a>
+    <a href="phasor-core.html">phasor-core</a>
+    <a href="phasor-model.html">phasor-model</a>
+    <a href="phasor-exec.html">phasor-exec</a>
+    <a href="#graph">依赖图</a>
+    <a href="#flow">流程</a>
+    <a href="#class">类图</a>
+    <a href="#types">类型</a>
+    <a href="#table">对照表</a>
+    <a href="#inputs">输入</a>
+    <a href="#walkthrough">走例</a>
+    <a href="#dualma">双均线</a>
+    <a href="#faq">FAQ</a>
+    <a href="#parity">vectorbt</a>
+    <a href="#perf">性能</a>
+  </nav>
+</header>
+<main>
+  <h1>phasor-sim</h1>
+  <p class="muted">
+    两条按根推进的模拟循环。订单循环每个格子一笔请求。信号循环把信号和止损收成至多一笔，再交给同一个
+    <a href="phasor-exec.html"><code>execute_validated</code></a>。
+    组内共享一份现金、按顺序成交；组与组互不影响，并行就切在组上。
+    成交、滑点和规模级联在执行内核里，这一页只写循环怎样把一根 K 线收成那一次调用。
+  </p>
+  <div class="stats">
+    <div class="stat"><b>6</b><span>模块。四个公开；cash 与 random 是私有模块</span></div>
+    <div class="stat"><b>4</b><span>个上游 crate，src 里都有引用</span></div>
+    <div class="stat"><b>8</b><span>个入口：两条循环，各自普通 / 日志，串行 / 并行</span></div>
+  </div>
+
+  <h2 id="graph">依赖图</h2>
+  <p>
+    左侧是上游。中间是 phasor-sim 的六个模块。右侧是 <code>src/</code> 里引用了它的 crate。
+    一根线表示生产代码用到了对应模块。点模块、上游或 crate，只保留相关的线。
+  </p>
+  <div class="legend" id="legend"></div>
+  <div class="panel">
+    <div class="cap">实线都是 src 引用。error 和 model 默认画淡，因为它们几乎进每个模块</div>
+    <div class="body">
+      <svg id="dep-graph" width="1040" height="680" viewBox="0 0 1040 680" role="img" aria-label="phasor-sim 依赖图"></svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">
+        来源：各 crate 的 Cargo.toml，以及 src/ 中的 <code>use</code>。不含 tests/、examples/，也不含源文件里的 <code>#[cfg(test)]</code>。
+        error 默认透明度 0.18，model 0.35，其余约 0.78。
+        from_orders 直接使用的模型名字只有 <code>StatusInfo::describe</code>；Direction、SizeType、OrderStatus 从 <a href="phasor-exec.html">phasor-exec</a> 再导出。
+        <code>pub use phasor_sim as sim</code> 把整个 crate 暴露成 <code>phasor::sim</code>，包括 from_orders。图上到 phasor 的线只画 prelude 再导出的 Groups、CallSeq 和信号循环。
+        random 只依赖标准库，所以没有左侧的线；两条循环在 <code>reject_prob &gt; 0</code> 时调用它。
+        成交公式见 <a href="phasor-exec.html">phasor-exec</a>。
+      </p>
+    </div>
+  </div>
+  <div id="detail">
+    <h3>点一个节点</h3>
+    <p class="muted" style="margin:0">模块说明它被谁使用；上游说明哪条循环拿它做什么；crate 说明它拿 phasor-sim 的哪一部分。</p>
+  </div>
+
+  <h2>crate 内部</h2>
+  <p class="muted">两条循环都调用 groups、cash、random。信号循环另外调用 signals，以及订单循环里的 <code>updated_value</code>。groups 和 signals 之间没有引用。</p>
+  <div class="panel">
+    <div class="cap">上排是两条循环。下排是它们调用的模块。count_where 在 lib.rs</div>
+    <div class="body">
+      <svg width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="phasor-sim 内部依赖">
+        <defs>
+          <marker id="intArr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a"/>
+          </marker>
+        </defs>
+        <rect x="20" y="16" width="240" height="64" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+        <text x="140" y="40" text-anchor="middle" font-size="13" font-weight="600" fill="#f0f0f0">from_signals</text>
+        <text x="140" y="60" text-anchor="middle" font-size="11" fill="#f0c0d0">信号、止损，至多一笔订单</text>
+        <rect x="430" y="16" width="240" height="64" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="550" y="40" text-anchor="middle" font-size="13" font-weight="600" fill="#f0f0f0">from_orders</text>
+        <text x="550" y="60" text-anchor="middle" font-size="11" fill="#b7e4f2">每格一笔，两遍执行</text>
+        <path d="M260 40 H430" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <text x="345" y="32" text-anchor="middle" font-size="10" fill="#909090">updated_value</text>
+
+        <rect x="24" y="168" width="160" height="56" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="104" y="192" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">signals</text>
+        <text x="104" y="208" text-anchor="middle" font-size="10" fill="#e4d4fb">纯函数</text>
+        <rect x="204" y="168" width="160" height="56" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="284" y="192" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">groups</text>
+        <text x="284" y="208" text-anchor="middle" font-size="10" fill="#d5ecb0">分组与顺序</text>
+        <rect x="384" y="168" width="160" height="56" rx="6" fill="#14302c" stroke="#2fbfa8"/>
+        <text x="464" y="192" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">cash</text>
+        <text x="464" y="208" text-anchor="middle" font-size="10" fill="#b7efe4">私有 · 现金流</text>
+        <rect x="564" y="168" width="160" height="56" rx="6" fill="#332818" stroke="#d4a24a"/>
+        <text x="644" y="192" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">random</text>
+        <text x="644" y="208" text-anchor="middle" font-size="10" fill="#f0ddb4">私有 · (seed, row, col)</text>
+        <rect x="744" y="168" width="270" height="56" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="879" y="192" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">lib · count_where</text>
+        <text x="879" y="208" text-anchor="middle" font-size="10" fill="#b0b0b0">两条 fill_bound 都用它</text>
+
+        <path d="M140 80 V168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M200 80 C 200 130, 284 130, 284 168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M230 80 C 250 124, 464 124, 464 168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M260 80 C 300 120, 644 120, 644 168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M480 80 C 420 124, 284 124, 284 168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M520 80 V168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+        <path d="M560 80 C 600 124, 644 124, 644 168" fill="none" stroke="#8a8a8a" marker-end="url(#intArr)"/>
+      </svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">左上那四条线从 from_signals 出发，右下三条从 from_orders 出发。两条都到 groups、cash、random。只有信号循环到 signals。count_where 按 FlexArray 的五种布局计数，MappedColumns 每个源列只数一次。</p></div>
+  </div>
+
+  <h2>六个模块做什么</h2>
+  <div class="grid2">
+    <article class="card">
+      <h3><span class="dot" style="background:#4cb3d4"></span> from_orders</h3>
+      <p>每个格子一笔订单。一根 K 线先整组解析价格，再按 CallSeq 调用 <code>execute_validated</code>。列参数不变时，每列的 <code>ValidatedOrder</code> 只构造一次：九次读取和内核十四项检查里的七项被提到循环外。源码里的测量是稀疏 +8% 构造、+20% 校验，合计 +30%；稠密 +11% 与 +10%，合计 +22%。预分配相对按倍增长，在成交密集的扫描上 +19%，在单列长序列上 +6%。</p>
+    </article>
+    <article class="card">
+      <h3><span class="dot" style="background:#e06b8a"></span> from_signals</h3>
+      <p>每列准备两份 <code>ValidatedOrder</code>：普通滑点，以及止损限价用的零滑点。规模和规模类型沿列不变时，bar 0 之前用全假信号调用一次 <code>signals_to_size</code>，非法规模只报一次，安静的根就可以直接跳过。填充上界是置位信号格的两倍，再封顶到行列数。注释引用订单循环在稀疏负载上测得的 +30%，以及预分配的 +6% 到 +19%。</p>
+    </article>
+    <article class="card">
+      <h3><span class="dot" style="background:#8fbf4a"></span> groups</h3>
+      <p>分组存的是长度，默认 <code>ungrouped</code>：每列长度 1，各有各的现金。长度里出现 0，或总和不等于列数，<code>from_lens</code> 返回 Invariant。<code>is_shared</code> 在任一长度大于 1 时为真，模拟据此才做组一级的净值。<code>chunks</code> 按列数把组切成连续段，合并时按顺序拼接。注释里的例子：5 个组、4 个线程，按组数向上取整会让一个线程空闲。</p>
+    </article>
+    <article class="card">
+      <h3><span class="dot" style="background:#c084fc"></span> signals</h3>
+      <p>七步里的纯函数，顺序固定，可以一个一个对照。止损覆盖输入；然后同向的入场和出场；然后多空入场；然后对着持仓的入场；最后 <code>signals_to_size</code>。先解方向冲突再解同向冲突，活下来的信号会不一样。负的 size 直接 Invariant，方向只写在信号上。反手是一笔订单。百分数不能反手。</p>
+    </article>
+    <article class="card">
+      <h3><span class="dot" style="background:#2fbfa8"></span> cash</h3>
+      <p>成交之外的现金。开盘先存款再付股息，收盘再记 earnings。负数流出封顶在 <code>max(free_cash, 0)</code>，记录里是实际入账的数。现金 100、自由现金 40 时，请求取出 50，入账 −40，现金变成 60、自由现金变成 0；再取 1，入账 0。无穷金额是 Invariant。标量 0 或 NaN 整段跳过，按列存放的全 0 仍会逐根读。</p>
+    </article>
+    <article class="card">
+      <h3><span class="dot" style="background:#d4a24a"></span> random</h3>
+      <p><code>uniform(seed, row, col)</code> 用 SplitMix64 混合这三项，取高 53 位除以 2^53，落在 [0, 1)。<code>inline(never)</code>，只在 <code>reject_prob &gt; 0</code> 时调用。内核自己不抽样。抽样若改成循环里往前推进的生成器，结果就会跟着分组和线程数变。</p>
+    </article>
+  </div>
+
+  <h2 id="flow">模拟流程</h2>
+  <p>
+    三张图按源码顺序画。第一张是两条循环共用的一根 K 线。第二张是信号循环在调用内核之前做的准备。第三张是分组、组内顺序和线程。
+    买卖公式、规模级联和拒单状态在 <a href="phasor-exec.html">phasor-exec</a>。
+  </p>
+  <div class="legend">
+    <span class="chip" style="cursor:default"><i class="dot" style="background:#4cb3d4"></i>订单循环</span>
+    <span class="chip" style="cursor:default"><i class="dot" style="background:#e06b8a"></i>信号循环</span>
+    <span class="chip" style="cursor:default"><i class="dot" style="background:#8fbf4a"></i>分组</span>
+    <span class="chip" style="cursor:default"><i class="dot" style="background:#2fbfa8"></i>现金</span>
+    <span class="chip" style="cursor:default"><i class="dot" style="background:#d35d5d"></i>Err</span>
+  </div>
+
+  <div class="panel">
+    <div class="cap">1. 一根 K 线。开盘现金，整组解析价格，按序成交，收盘收益。组内净值沿用</div>
+    <div class="body">
+      <svg width="1040" height="560" viewBox="0 0 1040 560" role="img" aria-label="一根 K 线的两遍循环">
+        <defs>
+          <marker id="barArr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a"/>
+          </marker>
+        </defs>
+        <rect x="20" y="16" width="500" height="48" rx="6" fill="#14302c" stroke="#2fbfa8"/>
+        <text x="32" y="36" font-size="12" font-weight="600" fill="#f0f0f0">1 · 开盘现金</text>
+        <text x="32" y="52" font-size="11" fill="#b7efe4">存款读组的第一列，然后按开盘前持仓付股息</text>
+        <path d="M270 64 V78" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="78" width="500" height="48" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="32" y="98" font-size="12" font-weight="600" fill="#f0f0f0">2 · 按需重建 ValidatedOrder</text>
+        <text x="32" y="114" font-size="11" fill="#b7e4f2">费率、滑点、日志等沿行变化时才重建</text>
+        <path d="M270 126 V140" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="140" width="500" height="48" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="32" y="160" font-size="12" font-weight="600" fill="#f0f0f0">3 · 第一遍：整组解析价格</text>
+        <text x="32" y="176" font-size="11" fill="#b7e4f2">估值先定。ffill 开着时，NaN 不覆盖上一笔估值</text>
+        <path d="M520 164 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="128" width="472" height="72" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="560" y="148" font-size="11" fill="#d0d0d0">订单：+∞ 本根收盘，−∞ 上一根收盘</text>
+        <text x="560" y="166" font-size="11" fill="#d0d0d0">信号：+∞ 本根收盘，−∞ 优先本根开盘</text>
+        <text x="560" y="184" font-size="11" fill="#909090">估值的 −∞ 两条都是上一根收盘</text>
+        <path d="M270 188 V202" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="202" width="500" height="48" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="32" y="222" font-size="12" font-weight="600" fill="#f0f0f0">4 · 共享组：净值一次，再排 CallSeq</text>
+        <text x="32" y="238" font-size="11" fill="#d5ecb0">现金加上每个非零持仓乘以上一笔估值</text>
+        <path d="M520 226 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="208" width="472" height="48" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="560" y="228" font-size="11" fill="#d5ecb0">Auto 升序。负数先做，NaN 排到最后</text>
+        <text x="560" y="246" font-size="11" fill="#d5ecb0">一列一组时两条循环都不调用 resolve</text>
+        <path d="M270 250 V264" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="264" width="500" height="48" rx="6" fill="#3a2a1c" stroke="#e07a3d"/>
+        <text x="32" y="284" font-size="12" font-weight="600" fill="#f0f0f0">5 · 第二遍：execute_validated</text>
+        <text x="32" y="300" font-size="11" fill="#f0c8a8">set_bar 后调用。抽样仅在 reject_prob &gt; 0</text>
+        <path d="M520 288 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="264" width="472" height="48" rx="6" fill="#3a2a1c" stroke="#e07a3d"/>
+        <text x="560" y="284" font-size="11" fill="#f0c8a8">买卖、级联、拒单状态在 phasor-exec</text>
+        <text x="560" y="302" font-size="11" fill="#f0c8a8">信号循环跳过没有 Pending 的列</text>
+        <path d="M270 312 V326" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="326" width="500" height="48" rx="6" fill="#3a2222" stroke="#d35d5d"/>
+        <text x="32" y="346" font-size="12" font-weight="600" fill="#f0f0f0">6 · 返回之后才读 raise_reject</text>
+        <text x="32" y="362" font-size="11" fill="#f0b4b4">Rejected 且该字段为真，变成 Invariant</text>
+        <path d="M270 374 V388" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="388" width="500" height="56" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="32" y="410" font-size="12" font-weight="600" fill="#f0f0f0">7 · 沿用组净值</text>
+        <text x="32" y="428" font-size="11" fill="#b7e4f2">默认 update_value 为假，成交不改这根后面的净值</text>
+        <path d="M520 416 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="388" width="472" height="56" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="560" y="410" font-size="11" fill="#d0d0d0">同一根的每一笔都按开盘时的净值定规模</text>
+        <text x="560" y="428" font-size="11" fill="#909090">为真时，新估值价等于成交价</text>
+        <path d="M270 444 V458" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="458" width="500" height="48" rx="6" fill="#14302c" stroke="#2fbfa8"/>
+        <text x="32" y="478" font-size="12" font-weight="600" fill="#f0f0f0">8 · 收盘 earnings</text>
+        <text x="32" y="494" font-size="11" fill="#b7efe4">按列、按布局顺序。没有订单的根也记</text>
+        <path d="M520 482 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="458" width="472" height="48" rx="6" fill="#14302c" stroke="#2fbfa8"/>
+        <text x="560" y="478" font-size="11" fill="#b7efe4">现金 100，开盘存入 20</text>
+        <text x="560" y="494" font-size="11" fill="#b7efe4">这根的目标订单按 120 定规模</text>
+      </svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0 0 6px">
+        订单循环在一列一组时，执行到该列才用「现金 + 这一列的持仓 × 估值」重算净值。信号循环先把组内持仓加总；组长度是 1 时两种加总是同一件事。
+        成交之后 <code>last_val_price</code> 无条件写成新估值价：它要么是原来的值，要么是有限的成交价。
+      </p>
+      <p class="small" style="margin:0">
+        日志有 38 个字段，订单记录有 7 个。到达内核的订单才写一行，成交与否都写；信号没收成订单的根没有日志。没有成交时 <code>order_id</code> 是 −1。
+        串行路径上各组共用一个 fills 计数，这样日志能对上同一份缓冲里的成交。
+      </p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cap">2. from_signals 的 prepare_order。止损先于冲突，冲突只在有入场时发生，然后才定规模</div>
+    <div class="body">
+      <svg width="1040" height="520" viewBox="0 0 1040 520" role="img" aria-label="信号收成一笔订单">
+        <rect x="20" y="16" width="500" height="48" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+        <text x="32" y="36" font-size="12" font-weight="600" fill="#f0f0f0">1 · 解析订单价和估值价</text>
+        <text x="32" y="52" font-size="11" fill="#f0c0d0">估值在止损改写订单价之前完成</text>
+        <path d="M270 64 V78" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="78" width="500" height="56" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+        <text x="32" y="98" font-size="12" font-weight="600" fill="#f0f0f0">2 · 止损已武装时才测试</text>
+        <text x="32" y="116" font-size="11" fill="#f0c0d0">先止损，未触发再止盈。测完这一根才跟踪</text>
+        <path d="M520 106 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="78" width="472" height="72" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="560" y="98" font-size="11" fill="#d0d0d0">多头锚 100，距离 0.1，水平 90</text>
+        <text x="560" y="116" font-size="11" fill="#d0d0d0">开盘 85：成交 85。开盘 98、最低 88：成交 90</text>
+        <text x="560" y="134" font-size="11" fill="#909090">缺的开高低用收盘补齐</text>
+        <path d="M270 134 V148" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="148" width="500" height="56" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+        <text x="32" y="170" font-size="12" font-weight="600" fill="#f0f0f0">3 · 触发：from_stop 换掉输入</text>
+        <text x="32" y="188" font-size="11" fill="#f0c0d0">StopLimit 把价格设成触发价，并走零滑点订单</text>
+        <path d="M270 204 V218" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="218" width="500" height="56" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="32" y="240" font-size="12" font-weight="600" fill="#f0f0f0">4 · 未触发：OR 合并两套信号</text>
+        <text x="32" y="258" font-size="11" fill="#e4d4fb">规模已检查且一个信号都没有：返回 None</text>
+        <path d="M520 246 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="218" width="472" height="56" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="560" y="240" font-size="11" fill="#e4d4fb">Direction::Both 时 exit 是空头入场</text>
+        <text x="560" y="258" font-size="11" fill="#e4d4fb">显式的四个数组与 entries/exits 做或</text>
+        <path d="M270 274 V288" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="288" width="500" height="48" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="32" y="308" font-size="12" font-weight="600" fill="#f0f0f0">5 · 有入场才解冲突</text>
+        <text x="32" y="324" font-size="11" fill="#e4d4fb">同向，然后方向，然后对着持仓的入场</text>
+        <path d="M270 336 V350" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="350" width="500" height="48" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="32" y="370" font-size="12" font-weight="600" fill="#f0f0f0">6 · signals_to_size</text>
+        <text x="32" y="386" font-size="11" fill="#e4d4fb">只要 Amount、Value、Percent。负规模是 Invariant</text>
+        <path d="M520 374 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="350" width="472" height="48" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="560" y="370" font-size="11" fill="#d0d0d0">持仓 +10，Reverse，Amount 5</text>
+        <text x="560" y="386" font-size="11" fill="#d0d0d0">一笔订单，数量 −15，类型 Amount</text>
+        <path d="M270 398 V412" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+
+        <rect x="20" y="412" width="500" height="56" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+        <text x="32" y="434" font-size="12" font-weight="600" fill="#f0f0f0">7 · 规模为 0 则 None</text>
+        <text x="32" y="452" font-size="11" fill="#f0c0d0">ShortOnly 再取一次负号，内核里还会再取一次</text>
+        <path d="M520 440 H548" fill="none" stroke="#8a8a8a" marker-end="url(#barArr)"/>
+        <rect x="548" y="412" width="472" height="56" rx="6" fill="#3a2a1c" stroke="#e07a3d"/>
+        <text x="560" y="434" font-size="11" fill="#f0c8a8">成交后：持仓回到 0 就清掉止损</text>
+        <text x="560" y="452" font-size="11" fill="#f0c8a8">新开或反手重锚。只加仓时看 upon_stop_update</text>
+      </svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">
+        向下的止损水平是锚点 × (1 − 距离)。开盘已经穿过水平，成交价是开盘；水平落在最低和最高之间，成交价是水平。距离小于 0 是 Invariant。
+        跟踪发生在测试之后，所以这一根用的是上一根留下的峰值。
+        Close 和 Reverse 会把累积关掉，减仓变体保留累积。减仓本身不重新锚定止损。
+      </p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cap">3. 组是并行单位。组内一根 K 线上顺序执行。线程各写各的缓冲，再按组顺序接起来</div>
+    <div class="body">
+      <svg width="1040" height="430" viewBox="0 0 1040 430" role="img" aria-label="分组与并行">
+        <text x="20" y="22" font-size="12" font-weight="600" fill="#d5ecb0">Groups</text>
+        <rect x="20" y="32" width="320" height="64" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="32" y="54" font-size="12" font-weight="600" fill="#f0f0f0">ungrouped(n_cols)</text>
+        <text x="32" y="74" font-size="11" fill="#d5ecb0">每列长度 1。阶段 1 的默认</text>
+        <rect x="20" y="108" width="320" height="64" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="32" y="130" font-size="12" font-weight="600" fill="#f0f0f0">from_lens</text>
+        <text x="32" y="150" font-size="11" fill="#d5ecb0">长度之和等于列数。0 长度是 Invariant</text>
+        <rect x="20" y="184" width="320" height="64" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="32" y="206" font-size="12" font-weight="600" fill="#f0f0f0">chunks(n_threads)</text>
+        <text x="32" y="226" font-size="11" fill="#d5ecb0">连续组段，按列数而不是按组数切分</text>
+        <rect x="20" y="260" width="320" height="64" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="32" y="282" font-size="12" font-weight="600" fill="#f0f0f0">一个共享组合</text>
+        <text x="32" y="302" font-size="11" fill="#b0b0b0">只有一个工作单元，退回串行</text>
+
+        <text x="364" y="22" font-size="12" font-weight="600" fill="#d5ecb0">CallSeq</text>
+        <rect x="364" y="32" width="320" height="56" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="376" y="54" font-size="12" font-weight="600" fill="#f0f0f0">Default</text>
+        <text x="376" y="72" font-size="11" fill="#d5ecb0">从左到右。这是枚举的默认值</text>
+        <rect x="364" y="100" width="320" height="72" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="376" y="122" font-size="12" font-weight="600" fill="#f0f0f0">Auto</text>
+        <text x="376" y="140" font-size="11" fill="#d5ecb0">近似价值升序，稳定，NaN 在最后</text>
+        <text x="376" y="158" font-size="11" fill="#d5ecb0">用上一笔估值，决定顺序，不决定成交</text>
+        <rect x="364" y="184" width="320" height="72" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="376" y="206" font-size="12" font-weight="600" fill="#f0f0f0">Explicit</text>
+        <text x="376" y="224" font-size="11" fill="#d5ecb0">组内下标，列主序，范围 0..组长度</text>
+        <text x="376" y="242" font-size="11" fill="#d5ecb0">长度不对或越界是 Invariant</text>
+        <rect x="364" y="268" width="320" height="56" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="376" y="290" font-size="12" font-weight="600" fill="#f0f0f0">组长度是 1</text>
+        <text x="376" y="308" font-size="11" fill="#b0b0b0">两条循环都不调用 resolve</text>
+
+        <text x="708" y="22" font-size="12" font-weight="600" fill="#b7e4f2">线程</text>
+        <rect x="708" y="32" width="312" height="56" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="720" y="54" font-size="12" font-weight="600" fill="#f0f0f0">n_threads 收到 [1, 组数]</text>
+        <text x="720" y="72" font-size="11" fill="#b7e4f2">等于 1 时直接走串行函数</text>
+        <rect x="708" y="100" width="312" height="72" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="720" y="122" font-size="12" font-weight="600" fill="#f0f0f0">每线程自己的 SinkBuffer</text>
+        <text x="720" y="140" font-size="11" fill="#b7e4f2">fills 从 0 数。状态留在线程里</text>
+        <text x="720" y="158" font-size="11" fill="#b7e4f2">std::thread::scope</text>
+        <rect x="708" y="184" width="312" height="72" rx="6" fill="#163038" stroke="#4cb3d4"/>
+        <text x="720" y="206" font-size="12" font-weight="600" fill="#f0f0f0">按组顺序拼接</text>
+        <text x="720" y="224" font-size="11" fill="#b7e4f2">日志路径在 Journal::concat 重定 order_id</text>
+        <text x="720" y="242" font-size="11" fill="#b7e4f2">多线程出错时返回最左一段</text>
+        <rect x="708" y="268" width="312" height="56" rx="6" fill="#332818" stroke="#d4a24a"/>
+        <text x="720" y="290" font-size="12" font-weight="600" fill="#f0f0f0">抽样只看 seed、行、列</text>
+        <text x="720" y="308" font-size="11" fill="#f0ddb4">换线程数不改变这一格的随机数</text>
+      </svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0 0 6px">
+        两列共享现金，左列买入、右列卖出。Auto 把近似价值为负的卖出排在前面，买入才能用上刚刚释放的现金。买如果排在前面，会因为现金不够被安静地拒绝。
+        信号循环里没有待执行订单的列，近似价值记 0。订单循环对每一列都估算，估不出的是 NaN，排到最后。
+      </p>
+      <p class="small" style="margin:0">
+        预分配也写在并行路径的注释里：四个核上，缓冲按倍增长时加速是 1.46 倍，预分配到填充上界后是 1.70 倍。差别来自各线程同时进分配器。
+        测量数字在 <code>docs/ARCHITECTURE.md</code> §11.2，这里不另写一份。
+      </p>
+    </div>
+  </div>
+
+  <h2>现金何时入账</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>输入</th><th>何时</th><th>读哪里</th><th>记录</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">cash_deposits</td><td>开盘，任何订单定价之前</td><td>组的第一列</td><td class="mono">Deposit</td></tr>
+        <tr><td class="mono">cash_dividends</td><td>开盘，紧接存款</td><td>每列的每股股息 × 本根订单前的持仓。空头付出</td><td class="mono">Dividend</td></tr>
+        <tr><td class="mono">cash_earnings</td><td>收盘，组内订单都结束之后</td><td>每一列，按布局顺序。安静的根也记</td><td class="mono">Earning</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">本根买入的仓位不领这根的股息，本根卖出的仓位也不失去它。流出封顶之后，分析层用记下来的金额重算余额。现金流没有向量化夹具；检查在 analysis 的现金测试里。</p>
+
+  <h2 id="class">类图</h2>
+  <p class="muted">公开的分组、调用顺序，以及信号纯函数的两个类型。<code>FromOrders</code> 和 <code>FromSignals</code> 的字段都是 FlexArray，放在下面的表里。Stops、Pending、ColumnState 是循环私有的。</p>
+  <div class="panel">
+    <div class="cap">实心菱形是 Groups 持有三段 Vec。虚线是函数返回或读取，不是字段</div>
+    <div class="body">
+      <svg width="1040" height="380" viewBox="0 0 1040 380" role="img" aria-label="Groups、CallSeq、Signals、SizedOrder">
+        <defs>
+          <marker id="simDep" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M0,0 L10,4 L0,8 z" fill="none" stroke="#8a8a8a"/>
+          </marker>
+        </defs>
+        <rect x="20" y="36" width="250" height="300" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="32" y="58" font-size="11" fill="#d5ecb0">«struct»</text>
+        <text x="32" y="78" font-size="14" font-weight="600" fill="#f0f0f0">Groups</text>
+        <line x1="32" y1="90" x2="246" y2="90" stroke="#3d5a28"/>
+        <text x="32" y="112" font-size="12" fill="#d5ecb0">− lens: Vec&lt;usize&gt;</text>
+        <text x="32" y="132" font-size="12" fill="#d5ecb0">− starts: Vec&lt;usize&gt;</text>
+        <text x="32" y="152" font-size="12" fill="#d5ecb0">− of_col: Vec&lt;usize&gt;</text>
+        <line x1="32" y1="164" x2="246" y2="164" stroke="#3d5a28"/>
+        <text x="32" y="186" font-size="12" fill="#f0f0f0">+ ungrouped(n_cols)</text>
+        <text x="32" y="206" font-size="12" fill="#f0f0f0">+ from_lens(lens, n_cols)</text>
+        <text x="32" y="226" font-size="12" fill="#f0f0f0">+ is_shared() / max_len()</text>
+        <text x="32" y="246" font-size="12" fill="#f0f0f0">+ range(g) / len_of(g)</text>
+        <text x="32" y="266" font-size="12" fill="#f0f0f0">+ of_column(col)</text>
+        <text x="32" y="286" font-size="12" fill="#f0f0f0">+ chunks(n_threads)</text>
+        <polygon points="32,300 42,306 32,312 22,306" fill="#8fbf4a"/>
+        <text x="50" y="310" font-size="11" fill="#d5ecb0">持有上面三段长度</text>
+
+        <rect x="300" y="36" width="230" height="200" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="312" y="58" font-size="11" fill="#d5ecb0">«enum»</text>
+        <text x="312" y="78" font-size="14" font-weight="600" fill="#f0f0f0">CallSeq</text>
+        <line x1="312" y1="90" x2="510" y2="90" stroke="#3d5a28"/>
+        <text x="312" y="112" font-size="12" fill="#f0f0f0">+ Default</text>
+        <text x="312" y="132" font-size="12" fill="#f0f0f0">+ Auto</text>
+        <text x="312" y="152" font-size="12" fill="#f0f0f0">+ Explicit(&amp;[usize])</text>
+        <line x1="312" y1="164" x2="510" y2="164" stroke="#3d5a28"/>
+        <text x="312" y="186" font-size="12" fill="#f0f0f0">+ resolve(...)</text>
+        <text x="312" y="208" font-size="11" fill="#d5ecb0">默认变体是 Default</text>
+
+        <rect x="560" y="36" width="220" height="200" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="572" y="58" font-size="11" fill="#e4d4fb">«struct»</text>
+        <text x="572" y="78" font-size="14" font-weight="600" fill="#f0f0f0">Signals</text>
+        <line x1="572" y1="90" x2="760" y2="90" stroke="#4a3568"/>
+        <text x="572" y="112" font-size="12" fill="#f0f0f0">+ long_entry: bool</text>
+        <text x="572" y="132" font-size="12" fill="#f0f0f0">+ long_exit: bool</text>
+        <text x="572" y="152" font-size="12" fill="#f0f0f0">+ short_entry: bool</text>
+        <text x="572" y="172" font-size="12" fill="#f0f0f0">+ short_exit: bool</text>
+        <line x1="572" y1="184" x2="760" y2="184" stroke="#4a3568"/>
+        <text x="572" y="206" font-size="12" fill="#f0f0f0">+ any()</text>
+
+        <rect x="810" y="36" width="210" height="160" rx="6" fill="#2a2038" stroke="#c084fc"/>
+        <text x="822" y="58" font-size="11" fill="#e4d4fb">«struct»</text>
+        <text x="822" y="78" font-size="14" font-weight="600" fill="#f0f0f0">SizedOrder</text>
+        <line x1="822" y1="90" x2="1000" y2="90" stroke="#4a3568"/>
+        <text x="822" y="112" font-size="12" fill="#f0f0f0">+ size: f64</text>
+        <text x="822" y="132" font-size="12" fill="#f0f0f0">+ size_type</text>
+        <text x="822" y="152" font-size="12" fill="#f0f0f0">+ direction</text>
+        <text x="822" y="176" font-size="11" fill="#e4d4fb">0 表示没有订单</text>
+
+        <path d="M780 140 H810" fill="none" stroke="#8a8a8a" stroke-dasharray="4 3" marker-end="url(#simDep)"/>
+        <text x="300" y="268" font-size="12" fill="#909090">两条请求各自带一份 CallSeq</text>
+        <text x="300" y="290" font-size="12" fill="#909090">订单循环的 groups 是 Groups</text>
+        <text x="300" y="312" font-size="12" fill="#909090">信号循环的 groups 是 Option</text>
+        <text x="300" y="334" font-size="12" fill="#909090">None 时展开成 ungrouped</text>
+        <text x="560" y="268" font-size="12" fill="#909090">signals_to_size 返回 SizedOrder</text>
+        <text x="560" y="290" font-size="12" fill="#909090">from_direction_mode、from_stop</text>
+        <text x="560" y="312" font-size="12" fill="#909090">三个 resolve，顺序固定</text>
+        <text x="560" y="334" font-size="12" fill="#909090">approx_order_value 给 Auto 排序</text>
+      </svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0"><code>stop_price</code> 是 from_signals 的公开函数，返回这一根的成交价或 NaN。Stops 停在列状态里，不进这张图。</p></div>
+  </div>
+
+  <h2 id="types">核心类型</h2>
+  <h3>入口</h3>
+  <div class="wrap">
+    <table class="types">
+      <thead><tr><th>函数</th><th>返回</th><th>做什么</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">simulate_from_orders</td><td class="mono">OrderRecords</td><td>单线程。日志调用存在，OrderRecords 把日志丢掉</td></tr>
+        <tr><td class="mono">simulate_from_orders_logged</td><td class="mono">Journal</td><td>同一份成交，另外保留要日志的订单。默认标志下日志半边是空的</td></tr>
+        <tr><td class="mono">simulate_from_orders_parallel</td><td class="mono">OrderRecords</td><td>按组切线程。输出与串行逐字节相同</td></tr>
+        <tr><td class="mono">simulate_from_orders_logged_parallel</td><td class="mono">Journal</td><td>同上，合并时重定每条日志的 order_id</td></tr>
+        <tr><td class="mono">simulate_from_signals</td><td class="mono">OrderRecords</td><td>信号循环的单线程入口</td></tr>
+        <tr><td class="mono">simulate_from_signals_logged</td><td class="mono">Journal</td><td>成交与未加日志的那次相同</td></tr>
+        <tr><td class="mono">simulate_from_signals_parallel</td><td class="mono">OrderRecords</td><td>同样按组切。组数是 1 时就是串行</td></tr>
+        <tr><td class="mono">simulate_from_signals_logged_parallel</td><td class="mono">Journal</td><td>日志与串行的日志入口一致</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px"><code>DEFAULT_MIN_SIZE</code> 是 1e-8。两条请求的 <code>min_size</code> 默认都用它。内核里 Order 自己的默认最小规模是 0，省掉这个字段会让 5e-9 的订单在这里成交、在参考实现里被拒。</p>
+
+  <h3>FromOrders 与 FromSignals 里不一样的默认值</h3>
+  <div class="wrap">
+    <table class="types">
+      <thead><tr><th>字段</th><th>订单循环</th><th>信号循环</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">direction</td><td>Both</td><td>LongOnly</td></tr>
+        <tr><td class="mono">price 的 −∞</td><td>上一根收盘。第一根是 NaN</td><td>本根开盘；开盘是 NaN 再用上一根收盘</td></tr>
+        <tr><td class="mono">size</td><td>+∞，原样交给内核</td><td>+∞ 表示尽量多。只接受 Amount、Value、Percent</td></tr>
+        <tr><td class="mono">groups</td><td>Groups，默认 ungrouped(0)。<code>new</code> 按列数重建</td><td>Option。None 展开成 ungrouped(n_cols)</td></tr>
+        <tr><td class="mono">OHLC</td><td>只有 close</td><td>open、high、low、close，默认都是 NaN</td></tr>
+        <tr><td class="mono">信号与止损</td><td>没有这些字段</td><td>四组信号默认假。sl_stop、tp_stop 默认 NaN。use_stops 默认真</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">两边相同的默认：init_cash 100，fees、fixed_fees、slippage、reject_prob 为 0，seed 0，lock_cash 假，allow_partial 真，raise_reject 假，log 假，min_size 1e-8，max_size +∞，size_granularity NaN，cash_limit +∞，val_price +∞，三种现金流 0，ffill_val_price 真，update_value 假，call_seq 为 Default，size_type 为 Amount，price 为 +∞。</p>
+
+  <h3>信号循环多出来的默认</h3>
+  <div class="wrap">
+    <table class="types">
+      <thead><tr><th>字段</th><th>默认</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">accumulate</td><td>Disabled</td><td>关闭时，出场是把持仓全部平掉，请求规模不参与</td></tr>
+        <tr><td class="mono">upon_long_conflict / upon_short_conflict</td><td>Ignore</td><td>同一方向入场和出场一起出现时，两个都丢掉</td></tr>
+        <tr><td class="mono">upon_dir_conflict</td><td>Ignore</td><td>多头入场和空头入场一起出现时，两个都丢掉</td></tr>
+        <tr><td class="mono">upon_opposite_entry</td><td>ReverseReduce</td><td>对着持仓的入场保留，累积也保留</td></tr>
+        <tr><td class="mono">stop_entry_price</td><td>Close</td><td>开仓或反手时，止损锚在收盘价</td></tr>
+        <tr><td class="mono">stop_exit_price</td><td>StopLimit</td><td>触发后成交在止损价，滑点强制为 0</td></tr>
+        <tr><td class="mono">upon_stop_exit</td><td>Close</td><td>止损变成持仓那一侧的出场，并关掉累积</td></tr>
+        <tr><td class="mono">upon_stop_update</td><td>Override</td><td>加仓时，已有的止损距离不是 NaN 才换锚</td></tr>
+        <tr><td class="mono">sl_trail</td><td>false</td><td>为真时，多头用最高价上移，空头用最低价下移</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>近似订单价值</h3>
+  <p class="muted">正数表示要花现金，负数表示会释放现金。ShortOnly 先把规模取负。资产价值是持仓乘以最后一次估值价。</p>
+  <div class="wrap">
+    <table class="types">
+      <thead><tr><th>size_type</th><th>近似</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Amount</td><td class="mono">size * val_price</td></tr>
+        <tr><td class="mono">Value</td><td class="mono">size</td></tr>
+        <tr><td class="mono">Percent，规模 ≥ 0</td><td class="mono">size * cash</td></tr>
+        <tr><td class="mono">Percent，LongOnly 且规模 &lt; 0</td><td class="mono">size * asset_value</td></tr>
+        <tr><td class="mono">Percent，其余负规模</td><td class="mono">size * (2 * max(asset, 0) + max(free_cash, 0))</td></tr>
+        <tr><td class="mono">TargetAmount</td><td class="mono">size * val_price − asset</td></tr>
+        <tr><td class="mono">TargetValue</td><td class="mono">size − asset</td></tr>
+        <tr><td class="mono">TargetPercent</td><td class="mono">size * value − asset</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">平空头要买回仓位，还要释放预留，所以百分数那一支把多头资产乘了两次。插入排序每根每组做一次，组里只有几列。</p>
+
+  <h2>不能绕开的规则</h2>
+  <div class="note" style="margin-bottom:10px">
+    时间轴上 <code>state[i] = f(state[i−1], bar[i])</code>，所以循环本身不做 SIMD。并行只发生在互不共享现金的组之间。
+    金融比较走 <a href="phasor-core.html">phasor-core</a> 的 math：现金流用 <code>add</code>，负规模用 <code>is_less</code>。组净值里「持仓是不是 0」用精确相等。
+    成交规则在 <a href="phasor-exec.html">phasor-exec</a>。
+  </div>
+  <pre>组长度之和必须等于 n_cols          // 0 长度或对不上都是 Invariant
+CallSeq 只在组长度 &gt; 1 时 resolve
+组净值沿用到这一根的下一笔          // update_value 为真才因成交改写
++∞ 价格 → 本根收盘
+订单循环的 −∞ 价格 → 上一根收盘    // 第一根是 NaN
+信号循环的 −∞ 价格 → 本根开盘      // 开盘是 NaN 时才用上一根收盘
+估值的 −∞ → 上一根收盘             // 两条循环相同，且先于止损改价
+raise_reject 在 execute_validated 返回之后
+抽样 = uniform(seed, row, col)     // 仅当 reject_prob &gt; 0
+串行各组共用一个 fills              // 并行每线程从 0，合并时重定基
+信号规模只许 Amount / Value / Percent
+负的 size 是 Invariant              // 方向写在信号上
+百分数不能反手                      // 反手是一笔，类型变成 Amount
+ShortOnly 在进内核前再取一次负号    // 内核里还会再取一次
+止损距离 &lt; 0 是 Invariant
+跳空穿过止损 → 成交在开盘
+止损先测试，然后才跟踪
+现金流的无穷金额是 Invariant        // NaN 当成 0
+流出封顶在 max(free_cash, 0)</pre>
+
+  <h2 id="table">谁依赖它，用来做什么</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>crate</th><th>用到的模块</th><th>用来做什么</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">phasor 的 prelude 再导出 CallSeq、Groups、FromSignals、simulate_from_signals、simulate_from_signals_parallel。<code>phasor::sim</code> 暴露整个 crate，包括订单循环的四个入口。prelude 本身不导出 FromOrders。</p>
+
+  <h2>源文件</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">crates/phasor-sim/src/lib.rs</td><td>模块可见性、DEFAULT_MIN_SIZE、count_where，以及八个入口的再导出。</td></tr>
+        <tr><td class="mono">src/from_orders.rs</td><td>FromOrders、两遍的 simulate_group、updated_value、四个订单入口。单测在文件内，不计入依赖图。</td></tr>
+        <tr><td class="mono">src/from_signals.rs</td><td>FromSignals、stop_price、prepare_order、止损再武装、四个信号入口。</td></tr>
+        <tr><td class="mono">src/groups.rs</td><td>Groups、CallSeq、approx_order_value、插入排序。</td></tr>
+        <tr><td class="mono">src/signals.rs</td><td>Signals、from_direction_mode、from_stop、三个冲突函数、signals_to_size。</td></tr>
+        <tr><td class="mono">src/cash.rs</td><td>私有。is_off、at_open、earn。流出封顶。</td></tr>
+        <tr><td class="mono">src/random.rs</td><td>私有。uniform(seed, row, col)。</td></tr>
+        <tr><td class="mono">tests/parity_from_orders.rs</td><td>订单循环与已提交夹具对照。页面不改这些夹具。</td></tr>
+        <tr><td class="mono">tests/parity_from_signals.rs</td><td>信号循环对照。</td></tr>
+        <tr><td class="mono">tests/parity_signals.rs</td><td>纯函数逐个对照。</td></tr>
+        <tr><td class="mono">tests/parity_cash_sharing.rs</td><td>共享现金与调用顺序。</td></tr>
+        <tr><td class="mono">tests/order_controls.rs</td><td>订单控制项。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:14px">examples/bench.rs 和 examples/scaling.rs 不计入上面的依赖图。枚举在 <a href="phasor-model.html">phasor-model</a>。内核在 <a href="phasor-exec.html">phasor-exec</a>。容差和 FlexArray 在 <a href="phasor-core.html">phasor-core</a>。</p>
+
+  <!-- 以下章节来自 2026-10-15 的代码走读问答，面向第一次读循环的人。 -->
+
+  <h2 id="inputs">输入长什么样：1m × 5 年 × 3 个标的</h2>
+  <p>
+    sim 只吃 <code>(n_rows, n_cols)</code> 的矩阵和标量/向量参数，不认识“均线”。K 线对齐、复权、asof 关联都发生在进入 sim 之前的数据层
+    （<code>BarPanel</code>，见 <code>crates/phasor-py/python/phasor/data.py</code>）。策略参数（快/慢均线窗口）是 Python 策略函数的参数，引擎只收到算好后的布尔矩阵。
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">市场数据与信号</h3>
+      <p>
+        OHLC 都是 <code>(T, 3)</code> 的 <code>float64</code> 矩阵，Fortran（列主序）布局，numpy 缓冲零拷贝借用。
+        用止损时 high/low 必须给。<code>entries/exits</code> 是 <code>(T, 3)</code> 的 bool 矩阵，通常极稀疏。
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">交易参数：FlexArray 四种形态</h3>
+      <p>
+        标量（<code>fees=0.001</code>，全部格子共用，不访问内存）、每列一个（<code>init_cash</code>）、每 bar 一个（长度 T）、完整 (T,3) 矩阵。
+        <code>get(row,col)</code> 是一次内联 match，见 <a href="phasor-core.html">phasor-core</a>。
+      </p>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="cap">规模换算。引擎不理解时间粒度，只数 bar 序号；“1m”只影响 T 和 ann_factor（小时级用 365×24）</div>
+    <div class="body">
+      <table>
+        <thead><tr><th>项</th><th>数值</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">T</td><td>≈ 2,628,000</td><td>5 × 365 × 24 × 60。缺 bar 以 time 轴为准，close 里是 NaN</td></tr>
+          <tr><td class="mono">close 单字段</td><td>≈ 63 MB</td><td>2.63M × 3 × 8 B</td></tr>
+          <tr><td class="mono">OHLC 合计</td><td>≈ 250 MB</td><td>四个字段顺序排列在内存里，沿列向下读是顺序访问</td></tr>
+          <tr><td class="mono">信号矩阵</td><td>稀疏 bool</td><td>双均线 5 年每列只有几十到几百个 true</td></tr>
+          <tr><td class="mono">成交记录</td><td>几百条</td><td>按信号置位数的两倍预分配，不按 T×列预留</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">
+        传 C-order 二维数组会被直接拒绝（<code>crates/phasor-py/src/array.rs</code> 的 <code>columns_of</code>）：按列主序误读行主序数组等于把行情转置，照样跑出“看起来正常”的错误回测。Python 包装层自动 <code>np.asfortranarray</code>。
+      </p>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="cap">端到端数据流：向量化输入 → group 并行的串行时间轴 → 向量化记录</div>
+    <div class="body">
+      <svg width="1040" height="452" viewBox="0 0 1040 452" role="img" aria-label="1m 五年三标的回测的数据流与内存布局">
+        <defs>
+          <marker id="plArr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a"/>
+          </marker>
+        </defs>
+
+        <!-- pipeline nodes -->
+        <g font-size="11">
+          <rect x="60" y="26" width="140" height="52" rx="6" fill="#1e2a40" stroke="#3a7afe"/>
+          <text x="130" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">Parquet / CSV</text>
+          <text x="130" y="66" text-anchor="middle" fill="#aec4f5">库不下载；examples 才联网</text>
+
+          <rect x="216" y="26" width="140" height="52" rx="6" fill="#2a2440" stroke="#7b64b8"/>
+          <text x="286" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">BarPanel (T,3)</text>
+          <text x="286" y="66" text-anchor="middle" fill="#d5cdf0">Arrow 解码 · 时间对齐</text>
+
+          <rect x="372" y="26" width="140" height="52" rx="6" fill="#2a2038" stroke="#c084fc"/>
+          <text x="442" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">信号 (T,3) bool</text>
+          <text x="442" y="66" text-anchor="middle" fill="#e4d4fb">numpy 滚动均线 · 延迟 1</text>
+
+          <rect x="528" y="26" width="140" height="52" rx="6" fill="#3a2430" stroke="#e06b8a"/>
+          <text x="598" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">from_signals</text>
+          <text x="598" y="66" text-anchor="middle" fill="#f0c0d0">prepare_order 逐 bar</text>
+
+          <rect x="684" y="26" width="140" height="52" rx="6" fill="#243018" stroke="#8fbf4a"/>
+          <text x="754" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">3 线程 × 3 group</text>
+          <text x="754" y="66" text-anchor="middle" fill="#d5ecb0">组内时间轴仍串行</text>
+
+          <rect x="840" y="26" width="140" height="52" rx="6" fill="#262626" stroke="#8a8a8a"/>
+          <text x="910" y="48" text-anchor="middle" font-size="12" font-weight="600" fill="#f0f0f0">OrderRecords</text>
+          <text x="910" y="66" text-anchor="middle" fill="#c0c0c0">拼接赋 id → Portfolio</text>
+
+          <path d="M200 52 H214" stroke="#8a8a8a" marker-end="url(#plArr)"/>
+          <path d="M356 52 H370" stroke="#8a8a8a" marker-end="url(#plArr)"/>
+          <path d="M512 52 H526" stroke="#8a8a8a" marker-end="url(#plArr)"/>
+          <path d="M668 52 H682" stroke="#8a8a8a" marker-end="url(#plArr)"/>
+          <path d="M824 52 H838" stroke="#8a8a8a" marker-end="url(#plArr)"/>
+        </g>
+
+        <text x="60" y="112" font-size="12" font-weight="600" fill="#f0f0f0">引擎只看到两个列主序矩阵：numpy 缓冲零拷贝借用，沿列向下走是顺序读</text>
+
+        <!-- close matrix -->
+        <text x="60" y="138" font-size="11" font-weight="600" fill="#b7e4f2">close: f64，连续排列（单字段约 63 MB，OHLC 约 250 MB）</text>
+        <g font-size="10" fill="#d0d0d0">
+          <rect x="60" y="146" width="64" height="22" fill="#243038" stroke="#3d5a66"/>
+          <rect x="124" y="146" width="64" height="22" fill="#243038" stroke="#3d5a66"/>
+          <rect x="188" y="146" width="64" height="22" fill="#243038" stroke="#3d5a66"/>
+          <text x="92" y="161" text-anchor="middle" fill="#b7e4f2">BTC</text>
+          <text x="156" y="161" text-anchor="middle" fill="#b7e4f2">ETH</text>
+          <text x="220" y="161" text-anchor="middle" fill="#b7e4f2">SOL</text>
+          <!-- BTC -->
+          <g fill="#1f2630" stroke="#3d3d3d">
+            <rect x="60" y="168" width="64" height="22"/><rect x="60" y="190" width="64" height="22"/>
+            <rect x="60" y="212" width="64" height="22"/><rect x="60" y="234" width="64" height="22"/>
+            <rect x="60" y="256" width="64" height="22"/><rect x="60" y="278" width="64" height="22"/>
+          </g>
+          <g fill="#1f2630" stroke="#3d3d3d">
+            <rect x="124" y="168" width="64" height="22"/><rect x="124" y="190" width="64" height="22"/>
+            <rect x="124" y="212" width="64" height="22"/><rect x="124" y="234" width="64" height="22"/>
+            <rect x="124" y="256" width="64" height="22"/><rect x="124" y="278" width="64" height="22"/>
+          </g>
+          <g fill="#1f2630" stroke="#3d3d3d">
+            <rect x="188" y="168" width="64" height="22"/><rect x="188" y="190" width="64" height="22"/>
+            <rect x="188" y="212" width="64" height="22"/><rect x="188" y="234" width="64" height="22"/>
+            <rect x="188" y="256" width="64" height="22"/><rect x="188" y="278" width="64" height="22"/>
+          </g>
+          <g text-anchor="middle">
+            <text x="92" y="183">28900.0</text><text x="92" y="205">28912.5</text><text x="92" y="227">28908.0</text>
+            <text x="92" y="249">28920.0</text><text x="92" y="271">28933.0</text><text x="92" y="293">28925.0</text>
+            <text x="156" y="183">730.0</text><text x="156" y="205">731.2</text><text x="156" y="227">730.8</text>
+            <text x="156" y="249">732.5</text><text x="156" y="271">733.1</text><text x="156" y="293">732.9</text>
+            <text x="220" y="183">2.10</text><text x="220" y="205">2.11</text><text x="220" y="227">2.09</text>
+            <text x="220" y="249">2.12</text><text x="220" y="271">2.13</text><text x="220" y="293">2.12</text>
+          </g>
+          <text x="184" y="320" text-anchor="middle" font-size="11" fill="#909090">⋮ 共 T ≈ 2,628,000 行</text>
+        </g>
+        <path d="M60 344 H244" stroke="#4cb3d4" stroke-width="2" marker-end="url(#plArr)"/>
+        <text x="60" y="366" font-size="11" fill="#b7e4f2">内存方向：先 BTC 全部 2.63M 个 f64，再 ETH、SOL —— 循环沿列向下读，缓存命中</text>
+        <text x="60" y="384" font-size="11" fill="#909090">C-order 数组被 columns_of 拒绝：列主序误读行主序等于把行情转置</text>
+
+        <!-- sparse signals -->
+        <text x="430" y="138" font-size="11" font-weight="600" fill="#f0c0d0">entries / exits: 稀疏 bool（每列几十~几百个 true）</text>
+        <g font-size="10">
+          <g fill="#262626" stroke="#3d3d3d">
+            <!-- 3 cols x 6 rows: x 430/486/542, w56, h22 from y146 -->
+          </g>
+          <g>
+            <g fill="#262626" stroke="#3d3d3d">
+              <rect x="430" y="168" width="56" height="22"/><rect x="430" y="190" width="56" height="22"/>
+              <rect x="430" y="212" width="56" height="22"/><rect x="430" y="234" width="56" height="22"/>
+              <rect x="430" y="256" width="56" height="22"/><rect x="430" y="278" width="56" height="22"/>
+              <rect x="486" y="168" width="56" height="22"/><rect x="486" y="190" width="56" height="22"/>
+              <rect x="486" y="212" width="56" height="22"/><rect x="486" y="234" width="56" height="22"/>
+              <rect x="486" y="256" width="56" height="22"/><rect x="486" y="278" width="56" height="22"/>
+              <rect x="542" y="168" width="56" height="22"/><rect x="542" y="190" width="56" height="22"/>
+              <rect x="542" y="212" width="56" height="22"/><rect x="542" y="234" width="56" height="22"/>
+              <rect x="542" y="256" width="56" height="22"/><rect x="542" y="278" width="56" height="22"/>
+            </g>
+            <g text-anchor="middle" font-size="11">
+              <!-- BTC: cross at row index 2 -->
+              <text x="458" y="183" fill="#606060">false</text>
+              <text x="458" y="205" fill="#606060">false</text>
+              <text x="458" y="227" fill="#f0c0d0" font-weight="600">true</text>
+              <text x="458" y="249" fill="#606060">false</text>
+              <text x="458" y="271" fill="#606060">false</text>
+              <text x="458" y="293" fill="#606060">false</text>
+              <!-- ETH: cross at row 4 -->
+              <text x="514" y="183" fill="#606060">false</text>
+              <text x="514" y="205" fill="#606060">false</text>
+              <text x="514" y="227" fill="#606060">false</text>
+              <text x="514" y="249" fill="#606060">false</text>
+              <text x="514" y="271" fill="#f0c0d0" font-weight="600">true</text>
+              <text x="514" y="293" fill="#606060">false</text>
+              <!-- SOL: nothing in view -->
+              <text x="570" y="183" fill="#606060">false</text>
+              <text x="570" y="205" fill="#606060">false</text>
+              <text x="570" y="227" fill="#606060">false</text>
+              <text x="570" y="249" fill="#606060">false</text>
+              <text x="570" y="271" fill="#606060">false</text>
+              <text x="570" y="293" fill="#606060">false</text>
+            </g>
+            <text x="514" y="320" text-anchor="middle" font-size="11" fill="#909090">⋮ 2.63M 行</text>
+          </g>
+          <!-- header -->
+          <rect x="430" y="146" width="56" height="22" fill="#33222c" stroke="#7a4658"/>
+          <rect x="486" y="146" width="56" height="22" fill="#33222c" stroke="#7a4658"/>
+          <rect x="542" y="146" width="56" height="22" fill="#33222c" stroke="#7a4658"/>
+          <text x="458" y="161" text-anchor="middle" fill="#f0c0d0">BTC</text>
+          <text x="514" y="161" text-anchor="middle" fill="#f0c0d0">ETH</text>
+          <text x="570" y="161" text-anchor="middle" fill="#f0c0d0">SOL</text>
+        </g>
+        <text x="660" y="160" font-size="11" fill="#d0d0d0">绝大多数 bar：</text>
+        <text x="660" y="180" font-size="11" fill="#f0c0d0">prepare_order 第 3 步返回 None</text>
+        <text x="660" y="200" font-size="11" fill="#909090">成本≈顺序读 + 一个分支；只有几百根进撮合内核</text>
+
+        <rect x="430" y="330" width="550" height="64" rx="6" fill="#20243a" stroke="#3a5a8a"/>
+        <text x="446" y="354" font-size="11" font-weight="600" fill="#aec4f5">参数走 FlexArray（借用，不展开）</text>
+        <text x="446" y="374" font-size="11" fill="#c0d4f5">Scalar（不访存）· PerColumn · PerRow · Full —— get(row,col) 是一次内联 match</text>
+        <text x="446" y="390" font-size="11" fill="#c0d4f5">MappedColumns / column_map：5000 个逻辑列复用内存里的 100 列真实行情</text>
+      </svg>
+    </div>
+  </div>
+  <p class="small">
+    <code>@strategy</code> 的 <code>signal_delay=1</code> 是默认值：bar i 收盘确认的金叉在 bar i+1 才成为订单，配合默认 <code>price=+∞</code>（执行 bar 的收盘）防前视。见 <code>crates/phasor-py/python/phasor/strategy.py</code>。
+  </p>
+
+  <h2 id="walkthrough">走一遍：A/B 共享账户的 4 根 bar</h2>
+  <p>
+    最小数字例子：A、B 两个标的共用一个 200 元账户（同一 group），4 根 bar，手续费和滑点为 0。
+    A 设 <code>sl_stop=0.1</code>（10% 止损，锚定 Close，StopLimit 成交），B 不设止损。
+    bar 0 两个同时做多入场，size 分别为 5 股 ×10 和 3 股 ×20；bar 3 B 出场。
+  </p>
+  <div class="panel">
+    <div class="cap">逐 bar 账本。bar 0 的两笔买单都按开盘时的组价值 200 定价，后买的看不到前一笔改过的账本</div>
+    <div class="body">
+      <table>
+        <thead><tr><th>bar</th><th>A 价格区间</th><th>B 收盘</th><th>事件</th><th>simulate_group 里发生什么</th><th>成交后现金 / 持仓</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">0</td><td>10</td><td>20</td>
+            <td>A、B 同时做多入场</td>
+            <td>整组解析价格 → group_value=200 → Auto 按近似金额升序（A 50 先，B 60 后）→ re-arm：A 止损位 10×(1−0.1)=<b>9</b></td>
+            <td>cash 90；A +5，B +3</td>
+          </tr>
+          <tr>
+            <td class="mono">1</td><td>low 10.8 / 11</td><td>21</td>
+            <td>无信号（安静 bar）</td>
+            <td>止损位 9，low 10.8 &gt; 9 未触发；四个信号全 false → 全组快速路径只结算 earnings</td>
+            <td>不变</td>
+          </tr>
+          <tr>
+            <td class="mono">2</td><td>open 9.5 / low 8.4 / high 9.6 / close 8.5</td><td>22</td>
+            <td>A 止损触发</td>
+            <td>open 9.5 &gt; 9（未跳空），9 落在 [8.4, 9.6] → 成交价 <b>9</b>；<code>from_stop</code> 替换输入信号，<code>stop_limit=true</code> 走零滑点变体；卖出后清空止损</td>
+            <td>cash 135；A 0，B +3</td>
+          </tr>
+          <tr>
+            <td class="mono">3</td><td>12</td><td>23</td>
+            <td>B 多头出场</td>
+            <td>long_exit → 全平 3 股 ×23</td>
+            <td>cash 204；全平</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">
+        最终四条成交按列号排序：(0,A 买5@10)、(0,B 买3@20)、(2,A 卖5@9)、(3,B 卖3@23)。期末现金 200−110+45+69=204。
+        若 bar 2 的 open 直接开在 8.0（跳空），成交价是 8.0：止损是“你要求的价格”不是“你拿到的价格”（<code>stop_price</code>，from_signals.rs:276）。
+      </p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cap">4 根 bar 的时间轴：价格、止损位与共享现金。圆圈是成交，菱形是止损触发；虚线 9 是止损位</div>
+    <div class="body">
+      <div class="legend">
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#4cb3d4"></i>A 价格（含 bar 2 的开高低收）</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#7fb8c9"></i>B 收盘</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#2fbfa8"></i>共享现金</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#d35d5d"></i>止损位 / 触发</span>
+      </div>
+      <svg width="1040" height="360" viewBox="0 0 1040 360" role="img" aria-label="A/B 共享账户四根 bar 的价格与现金">
+        <defs>
+          <marker id="wtArr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a"/>
+          </marker>
+        </defs>
+
+        <!-- gridlines -->
+        <g stroke="#333333" stroke-dasharray="3 4">
+          <line x1="110" y1="48" x2="110" y2="290"/><line x1="380" y1="48" x2="380" y2="290"/>
+          <line x1="650" y1="48" x2="650" y2="290"/><line x1="920" y1="48" x2="920" y2="290"/>
+        </g>
+
+        <!-- stop level 9 across bars 0..2 -->
+        <line x1="110" y1="155" x2="785" y2="155" stroke="#d35d5d" stroke-dasharray="6 4" stroke-width="1.5"/>
+        <text x="790" y="159" font-size="11" fill="#f0b4b4">止损位 9（A，bar 0 收盘锚定）</text>
+
+        <!-- A price polyline -->
+        <polyline points="110,140 380,125 650,165 920,112" fill="none" stroke="#4cb3d4" stroke-width="2"/>
+        <!-- B close polyline -->
+        <polyline points="110,46 380,40 650,34 920,28" fill="none" stroke="#7fb8c9" stroke-width="2" stroke-dasharray="5 3"/>
+
+        <!-- bar 2 OHLC for A: open 9.5, high 9.6, low 8.4, close 8.5 -->
+        <line x1="650" y1="46" x2="650" y2="175" stroke="#b7e4f2" stroke-width="1"/>
+        <line x1="640" y1="50" x2="660" y2="50" stroke="#b7e4f2" stroke-width="1.5"/>
+        <line x1="640" y1="165" x2="660" y2="165" stroke="#b7e4f2" stroke-width="1.5"/>
+
+        <!-- fills -->
+        <g>
+          <circle cx="110" cy="140" r="7" fill="#4cb3d4" stroke="#0e2230" stroke-width="2"/>
+          <circle cx="110" cy="46" r="7" fill="#7fb8c9" stroke="#0e2230" stroke-width="2"/>
+          <polygon points="650,146 661,155 650,164 639,155" fill="#d35d5d" stroke="#301414" stroke-width="2"/>
+          <circle cx="920" cy="28" r="7" fill="#7fb8c9" stroke="#0e2230" stroke-width="2"/>
+        </g>
+
+        <!-- fill captions -->
+        <g font-size="11">
+          <text x="124" y="136" fill="#f0f0f0" font-weight="600">A 买 5 @10</text>
+          <text x="124" y="68" fill="#d0e8ee">B 买 3 @20</text>
+          <text x="540" y="190" fill="#f0b4b4">A 止损卖 5 @9（区间内触发，不是收盘 8.5）</text>
+          <text x="790" y="24" fill="#d0e8ee">B 卖 3 @23</text>
+          <text x="556" y="28" fill="#909090">open 9.5 未跳空 · 9 落在 [8.4, 9.6]</text>
+        </g>
+
+        <!-- bar labels -->
+        <g font-size="11" fill="#909090" text-anchor="middle">
+          <text x="110" y="312">bar 0</text><text x="380" y="312">bar 1</text>
+          <text x="650" y="312">bar 2</text><text x="920" y="312">bar 3</text>
+        </g>
+        <g font-size="10" fill="#707070" text-anchor="middle">
+          <text x="110" y="328">两个入场信号</text><text x="380" y="328">安静 bar：信号全 false，止损 9 未碰</text>
+          <text x="650" y="328">A 止损触发替换信号；B 无信号</text><text x="920" y="328">B long_exit 全平</text>
+        </g>
+
+        <!-- cash ladder -->
+        <polyline points="110,244 110,270 380,270 650,228 920,183" fill="none" stroke="#2fbfa8" stroke-width="2"
+                  marker-start="url(#wtArr)" marker-mid="url(#wtArr)" marker-end="url(#wtArr)"/>
+        <g font-size="11" fill="#b7efe4">
+          <text x="60" y="248">200</text>
+          <text x="60" y="274">90</text>
+          <text x="596" y="224">135</text>
+          <text x="872" y="179">204</text>
+        </g>
+        <text x="56" y="216" font-size="11" fill="#9ad8cc">现金</text>
+      </svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">
+        现金阶梯是组内共享的：200 −50(A) −60(B) = 90；bar 1 安静但 earnings 照算（本例为 0）；+45 止损卖出；+69 出场 = 204。
+        若 bar 2 开盘价在止损位下方，菱形会画在开盘价而不是水平虚线处。
+      </p>
+    </div>
+  </div>
+
+  <h2 id="dualma">三个独立账户跑双均线</h2>
+  <p>
+    BTC / ETH / SOL 各 10,000 元独立现金，允许做空。不传 <code>cash_sharing</code> 时是三个长度 1 的 group，
+    <code>shared=false</code>，跳过组价值计算和 CallSeq；<code>threads=3</code> 时三个 group 并行，时间轴各自串行。
+  </p>
+  <pre>@strategy
+def dual_ma(data, fast=10, slow=30):
+    f = data["close"].rolling(fast).mean()
+    s = data["close"].rolling(slow).mean()
+    return crossed_above(f, s), crossed_above(s, f)
+
+pf = dual_ma.run(
+    panel,                  # OHLC (T,3)，列 = BTC, ETH, SOL
+    direction="both",       # entries→做多入场；exits 在 Both 下是“做空入场”
+    init_cash=10_000,       # 每个账户各一份
+    size=np.inf,            # 满仓：具体股数由 exec 内核按该账户现金算
+    fees=0.001,
+    threads=3,
+)</pre>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>bar（BTC 列）</th><th>信号</th><th>prepare_order 结果</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">0–9</td><td>全 false</td><td>安静 bar 早退，成本≈顺序读 + 一个分支</td></tr>
+        <tr><td class="mono">10 金叉</td><td class="mono">long_entry</td><td>空仓 → 买，+∞ 表示用全部可用现金</td></tr>
+        <tr><td class="mono">11–29</td><td>false</td><td>持多但无信号，早退</td></tr>
+        <tr><td class="mono">30 死叉</td><td class="mono">exits → short_entry</td><td>持多 + 做空入场，默认 ReverseReduce → <b>一笔订单反手</b>：平多 + 开空，size = −持仓量 − 新开空量（signals.rs:348）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2" style="margin-top:12px">
+    <div class="card">
+      <h3 style="margin-top:0">共用一个 30,000 账户</h3>
+      <p><code>cash_sharing=True, group_lens=[3]</code>：三列是同一 group，组内逐 bar 顺序执行；TargetPercent 按整组价值定价；<code>call_seq="auto"</code> 先卖后买。整个 group 不可并行。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">参数扫描</h3>
+      <p><code>dual_ma.sweep(panel, params=[...])</code>：50 组参数 × 3 标的拼成 150 列，<code>column_map</code> 让 150 个逻辑列复用内存里 3 列行情（FlexArray::MappedColumns），150 个独立 group 并行。</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cap">两种分组的执行形态。左：默认 ungrouped，group 之间三线程并行。右：cash_sharing，组内一列顺序执行的时间轴</div>
+    <div class="body">
+      <svg width="1040" height="360" viewBox="0 0 1040 360" role="img" aria-label="独立账户与共享现金账户的并行结构对比">
+        <defs>
+          <marker id="grArr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a"/>
+          </marker>
+        </defs>
+
+        <text x="20" y="30" font-size="12" font-weight="600" fill="#d5ecb0">独立账户：Groups::ungrouped(3)，三个 group 各进一个线程</text>
+
+        <!-- three lanes -->
+        <g font-size="11">
+          <rect x="20" y="44" width="470" height="44" rx="6" fill="#243018" stroke="#8fbf4a"/>
+          <text x="34" y="72" fill="#f0f0f0" font-weight="600">BTC · cash 10000</text>
+          <g fill="#304020" stroke="#7aa040">
+            <rect x="160" y="56" width="22" height="20"/><rect x="186" y="56" width="22" height="20"/>
+            <rect x="212" y="56" width="22" height="20"/><rect x="238" y="56" width="22" height="20"/>
+            <rect x="264" y="56" width="22" height="20"/><rect x="290" y="56" width="22" height="20"/>
+          </g>
+          <rect x="212" y="56" width="22" height="20" fill="#4a6a2a"/>
+          <text x="330" y="72" fill="#909090">⋮ 2.63M 根 · 线程 0</text>
+
+          <rect x="20" y="96" width="470" height="44" rx="6" fill="#243018" stroke="#8fbf4a"/>
+          <text x="34" y="124" fill="#f0f0f0" font-weight="600">ETH · cash 10000</text>
+          <g fill="#304020" stroke="#7aa040">
+            <rect x="160" y="108" width="22" height="20"/><rect x="186" y="108" width="22" height="20"/>
+            <rect x="212" y="108" width="22" height="20"/><rect x="238" y="108" width="22" height="20"/>
+            <rect x="264" y="108" width="22" height="20"/><rect x="290" y="108" width="22" height="20"/>
+          </g>
+          <rect x="264" y="108" width="22" height="20" fill="#4a6a2a"/>
+          <text x="330" y="124" fill="#909090">⋮ 2.63M 根 · 线程 1</text>
+
+          <rect x="20" y="148" width="470" height="44" rx="6" fill="#243018" stroke="#8fbf4a"/>
+          <text x="34" y="176" fill="#f0f0f0" font-weight="600">SOL · cash 10000</text>
+          <g fill="#304020" stroke="#7aa040">
+            <rect x="160" y="160" width="22" height="20"/><rect x="186" y="160" width="22" height="20"/>
+            <rect x="212" y="160" width="22" height="20"/><rect x="238" y="160" width="22" height="20"/>
+            <rect x="264" y="160" width="22" height="20"/><rect x="290" y="160" width="22" height="20"/>
+          </g>
+          <text x="330" y="176" fill="#909090">⋮ 2.63M 根 · 线程 2</text>
+        </g>
+
+        <rect x="20" y="210" width="470" height="34" rx="6" fill="#202620" stroke="#3d4a30"/>
+        <text x="34" y="232" font-size="11" fill="#d5ecb0">线程间无共享可变状态；各写各的 sink，结束按列 merge、再赋 id → 输出与线程数无关</text>
+
+        <path d="M500 120 H540" stroke="#8a8a8a" marker-end="url(#grArr)"/>
+
+        <!-- right: shared -->
+        <text x="550" y="30" font-size="12" font-weight="600" fill="#f0c0d0">共享账户：cash_sharing, group_lens=[3]，一个 group</text>
+        <rect x="550" y="44" width="470" height="34" rx="6" fill="#3a2028" stroke="#e06b8a"/>
+        <text x="566" y="66" font-size="11" fill="#f0c0d0">cash 30000（组首列读一次）· free_cash 共享</text>
+
+        <path d="M785 78 V98" stroke="#8a8a8a" marker-end="url(#grArr)"/>
+        <rect x="550" y="98" width="470" height="86" rx="6" fill="#262626" stroke="#3d3d3d"/>
+        <text x="566" y="120" font-size="11" font-weight="600" fill="#f0f0f0">同一根 bar 内顺序执行（shared = true）</text>
+        <g font-size="11">
+          <rect x="566" y="132" width="138" height="38" rx="4" fill="#2c2028" stroke="#7a4658"/>
+          <text x="635" y="156" text-anchor="middle" fill="#f0c0d0">1 · BTC</text>
+          <path d="M704 151 H724" stroke="#8a8a8a" marker-end="url(#grArr)"/>
+          <rect x="724" y="132" width="138" height="38" rx="4" fill="#2c2028" stroke="#7a4658"/>
+          <text x="793" y="156" text-anchor="middle" fill="#f0c0d0">2 · ETH</text>
+          <path d="M862 151 H882" stroke="#8a8a8a" marker-end="url(#grArr)"/>
+          <rect x="882" y="132" width="122" height="38" rx="4" fill="#2c2028" stroke="#7a4658"/>
+          <text x="943" y="156" text-anchor="middle" fill="#f0c0d0">3 · SOL</text>
+        </g>
+
+        <rect x="550" y="210" width="470" height="34" rx="6" fill="#243018" stroke="#8fbf4a"/>
+        <text x="566" y="232" font-size="11" fill="#d5ecb0">先算一次 group_value（cash + Σ 持仓×估值），Auto 先卖后买；group_value 沿用到本 bar 结束</text>
+
+        <rect x="550" y="256" width="470" height="60" rx="6" fill="#2a2438" stroke="#5a4a8a"/>
+        <text x="566" y="280" font-size="11" fill="#d5cdf0">整个 group 是一个不可再切的工作单位：现金余额跨列顺序依赖，加核无加速</text>
+        <text x="566" y="300" font-size="11" fill="#9a8fc8">并行只在 group 之间；多 group（多账户 / 参数组合）才能用多线程</text>
+      </svg>
+    </div>
+  </div>
+
+  <h2 id="faq">常见问题</h2>
+
+  <h3>Q1. 同一根 bar 同时出现入场和出场会怎样？</h3>
+  <p class="muted">
+    系统按配置的冲突模式处理，不替你猜。解析顺序固定：先同方向冲突，再多空入场冲突，最后反向持仓入场。空仓时 <code>Adjacent</code>/<code>Opposite</code> 两个信号都丢弃——没有持仓就没有相邻/相反可言。
+  </p>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>配置字段</th><th>冲突对</th><th>取值</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">upon_long_conflict / upon_short_conflict</td><td>同向 entry + exit</td><td>Entry / Exit / Adjacent / Opposite / Ignore（默认，两个都丢）</td></tr>
+        <tr><td class="mono">upon_dir_conflict</td><td>long_entry + short_entry</td><td>Long / Short / Adjacent / Opposite / Ignore</td></tr>
+        <tr><td class="mono">upon_opposite_entry</td><td>入场方向与持仓相反</td><td>Ignore / Close（只平仓）/ CloseReduce / Reverse（反手，一笔订单）/ ReverseReduce（默认）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">对应纯函数在 <code>src/signals.rs</code>：<code>resolve_signal_conflict</code>、<code>resolve_dir_conflict</code>、<code>resolve_opposite_entry</code>。持多 7、exit、accumulate 关闭时出场是全平 7，请求的 size 3 被忽略（见该文件单测 <code>an_exit_without_accumulation_closes_the_whole_position</code>）。</p>
+
+  <h3>Q2. 止损是用户配置的，还是系统写死的？</h3>
+  <p class="muted">
+    止损位和锚定方式全部由输入参数指定，引擎只提供触发规则。默认 <code>sl_stop/tp_stop</code> 是 NaN（不止损）。
+  </p>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>字段</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">sl_stop / tp_stop</td><td>止损/止盈距离，比例（0.1=10%）。NaN 禁用；默认 NaN</td></tr>
+        <tr><td class="mono">sl_trail</td><td>是否跟随曾到达的最好价格移动止损</td></tr>
+        <tr><td class="mono">stop_entry_price</td><td>开仓锚定价：ValPrice / Price / FillPrice / Close</td></tr>
+        <tr><td class="mono">stop_exit_price</td><td>触发后成交价：StopMarket / StopLimit（不收滑点）/ Close / Price</td></tr>
+        <tr><td class="mono">upon_stop_exit / upon_stop_update / use_stops</td><td>触发后平仓或反手 / 加仓时是否重锚 / 总开关（默认开）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">写死的只有触发规则 <code>stop_price</code>：止损位 = 锚定价 × (1 ∓ 比例)；开盘穿透按开盘成交，价位在 bar 区间内按止损位成交；同一根 bar 止损先于止盈。</p>
+
+  <h3>Q3. simulate_group 怎么判断“有没有订单”？判断后调用哪里下单？</h3>
+  <p class="muted">“有没有订单” = 止损触发，或信号经过合并、冲突消解后仍存活，且折算出的 size 非零。判定在 <code>prepare_order</code>（from_signals.rs:502），顺序：</p>
+  <pre>1. read_signals：两套约定 OR 合并成四个 bool
+2. 止损已武装 → stop_price；触发则 from_stop 替换信号（最高优先级）
+3. 四个信号全 false → 安静 bar 返回 None（稀疏策略大多数 bar 的出口）
+4. 含 entry → 三个冲突函数依次消解（可能全部改写成 false）
+5. signals_to_size：结合持仓、accumulate 折算带符号 size
+6. sized.size == 0 → None；否则返回 Pending</pre>
+  <p class="muted">
+    存活的订单在 <code>simulate_group</code> 里 <code>set_bar</code> 到预构建的 <code>ValidatedOrder</code>，然后调用
+    <a href="phasor-exec.html"><code>phasor_exec::execute_validated</code></a>（from_signals.rs:868）做校验和成交计算。
+    分层是：信号解析和组内调度在 phasor-sim，校验和成交在 phasor-exec，成交结果落到 sink。
+  </p>
+
+  <h3>Q4. sink 是做什么的？</h3>
+  <p class="muted">
+    sink 是循环与输出存储之间的抽象（<code>phasor-records/src/lib.rs:55</code> 的 <code>RecordSink</code>）。循环只在成交时调
+    <code>push_order(row, col, size, price, fees, side)</code>、有出入金时调 <code>push_cash(...)</code>，不关心写到哪里。
+  </p>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>实现</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">OrderRecords</td><td>struct-of-arrays 内存缓冲（col/idx/size/price/fees/side 六个并列 Vec），零转置交给 Arrow；分析层只从这些记录重建账户</td></tr>
+        <tr><td class="mono">Journal</td><td>OrderRecords + LogRecords，logged 变体</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">
+    <code>SinkBuffer</code> 还提供 <code>with_capacity</code>（并行时每线程一个 sink）和 <code>merge</code>（按列序拼接；Journal 合并时重定 log 的 order_id）。
+    id 在 merge 后才赋值，所以并行结果与线程数无关。用 trait 而不用具体数组，事件驱动层将来可复用同一记录格式。
+  </p>
+
+  <h3>Q5. 给到 sim 的订单是提前向量化算好的吗？</h3>
+  <p class="muted">
+    输入数据是向量化矩阵，订单决策在循环内逐 bar、逐列现场生成。决策依赖当前持仓、止损锚定价和 accumulate 状态，时间轴上是硬循环依赖，无法提前批量算。
+    静态部分被上提：手续费等九个参数和七项静态校验每列只构建一次 <code>ValidatedOrder</code>，每 bar 只 <code>set_bar</code> 四个动态字段（参数声明随行变化时才重建）。
+    并行轴在空间方向（group/列），时间方向始终串行。
+  </p>
+
+  <h2 id="parity">与 vectorbt：结果对齐，算法不同</h2>
+  <p>
+    撮合语义对齐 <b>vectorbt 1.1.0 开源版</b>：同一输入产出相同成交记录和分析结果。实现重新设计，没有复制代码。
+    保证方式是差分测试，而不是“看起来差不多”。
+  </p>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>环节</th><th>做法</th></tr></thead>
+      <tbody>
+        <tr><td>录制</td><td><code>tests/parity/generate_*.py</code> 在隔离环境（.venv-parity）运行真实 vectorbt 1.1.0，输出提交为 <code>tests/fixtures/*.tsv</code></td></tr>
+        <tr><td>回放</td><td><code>cargo test --workspace</code> 每次逐字段比对，无需 Python：撮合内核、信号流水线、止损、现金共享、交易视图、回撤、28 项统计指标</td></tr>
+        <tr><td>在线对照</td><td>Python 测试在装了 vectorbt 时实时重算一遍（<code>crates/phasor-py/tests</code>）</td></tr>
+        <tr><td>钉死的细节</td><td>min_size 默认 1e-8、跳空按开盘成交、同根 bar 止损先于止盈、反手是一笔订单、Direction::Both 下 exit 是做空入场</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">
+    边界：不对齐 vectorbt PRO（闭源，无法差分测试）；尚未实现的功能（init_cash="auto"、回调、部分 PRO 止损选项）谈不上对齐，状态见 <code>docs/plan.md</code>。
+  </p>
+
+  <h2 id="perf">为什么快，还能更快吗</h2>
+  <p>
+    先澄清一个前提：把分支密集的标量循环改写成 Rust 本身不带来加速——vectorbt 自己的 Rust 后端比 Numba 慢（0.74–0.82×），Numba 已经发射 LLVM 机器码。差距来自设计。
+    下面的数字来自 <code>docs/ARCHITECTURE.zh-CN.md</code> §15.1（4 核 Xeon，两个引擎同场测量）。
+  </p>
+  <div class="stats">
+    <div class="stat"><b>2.6–3.3×</b><span>单线程对 vectorbt Numba</span></div>
+    <div class="stat"><b>9.7–12.1×</b><span>4 线程对 vectorbt Numba</span></div>
+    <div class="stat"><b>3.62× / 1.63×</b><span>稀疏 / 稠密负载的 4 线程扩展（90% / 41%）</span></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">最大一块：把 sweep 变得可并行</h3>
+      <p>
+        参考事件驱动引擎状态在全局消息总线后面的 <code>Rc&lt;RefCell&gt;</code>，结构上只能顺序跑。phasor 没有 Rc/RefCell/全局状态，
+        group 是并行单位：<code>std::thread::scope</code> 连续分块、各线程自有状态和 sink、无锁无归约、合并后赋 id，串行与多线程逐位一致。
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">单线程：循环本身的设计</h3>
+      <p>
+        列主序扫描匹配内存访问；账户状态是栈上紧凑结构，内核单态化内联；FlexArray 标量快路径不访问内存，numpy 零拷贝；
+        列常量订单只构建一次；安静 bar 早退；缓冲按成交上界预分配；column_map 让参数扫描不复制行情。
+      </p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cap">加速比区间（4 核 Xeon，三次测量的中位数范围；两端同场测量保证比值可信）。横线是范围，白条是中位数</div>
+    <div class="body">
+      <svg width="1040" height="340" viewBox="0 0 1040 340" role="img" aria-label="phasor 对 vectorbt 的加速比区间与扩展效率">
+        <!-- gridlines -->
+        <g stroke="#303030">
+          <line x1="230" y1="36" x2="230" y2="200"/><line x1="337" y1="36" x2="337" y2="200"/>
+          <line x1="444" y1="36" x2="444" y2="200"/><line x1="551" y1="36" x2="551" y2="200"/>
+          <line x1="659" y1="36" x2="659" y2="200"/><line x1="766" y1="36" x2="766" y2="200"/>
+          <line x1="873" y1="36" x2="873" y2="200"/><line x1="980" y1="36" x2="980" y2="200"/>
+        </g>
+        <g font-size="10" fill="#909090" text-anchor="middle">
+          <text x="230" y="28">0</text><text x="337" y="28">2</text><text x="444" y="28">4</text>
+          <text x="551" y="28">6</text><text x="659" y="28">8</text><text x="766" y="28">10</text>
+          <text x="873" y="28">12</text><text x="980" y="28">14×</text>
+        </g>
+
+        <!-- 1x baseline -->
+        <line x1="284" y1="40" x2="284" y2="196" stroke="#606060" stroke-dasharray="4 4"/>
+        <text x="284" y="214" font-size="10" text-anchor="middle" fill="#909090">1× 基准</text>
+
+        <!-- row 1: 2.0..3.6 median 2.95 -->
+        <text x="20" y="56" font-size="12" font-weight="600" fill="#f0f0f0">单线程对 Numba</text>
+        <text x="20" y="72" font-size="10" fill="#909090">中位数 2.6–3.3×</text>
+        <line x1="337" y1="62" x2="423" y2="62" stroke="#909090" stroke-width="3"/>
+        <rect x="337" y="50" width="86" height="24" rx="4" fill="#3a7afe"/>
+        <line x1="388" y1="46" x2="388" y2="78" stroke="#ffffff" stroke-width="2"/>
+        <text x="431" y="66" font-size="11" fill="#f0f0f0">2.0–3.6×（坐席波动区间）</text>
+
+        <!-- row 2: 3.5..4.9 median 4.2 -->
+        <text x="20" y="116" font-size="12" font-weight="600" fill="#f0f0f0">单线程对 vectorbt Rust</text>
+        <text x="20" y="132" font-size="10" fill="#909090">中位数 3.5–4.9×；对方 Rust 后端对 Numba 仅 0.74–0.82×</text>
+        <line x1="418" y1="122" x2="492" y2="122" stroke="#909090" stroke-width="3"/>
+        <rect x="418" y="110" width="74" height="24" rx="4" fill="#7b64b8"/>
+        <line x1="455" y1="106" x2="455" y2="138" stroke="#ffffff" stroke-width="2"/>
+        <text x="500" y="126" font-size="11" fill="#f0f0f0">3.5–4.9×</text>
+
+        <!-- row 3: 9.7..12.1 median 10.9 -->
+        <text x="20" y="176" font-size="12" font-weight="600" fill="#f0f0f0">4 线程对 Numba</text>
+        <text x="20" y="192" font-size="10" fill="#909090">中位数 9.7–12.1×，最大的一块来自可并行的架构</text>
+        <line x1="750" y1="182" x2="878" y2="182" stroke="#909090" stroke-width="3"/>
+        <rect x="750" y="170" width="128" height="24" rx="4" fill="#8fbf4a"/>
+        <line x1="814" y1="166" x2="814" y2="198" stroke="#ffffff" stroke-width="2"/>
+        <text x="886" y="186" font-size="11" fill="#f0f0f0">9.7–12.1×</text>
+
+        <!-- scaling efficiency -->
+        <text x="20" y="246" font-size="12" font-weight="600" fill="#f0f0f0">4 线程扩展效率（20,000×256）</text>
+        <g font-size="11">
+          <text x="20" y="276" fill="#b7efe4">稀疏</text>
+          <rect x="230" y="264" width="600" height="16" rx="3" fill="#262626" stroke="#3d3d3d"/>
+          <rect x="230" y="264" width="540" height="16" rx="3" fill="#2fbfa8"/>
+          <text x="782" y="276" fill="#b7efe4">3.62× = 90%（纯计算可到 3.96×）</text>
+
+          <text x="20" y="306" fill="#f0c8a8">稠密</text>
+          <rect x="230" y="294" width="600" height="16" rx="3" fill="#262626" stroke="#3d3d3d"/>
+          <rect x="230" y="294" width="246" height="16" rx="3" fill="#e07a3d"/>
+          <text x="488" y="306" fill="#f0c8a8">1.63× = 41%：约 245 MB 记录写入，内存带宽封顶</text>
+        </g>
+      </svg>
+    </div>
+    <div class="foot">
+      <p class="small" style="margin:0">来源：<code>docs/ARCHITECTURE.zh-CN.md</code> §15.1 与 §11.2，<code>benchmarks/</code>。数字给区间不给单点，因为机器繁忙时 Numba 循环损失更大。</p>
+    </div>
+  </div>
+
+  <h3>物理天花板</h3>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>场景</th><th>限制</th></tr></thead>
+      <tbody>
+        <tr><td>单个共享现金账户</td><td>现金余额跨列顺序依赖，整个 group 是一个工作单位，加核无用</td></tr>
+        <tr><td>稠密负载（每根都成交）</td><td>内存带宽瓶颈（约 245 MB 记录写入），4 线程仅 1.63×</td></tr>
+        <tr><td>时间方向</td><td><code>state[t] = f(state[t−1], bar[t])</code> 硬依赖，SIMD 没有位置；SIMD 属于因子和分析层</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>还能更快的方向（docs/plan.md 已记录）</h3>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>项</th><th>预期</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">P1 内核热路径瘦身</td><td>几个百分点的确定收益：buy/sell 失去内联后每笔多约 14 条指令，把 lock_cash/费用反解拆成冷函数；用 callgrind 指令数做回归</td></tr>
+        <tr><td class="mono">K2 多进程 / Ray</td><td>数量级：group 天然独立，扩展到集群，结果要求与单机逐位一致</td></tr>
+        <tr><td class="mono">K1 分块执行</td><td>大扫描按块跑、可续跑，解决内存上限，不缩短 CPU 时间</td></tr>
+        <tr><td class="mono">K3 跨运行缓存</td><td>复用重复因子计算，文档标注“先测量值不值得做”</td></tr>
+        <tr><td class="mono">因子/指标层</td><td>表达式图与按标的并行仍在演进（Alpha158 7.87s→0.96s），端到端流程中 sim 之外仍可压缩</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">单线程 2.6–3.3× 中各项设计的单独贡献，架构文档明确说尚未拆解测量；sim 内核剩下的是边际工程，数量级提升来自分布式和因子层。</p>
+</main>
+<script>
+const COLORS = {
+  from_orders: "#4cb3d4",
+  from_signals: "#e06b8a",
+  groups: "#8fbf4a",
+  signals: "#c084fc",
+  cash: "#2fbfa8",
+  random: "#d4a24a",
+  flex: "#3a7afe",
+  math: "#1f8a65",
+  error: "#c9a227",
+  exec: "#e07a3d",
+  model: "#7b64b8",
+  records: "#c46b8a",
+};
+const MODULES = [
+  { id: "from_orders", name: "from_orders", sub: "两遍执行订单", blurb: "每个格子一笔订单。先整组解析价格，再按 CallSeq 调用 execute_validated。返回后若 Rejected 且 raise_reject，变成 Invariant。列参数不变时每列只构造一次 ValidatedOrder。" },
+  { id: "from_signals", name: "from_signals", sub: "信号收成订单", blurb: "prepare_order 先定估值，再测止损，再解冲突，再 signals_to_size。每列两份订单：普通滑点，以及 StopLimit 用的零滑点。没有 Pending 的列跳过内核。" },
+  { id: "groups", name: "groups", sub: "分组与顺序", blurb: "长度而不是边界。ungrouped 是每列一组。CallSeq::Auto 按近似价值升序，NaN 在最后。chunks 按列数切连续组段。" },
+  { id: "signals", name: "signals", sub: "纯函数", blurb: "from_direction_mode、from_stop、三个冲突函数、signals_to_size。顺序固定。负规模和目标规模类型是 Invariant。反手是一笔订单，百分数不能反手。" },
+  { id: "cash", name: "cash", sub: "现金流", blurb: "开盘存款再股息，收盘 earnings。流出封顶在 max(free_cash, 0)，记录实际入账的金额。标量 0 或 NaN 整段跳过。无穷金额是 Invariant。" },
+  { id: "random", name: "random", sub: "抽样", blurb: "uniform(seed, row, col)，SplitMix64，高 53 位除以 2^53，范围 [0, 1)。只在 reject_prob 大于 0 时由两条循环调用。没有下游 crate，也没有上游 crate。" },
+];
+const UPSTREAM = [
+  { id: "flex", name: "flex", sub: "FlexArray", blurb: "两条循环的输入，以及 cash 读取的三种现金流，都是 FlexArray。lib.rs 的 count_where 按五种布局计数，给 fill_bound 预分配。MappedColumns 每个源列只数一次。" },
+  { id: "math", name: "math", sub: "add / is_less", blurb: "cash 的入账用 add。signals_to_size 用 is_less 拒绝负规模。random 不经过 math。组净值里持仓是否为 0 用精确相等。" },
+  { id: "error", name: "error", sub: "Invariant", blurb: "分组对不上、显式顺序越界、负规模、目标规模类型、百分数反手、负的止损距离、无穷现金流，都是 Error::Invariant。内核的拒单仍是 OrderResult，raise_reject 再把它变成 Invariant。" },
+  { id: "exec", name: "exec", sub: "执行一笔", blurb: "两条循环构造 ValidatedOrder，每根 set_bar，再调用 execute_validated。Direction、SizeType、OrderStatus 从这里再导出。买卖公式不在 phasor-sim 里。" },
+  { id: "model", name: "model", sub: "枚举", blurb: "groups 用 Direction 和 SizeType。signals 用冲突和累积枚举。from_signals 用止损枚举。cash 用 CashFlowKind。from_orders 直接用的只有 StatusInfo::describe。" },
+  { id: "records", name: "records", sub: "成交与日志", blurb: "两条循环把成交写入 OrderRecords 或 Journal，把日志写入 LogSink。cash 经 RecordSink 记 Deposit、Dividend、Earning。OrderRecords 的 LogSink 默认空操作。" },
+];
+const CRATES = [
+  {
+    id: "phasor-analysis",
+    uses: ["groups", "from_orders", "from_signals"],
+    role: "Portfolio::from_orders 在 threads 大于 1 时调用 simulate_from_orders_parallel，否则调用串行入口。from_signals 同样按线程数在两个信号入口之间切换。分组用 groups::Groups。",
+  },
+  {
+    id: "phasor-py",
+    uses: ["groups", "from_orders", "from_signals"],
+    role: "绑定 FromOrders、FromSignals、CallSeq、Groups。两条循环的普通、日志、串行、并行四个入口都会调用。",
+  },
+  {
+    id: "phasor",
+    uses: ["groups", "from_signals"],
+    role: "prelude 再导出 CallSeq、Groups、FromSignals、simulate_from_signals、simulate_from_signals_parallel。sweep 使用 FromSignals。pub use phasor_sim as sim 暴露整个 crate，包括订单循环。图上只画 prelude 这两条。",
+  },
+];
+
+const svg = document.getElementById("dep-graph");
+const detail = document.getElementById("detail");
+let pinned = null;
+let paths = [];
+let nodes = [];
+
+function nodeBox(id) {
+  const ups = { flex: 137, math: 207, error: 277, exec: 347, model: 417, records: 487 };
+  if (Object.prototype.hasOwnProperty.call(ups, id)) return { x: 12, y: ups[id], w: 176, h: 56 };
+  const mods = { from_orders: 58, from_signals: 160, groups: 262, signals: 364, cash: 466, random: 568 };
+  if (Object.prototype.hasOwnProperty.call(mods, id)) return { x: 260, y: mods[id], w: 176, h: 86 };
+  const order = ["phasor-analysis", "phasor-py", "phasor"];
+  const i = order.indexOf(id);
+  const h = 72;
+  const gap = 36;
+  const total = order.length * h + (order.length - 1) * gap;
+  const y0 = (680 - total) / 2;
+  return { x: 760, y: y0 + i * (h + gap), w: 264, h };
+}
+
+function edgeList() {
+  const up = [
+    ["flex", "from_orders"], ["flex", "from_signals"], ["flex", "cash"],
+    ["math", "signals"], ["math", "cash"],
+    ["error", "from_orders"], ["error", "from_signals"], ["error", "groups"], ["error", "signals"], ["error", "cash"],
+    ["exec", "from_orders"], ["exec", "from_signals"],
+    ["model", "from_orders"], ["model", "from_signals"], ["model", "groups"], ["model", "signals"], ["model", "cash"],
+    ["records", "from_orders"], ["records", "from_signals"], ["records", "cash"],
+  ];
+  const down = [
+    ["from_orders", "phasor-analysis"], ["from_signals", "phasor-analysis"], ["groups", "phasor-analysis"],
+    ["from_orders", "phasor-py"], ["from_signals", "phasor-py"], ["groups", "phasor-py"],
+    ["from_signals", "phasor"], ["groups", "phasor"],
+  ];
+  return up.concat(down).map(function (pair) {
+    return { from: pair[0], to: pair[1], kind: pair[0] };
+  });
+}
+
+function active(focus, edge) {
+  const base = edge.kind === "error" ? 0.18 : edge.kind === "model" ? 0.35 : 0.78;
+  if (!focus) return base;
+  if (focus.kind === "mod") return edge.kind === focus.id || edge.to === focus.id ? 0.95 : 0.06;
+  if (focus.kind === "up") return edge.kind === focus.id ? 0.95 : 0.06;
+  if (focus.kind === "crate") {
+    const crate = CRATES.find(function (c) { return c.id === focus.id; });
+    return edge.to === focus.id && crate.uses.indexOf(edge.kind) !== -1 ? 0.95 : 0.06;
+  }
+  return base;
+}
+
+function applyFocus(focus) {
+  for (const p of paths) p.el.setAttribute("opacity", String(active(focus, p)));
+  for (const n of nodes) {
+    const on = focus && focus.id === n.id && focus.kind === n.kind;
+    n.rect.setAttribute("stroke-width", on ? "1.8" : "1");
+    if (n.kind === "mod" || n.kind === "up") {
+      n.rect.setAttribute("fill", on ? COLORS[n.id] : "#262626");
+      n.title.setAttribute("fill", on ? "#ffffff" : "#f0f0f0");
+      if (n.sub) n.sub.setAttribute("fill", on ? "#f5f5f5" : "#909090");
+    } else {
+      n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d");
+      n.rect.setAttribute("fill", on ? "#303030" : "#262626");
+    }
+  }
+  for (const b of document.querySelectorAll("#legend button")) {
+    b.classList.toggle("on", Boolean(focus && b.dataset.kind === focus.kind && b.dataset.id === focus.id));
+  }
+}
+
+function build() {
+  const ns = "http://www.w3.org/2000/svg";
+  function el(name, attrs) {
+    const node = document.createElementNS(ns, name);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    return node;
+  }
+  svg.appendChild(el("rect", { x: 244, y: 14, width: 208, height: 652, rx: 10, fill: "#181818", stroke: "#303030" }));
+  svg.appendChild(el("text", { x: 348, y: 36, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-sim";
+  svg.appendChild(el("text", { x: 348, y: 52, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "两条循环";
+
+  const edges = edgeList();
+  const into = {};
+  const outOf = {};
+  for (const e of edges) {
+    (into[e.to] || (into[e.to] = [])).push(e);
+    (outOf[e.from] || (outOf[e.from] = [])).push(e);
+  }
+  for (const list of Object.values(into)) {
+    list.forEach(function (e, i) { e.inSlot = i - (list.length - 1) / 2; });
+  }
+  for (const list of Object.values(outOf)) {
+    list.forEach(function (e, i) { e.outSlot = i - (list.length - 1) / 2; });
+  }
+
+  for (const e of edges) {
+    const a = nodeBox(e.from);
+    const b = nodeBox(e.to);
+    const x1 = a.x + a.w;
+    const y1 = a.y + a.h / 2 + e.outSlot * 8;
+    const x2 = b.x;
+    const y2 = b.y + b.h / 2 + e.inSlot * 8;
+    const mid = (x1 + x2) / 2;
+    const path = el("path", {
+      d: "M " + x1 + " " + y1 + " C " + mid + " " + y1 + ", " + mid + " " + y2 + ", " + x2 + " " + y2,
+      fill: "none",
+      stroke: COLORS[e.kind] || "#888",
+      "stroke-width": "1.5",
+    });
+    svg.appendChild(path);
+    paths.push({ el: path, from: e.from, to: e.to, kind: e.kind });
+  }
+
+  function addNode(id, kind, box, title, sub) {
+    const g = el("g", { style: "cursor:pointer" });
+    const stroke = kind === "crate" ? "#3d3d3d" : COLORS[id];
+    const rect = el("rect", {
+      x: box.x, y: box.y, width: box.w, height: box.h, rx: 6,
+      fill: "#262626", stroke: stroke, "stroke-width": 1,
+    });
+    const ty = sub ? box.y + box.h / 2 - 1 : box.y + box.h / 2 + 4;
+    const label = el("text", {
+      x: box.x + box.w / 2, y: ty, "text-anchor": "middle",
+      "font-size": 12, "font-weight": 650, fill: "#f0f0f0",
+    });
+    label.textContent = title;
+    g.append(rect, label);
+    let subEl = null;
+    if (sub) {
+      subEl = el("text", {
+        x: box.x + box.w / 2, y: box.y + box.h / 2 + 14,
+        "text-anchor": "middle", "font-size": 10, fill: "#909090",
+      });
+      subEl.textContent = sub;
+      g.appendChild(subEl);
+    }
+    g.addEventListener("click", function () {
+      pinned = pinned && pinned.id === id && pinned.kind === kind ? null : { kind: kind, id: id };
+      show(pinned);
+      applyFocus(pinned);
+    });
+    g.addEventListener("mouseenter", function () {
+      if (pinned) return;
+      show({ kind: kind, id: id });
+      applyFocus({ kind: kind, id: id });
+    });
+    svg.appendChild(g);
+    nodes.push({ id: id, kind: kind, rect: rect, title: label, sub: subEl });
+  }
+
+  for (const u of UPSTREAM) addNode(u.id, "up", nodeBox(u.id), u.name, u.sub);
+  for (const m of MODULES) addNode(m.id, "mod", nodeBox(m.id), m.name, m.sub);
+  const crateSub = { "phasor-analysis": "两组入口", "phasor-py": "八个入口", phasor: "prelude" };
+  for (const c of CRATES) addNode(c.id, "crate", nodeBox(c.id), c.id, crateSub[c.id]);
+  svg.addEventListener("mouseleave", function () {
+    if (pinned) return;
+    show(null);
+    applyFocus(null);
+  });
+  applyFocus(null);
+}
+
+function chips(uses) {
+  return '<div class="uses">' + uses.map(function (u) {
+    return '<span class="chip"><i class="dot" style="background:' + COLORS[u] + '"></i>' + u + "</span>";
+  }).join("") + "</div>";
+}
+
+function show(focus) {
+  if (!focus) {
+    detail.innerHTML = '<h3>点一个节点</h3><p class="muted" style="margin:0">模块说明它被谁使用；上游说明哪条循环拿它做什么；crate 说明它拿 phasor-sim 的哪一部分。</p>';
+    return;
+  }
+  if (focus.kind === "up") {
+    const u = UPSTREAM.find(function (x) { return x.id === focus.id; });
+    detail.innerHTML = "<h3>" + u.name + '</h3><p class="muted" style="margin:0">' + u.blurb + "</p>";
+    return;
+  }
+  if (focus.kind === "mod") {
+    const m = MODULES.find(function (x) { return x.id === focus.id; });
+    const users = CRATES.filter(function (c) { return c.uses.indexOf(m.id) !== -1; }).map(function (c) { return c.id; });
+    detail.innerHTML = "<h3>" + m.name + '</h3><p class="muted" style="margin:0">' + m.blurb + '</p><p class="small" style="margin:8px 0 0">src 引用方：' + (users.join("、") || "无") + "</p>";
+    return;
+  }
+  const c = CRATES.find(function (x) { return x.id === focus.id; });
+  detail.innerHTML = "<h3>" + c.id + '</h3><p class="muted" style="margin:0">' + c.role + "</p>" + chips(c.uses);
+}
+
+function legend() {
+  const host = document.getElementById("legend");
+  const items = [
+    { kind: "mod", id: "from_orders", name: "from_orders" },
+    { kind: "mod", id: "from_signals", name: "from_signals" },
+    { kind: "mod", id: "groups", name: "groups" },
+    { kind: "mod", id: "signals", name: "signals" },
+    { kind: "mod", id: "cash", name: "cash" },
+    { kind: "mod", id: "random", name: "random" },
+    { kind: "up", id: "flex", name: "flex" },
+    { kind: "up", id: "math", name: "math" },
+    { kind: "up", id: "error", name: "error" },
+    { kind: "up", id: "exec", name: "exec" },
+    { kind: "up", id: "model", name: "model" },
+    { kind: "up", id: "records", name: "records" },
+  ];
+  host.innerHTML = items.map(function (m) {
+    return '<button type="button" data-kind="' + m.kind + '" data-id="' + m.id + '"><i class="dot" style="background:' + COLORS[m.id] + '"></i>' + m.name + "</button>";
+  }).join("");
+  for (const btn of host.querySelectorAll("button")) {
+    btn.addEventListener("click", function () {
+      const kind = btn.dataset.kind;
+      const id = btn.dataset.id;
+      pinned = pinned && pinned.id === id && pinned.kind === kind ? null : { kind: kind, id: id };
+      show(pinned);
+      applyFocus(pinned);
+    });
+  }
+}
+
+function table() {
+  const body = document.getElementById("rows");
+  body.innerHTML = CRATES.map(function (c) {
+    const mods = c.uses.map(function (u) {
+      return '<span class="chip" style="padding:1px 8px"><i class="dot" style="background:' + COLORS[u] + '"></i>' + u + "</span>";
+    }).join(" ");
+    return '<tr><td class="mono">' + c.id + "</td><td>" + mods + "</td><td>" + c.role + "</td></tr>";
+  }).join("");
+}
+
+legend();
+table();
+build();
+</script>
+</body>
+</html>

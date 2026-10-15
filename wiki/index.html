@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>phasor wiki</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --chrome: #181818;
+    --text: #f0f0f0;
+    --muted: #909090;
+    --secondary: #b8b8b8;
+    --stroke: #303030;
+    --accent: #3a7afe;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.5;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+  .lead { color: var(--secondary); margin: 0 0 28px; }
+  a.card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border: 1px solid var(--stroke);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    background: var(--chrome);
+  }
+  a.card:hover { border-color: #4a4a4a; }
+  a.card strong { display: block; font-size: 16px; margin-bottom: 4px; }
+  a.card span { color: var(--muted); font-size: 13px; }
+  .kicker { color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <p class="kicker">PHASOR</p>
+  <h1>设计文档</h1>
+  <p class="lead">引擎的架构说明，以及地基、领域模型、执行内核、模拟循环的依赖和类型。页面是独立 HTML，用浏览器直接打开。</p>
+  <a class="card" href="architecture.html">
+    <strong>设计与架构</strong>
+    <span>自顶向下：流水线、双执行层、crate 分层、因子图、模拟循环、记录与分析、并行、验证和性能。</span>
+  </a>
+  <a class="card" href="phasor-core.html">
+    <strong>phasor-core</strong>
+    <span>无外部依赖的地基。依赖图标出谁用它的哪个模块；类图和类型表列出 FlexArray、Matrix、Columns、Label、Error。</span>
+  </a>
+  <a class="card" href="phasor-model.html">
+    <strong>phasor-model</strong>
+    <span>领域模型。依赖图标出谁用 types / ids / enums / bar；类图和类型表列出 Price、InstrumentId、Bar、OhlcvPanel 和 repr(i8) 枚举。</span>
+  </a>
+  <a class="card" href="phasor-exec.html">
+    <strong>phasor-exec</strong>
+    <span>执行内核。依赖图标出谁调用它；流程图画出归零、校验、规模级联和买卖；类图列出账户状态、Order 和 OrderResult。</span>
+  </a>
+  <a class="card" href="phasor-sim.html">
+    <strong>phasor-sim</strong>
+    <span>两条模拟循环。依赖图标出分组、订单循环和信号循环被谁调用；流程图画出一根 K 线、信号收成订单、以及按组并行。</span>
+  </a>
+</main>
+</body>
+</html>
