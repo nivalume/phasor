@@ -108,6 +108,7 @@
     <a href="phasor-core.html">phasor-core</a>
     <a href="phasor-model.html">phasor-model</a>
     <a href="phasor-exec.html">phasor-exec</a>
+    <a href="phasor-records.html">phasor-records</a>
     <a href="#graph">依赖图</a>
     <a href="#flow">流程</a>
     <a href="#class">类图</a>
@@ -116,6 +117,7 @@
     <a href="#inputs">输入</a>
     <a href="#walkthrough">走例</a>
     <a href="#dualma">双均线</a>
+    <a href="#sweep">扫描矩阵</a>
     <a href="#faq">FAQ</a>
     <a href="#parity">vectorbt</a>
     <a href="#perf">性能</a>
@@ -1036,7 +1038,7 @@ pf = dual_ma.run(
     </div>
     <div class="card">
       <h3 style="margin-top:0">参数扫描</h3>
-      <p><code>dual_ma.sweep(panel, params=[...])</code>：50 组参数 × 3 标的拼成 150 列，<code>column_map</code> 让 150 个逻辑列复用内存里 3 列行情（FlexArray::MappedColumns），150 个独立 group 并行。</p>
+      <p><code>dual_ma.sweep(panel, params=[...])</code>：50 组参数 × 3 标的拼成 150 列。拼出来的是两张表，见 <a href="#sweep">扫描矩阵</a>。<code>column_map</code> 让 150 个逻辑列复用内存里 3 列行情（FlexArray::MappedColumns），150 个独立 group 并行。</p>
     </div>
   </div>
 
@@ -1118,6 +1120,118 @@ pf = dual_ma.run(
     </div>
   </div>
 
+  <h2 id="sweep">参数扫描展开成什么样</h2>
+  <p>
+    <code>sweep</code> 之后送进 <code>simulate_from_signals</code> 的，是两张分开的布尔表：<code>entries</code> 和 <code>exits</code>。
+    列是「一组参数 × 一个标的」，不是「进场 / 出场」这两列。价格不跟着复制。
+  </p>
+  <pre>@phasor.strategy
+def ma_cross(data, fast, slow):
+    f = phasor.factors(
+        data,
+        fast=f"Mean($close, {fast})",
+        slow=f"Mean($close, {slow})",
+    )
+    return (
+        phasor.crossed_above(f["fast"], f["slow"]),
+        phasor.crossed_above(f["slow"], f["fast"]),
+    )
+
+ma_cross.sweep(
+    data,  # close 形状 (T, 2)：列 0 = BTC，列 1 = ETH
+    params=[
+        {"fast": 10, "slow": 50},
+        {"fast": 20, "slow": 50},
+    ],
+    signal_delay=1,
+)</pre>
+  <p class="muted">
+    每个参数组调用一次函数，得到两张 <code>(T, 2)</code>，再沿列拼起来。<code>signal_delay=1</code> 已经把 <code>true</code> 下移一根。下面四根只说明形状：格子里的「买」「卖」是假设的信号，不是用这四根价格算出来的 10/50 均线。
+  </p>
+  <div class="panel">
+    <div class="cap">价格保持两列。执行器读第 2 根 BTC 时用的就是 105</div>
+    <div class="body">
+      <table>
+        <thead><tr><th></th><th>BTC</th><th>ETH</th></tr></thead>
+        <tbody>
+          <tr><td>第 0 根</td><td class="mono">100</td><td class="mono">200</td></tr>
+          <tr><td>第 1 根</td><td class="mono">101</td><td class="mono">190</td></tr>
+          <tr><td>第 2 根</td><td class="mono">105</td><td class="mono">180</td></tr>
+          <tr><td>第 3 根</td><td class="mono">103</td><td class="mono">210</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <div class="cap">entries。空格子表示这一根不动。默认 LongOnly 时空仓读到「买」就买入</div>
+      <div class="body">
+        <table>
+          <thead>
+            <tr><th></th><th>10/50·BTC</th><th>10/50·ETH</th><th>20/50·BTC</th><th>20/50·ETH</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>第 0 根</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td>第 1 根</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td>第 2 根</td><td>买</td><td></td><td></td><td>买</td></tr>
+            <tr><td>第 3 根</td><td></td><td></td><td></td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="cap">exits。行、列与左表对齐。默认 LongOnly 时「卖」是平掉已有多头</div>
+      <div class="body">
+        <table>
+          <thead>
+            <tr><th></th><th>10/50·BTC</th><th>10/50·ETH</th><th>20/50·BTC</th><th>20/50·ETH</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>第 0 根</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td>第 1 根</td><td></td><td>卖</td><td></td><td></td></tr>
+            <tr><td>第 2 根</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td>第 3 根</td><td></td><td></td><td>卖</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="note">
+    第 2 根这一行：<code>10/50·BTC</code> 买入，价格用 BTC 的 105；<code>10/50·ETH</code> 不动；<code>20/50·ETH</code> 是另一笔回测，用 ETH 的 180 买入；<code>20/50·BTC</code> 不动。四列就是同一次模拟里的四笔独立回测，各有一份现金。
+  </div>
+  <div class="wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>交给 from_signals 的</th><th>形状</th><th>这一例</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">close</td><td class="mono">(T, 2)</td><td>还是 BTC、ETH</td></tr>
+        <tr><td class="mono">entries</td><td class="mono">(T, 4)</td><td>上穿，延迟已经做完</td></tr>
+        <tr><td class="mono">exits</td><td class="mono">(T, 4)</td><td>下穿，延迟已经做完</td></tr>
+        <tr><td class="mono">column_map</td><td class="mono">[0, 1, 0, 1]</td><td>第 0、2 列读 BTC，第 1、3 列读 ETH</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px">
+    <code>strategy.sweep</code> 拼完这两张表后调用 <code>from_signals</code>，Rust 放进 <code>FromSignals.entries</code> / <code>exits</code>，再调用 <code>simulate_from_signals</code>。
+    循环走到第 2 根、第 0 列，读到入场为真、出场为假，空仓，就按 <code>column_map[0] = 0</code> 取 BTC 收盘下买单。
+    参数再加密只加列：<code>fast ∈ {10,20,30,40}</code>、<code>slow ∈ {20,30,40,50}</code> 且 <code>fast &lt; slow</code> 是 10 组，乘 2 个标的，两张表都变成 <code>(T, 20)</code>，<code>close</code> 仍是 <code>(T, 2)</code>。
+  </p>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>entries</th><th>exits</th><th>默认 LongOnly</th></tr></thead>
+      <tbody>
+        <tr><td>真</td><td>假</td><td>空仓就买。已有多头且 <code>accumulate</code> 关闭时不加仓</td></tr>
+        <tr><td>假</td><td>真</td><td>已有多头就卖平。空仓没有可平的，不下单</td></tr>
+        <tr><td>假</td><td>假</td><td>不下单，执行核不会被调用</td></tr>
+        <tr><td>真</td><td>真</td><td>冲突。默认两边都丢</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small" style="margin-top:8px">
+    格子里没有 buy/sell 这个值。正的 <code>size</code> 是买，负的是卖，由 <code>signals_to_size</code> 在进核前算出来。
+    <code>direction="both"</code> 时，<code>exits</code> 的真表示开空，不是平多，见上面的双均线例子。
+    <code>ShortOnly</code> 则把 <code>entries</code> 读成卖出开空、<code>exits</code> 读成买入平空。
+  </p>
+
   <h2 id="faq">常见问题</h2>
 
   <h3>Q1. 同一根 bar 同时出现入场和出场会怎样？</h3>
@@ -1192,6 +1306,22 @@ pf = dual_ma.run(
     输入数据是向量化矩阵，订单决策在循环内逐 bar、逐列现场生成。决策依赖当前持仓、止损锚定价和 accumulate 状态，时间轴上是硬循环依赖，无法提前批量算。
     静态部分被上提：手续费等九个参数和七项静态校验每列只构建一次 <code>ValidatedOrder</code>，每 bar 只 <code>set_bar</code> 四个动态字段（参数声明随行变化时才重建）。
     并行轴在空间方向（group/列），时间方向始终串行。
+  </p>
+
+  <h3>Q6. 随机数是用来决定成交的吗？</h3>
+  <p class="muted">
+    不是。两条循环里的随机数只服务 <code>reject_prob</code>。默认 0，这时根本不抽。大于 0 时，<code>uniform(seed, row, col)</code> 抽一个 [0, 1) 的数交给执行核；抽数小于概率就记 <code>Rejected</code> / <code>RandomEvent</code>，现金和持仓不动。抽数只依赖种子、行、列，所以换线程数或分组不会改变拒哪些格子。
+  </p>
+
+  <h3>Q7. 信号是用户函数算的，还是循环里写死的？</h3>
+  <p class="muted">
+    进出场的布尔值在循环外面算好。Python 的 <code>@strategy</code> 对每个参数组返回 <code>(entries, exits)</code>，<code>sweep</code> 延迟、沿列拼接，再调用 <code>from_signals</code>。Rust 的 <code>SignalSweep</code> 用 <code>rule(factor, params) -&gt; (entry, exit)</code> 得到同一类数组。<code>phasor-signals</code> 的 <code>generate_exits</code> 可以收一个 <code>ExitChoice</code>，那也是生成数组的回调。
+    循环里写死的是后半段：止损是否覆盖信号、三种冲突、以及 <code>signals_to_size</code>。用户能换的是模式，不是这些函数体。每根 K 线看持仓再返回信号的 <code>signal_func</code>，以及止损、止盈调整回调，还没做。
+  </p>
+
+  <h3>Q8. from_orders 会比 from_signals 快吗？</h3>
+  <p class="muted">
+    看这一格进核之前被跳过，还是被多翻译一层。每一根都有真实订单时，<code>from_orders</code> 更省：它不读信号、不解冲突。信号很稀时反过来：没有信号、也没有已挂止损，<code>prepare_order</code> 直接返回，整组都安静就连执行核都不进。<code>from_orders</code> 仍然每根、每列进核，<code>NaN</code> 或 0 的数量只是被记成忽略。所以不要为了快，先把信号展开成一张满的订单表再交给订单循环。止损或止盈设上之后，持仓期间每一根都要测价格，这份开销只有信号循环有。真成交之后两边是同一个核。
   </p>
 
   <h2 id="parity">与 vectorbt：结果对齐，算法不同</h2>
