@@ -157,6 +157,8 @@
     <a href="architecture.html">架构</a>
     <a href="phasor-core.html">phasor-core</a>
     <a href="phasor-model.html">phasor-model</a>
+    <a href="phasor-generic.html">phasor-generic</a>
+    <a href="phasor-expr.html">phasor-expr</a>
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
@@ -468,9 +470,9 @@
     <div class="foot"><p class="small" style="margin:0" id="tb-note"></p></div>
   </div>
   <div class="grid3">
-    <article class="card"><h3>与零比较是精确的</h3><p>买卖两条腿里 <code>cash_limit == 0</code>、<code>adj_size == 0</code>、<code>position &lt; 0</code> 这些判断故意不用容差：参考实现在这里是精确比较，换成 <code>is_close</code> 会改变哪些订单成交。</p></div>
-    <article class="card"><h3>但入口先吸附到零</h3><p>进入内核时，<code>cash、position、debt、free_cash、val_price、value</code> 先经 <code>is_close(v, 0)</code> 吸附。于是后面的精确比较看到的是干净的 0，而不是 <code>1e-17</code>。</p></div>
-    <article class="card"><h3>测的是 adj_size</h3><p>买入腿的 SizeZero 检查测的是截断前的 <code>adj_size</code>，不是最终的 <code>final_size</code>——和参考实现一致，代码里专门注释了这一点。</p></div>
+    <article class="card"><h3>与零比较是精确的</h3><p>买卖两条腿里 <code>cash_limit == 0</code>、<code>adj_size == 0</code>、<code>position &lt; 0</code> 这些判断故意不用容差：参考实现在这里是精确比较，换成 <code>is_close</code> 会改变哪些订单成交。</p></article>
+    <article class="card"><h3>但入口先吸附到零</h3><p>进入内核时，<code>cash、position、debt、free_cash、val_price、value</code> 先经 <code>is_close(v, 0)</code> 吸附。于是后面的精确比较看到的是干净的 0，而不是 <code>1e-17</code>。</p></article>
+    <article class="card"><h3>测的是 adj_size</h3><p>买入腿的 SizeZero 检查测的是截断前的 <code>adj_size</code>，不是最终的 <code>final_size</code>——和参考实现一致，代码里专门注释了这一点。</p></article>
   </div>
 
   <!-- ============================================================ -->
@@ -510,9 +512,9 @@
     </div>
   </div>
   <div class="grid3" style="margin-top:12px">
-    <article class="card"><h3>构造不会失败</h3><p><code>ValidatedOrder::new</code> 把违规<b>带着走</b>，到原本会报错的那一刻（状态校验之后）才报。因为参考实现先忽略 NaN 数量再校验：一列 NaN 数量 + 非法费率应当得到一串 Ignored，而不是错误。</p></div>
-    <article class="card"><h3>set_bar 只改四个字段</h3><p><code>size、price、size_type、direction</code> 每根 K 线都可能变，且都不在参数校验里，所以覆盖它们不会让缓存的结论失效。参数真的沿行变化时，调用方重建一个。</p></div>
-    <article class="card"><h3>报错顺序不变</h3><p>两半拆开后仍按原来的顺序调用：同时违反状态和参数时报的是状态错误（测试 <code>a_bad_state_outranks_a_bad_parameter</code>）。违规存成 <code>&amp;'static str</code>，让 ValidatedOrder 保持 <code>Copy</code>。</p></div>
+    <article class="card"><h3>构造不会失败</h3><p><code>ValidatedOrder::new</code> 把违规<b>带着走</b>，到原本会报错的那一刻（状态校验之后）才报。因为参考实现先忽略 NaN 数量再校验：一列 NaN 数量 + 非法费率应当得到一串 Ignored，而不是错误。</p></article>
+    <article class="card"><h3>set_bar 只改四个字段</h3><p><code>size、price、size_type、direction</code> 每根 K 线都可能变，且都不在参数校验里，所以覆盖它们不会让缓存的结论失效。参数真的沿行变化时，调用方重建一个。</p></article>
+    <article class="card"><h3>报错顺序不变</h3><p>两半拆开后仍按原来的顺序调用：同时违反状态和参数时报的是状态错误（测试 <code>a_bad_state_outranks_a_bad_parameter</code>）。违规存成 <code>&amp;'static str</code>，让 ValidatedOrder 保持 <code>Copy</code>。</p></article>
   </div>
   <p class="small" style="margin-top:8px">
     代码注释写的是“十四项检查里的七项”“提速 12–15%”；现在 <code>param_violation</code> 有 8 项（<code>cash_limit</code> 是后来加的），提速数字以 benchmarks/README.md 的复测为准。
@@ -650,10 +652,10 @@
 
   <h2 id="rules">不能绕开的规则</h2>
   <div class="grid2">
-    <article class="card"><h3>语义跟参考实现走，哪怕不地道</h3><p>文件开头写明：两者可能不同的地方一律跟 vectorbt，不地道的写法加注释而不是“整理”。0 和 NaN 走卖出分支、SizeZero 测 <code>adj_size</code>、numpy 语义的 <code>sign</code>，都是有意保留的。<code>tests/fixtures/*.tsv</code> 不能为了让改动通过而重新生成。</p></div>
-    <article class="card"><h3>拒绝不是错误</h3><p>被拒的订单原样返回状态，带一个 <code>StatusInfo</code>；只有不变量被破坏才返回 <code>Err</code>。<code>raise_reject</code> 是调用方（phasor-sim）把拒绝升级成错误的开关，内核自己不看它。</p></div>
-    <article class="card"><h3>保持可单独调用</h3><p>不要让内核读“这一列的其它部分”，也不要在里面写记录、维护估值价或生成随机数。这些都在调用方，阶段 2 的事件驱动层才能直接复用它。</p></div>
-    <article class="card"><h3>余额更新一律走 math::add</h3><p>现金、仓位、负债、可用现金的每次更新都用 <code>add</code>，异号近似抵消时得到精确的 0；可负担判断用 <code>is_close_or_less</code>，严格小于用 <code>is_less</code>。见 <a href="phasor-core.html#math">phasor-core · 容差</a>。</p></div>
+    <article class="card"><h3>语义跟参考实现走，哪怕不地道</h3><p>文件开头写明：两者可能不同的地方一律跟 vectorbt，不地道的写法加注释而不是“整理”。0 和 NaN 走卖出分支、SizeZero 测 <code>adj_size</code>、numpy 语义的 <code>sign</code>，都是有意保留的。<code>tests/fixtures/*.tsv</code> 不能为了让改动通过而重新生成。</p></article>
+    <article class="card"><h3>拒绝不是错误</h3><p>被拒的订单原样返回状态，带一个 <code>StatusInfo</code>；只有不变量被破坏才返回 <code>Err</code>。<code>raise_reject</code> 是调用方（phasor-sim）把拒绝升级成错误的开关，内核自己不看它。</p></article>
+    <article class="card"><h3>保持可单独调用</h3><p>不要让内核读“这一列的其它部分”，也不要在里面写记录、维护估值价或生成随机数。这些都在调用方，阶段 2 的事件驱动层才能直接复用它。</p></article>
+    <article class="card"><h3>余额更新一律走 math::add</h3><p>现金、仓位、负债、可用现金的每次更新都用 <code>add</code>，异号近似抵消时得到精确的 0；可负担判断用 <code>is_close_or_less</code>，严格小于用 <code>is_less</code>。见 <a href="phasor-core.html#math">phasor-core · 容差</a>。</p></article>
   </div>
 
   <h2>源文件</h2>

@@ -138,7 +138,9 @@
     <a href="index.html">wiki</a>
     <a href="architecture.html">架构</a>
     <a href="phasor-core.html">phasor-core</a>
+    <a href="phasor-generic.html">phasor-generic</a>
     <a href="phasor-exec.html">phasor-exec</a>
+    <a href="phasor-expr.html">phasor-expr</a>
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
@@ -296,9 +298,9 @@
     <div class="foot"><p class="small" style="margin:0" id="en-note"></p></div>
   </div>
   <div class="grid3">
-    <article class="card"><h3>SizeType 是一条级联</h3><p>phasor-exec 按固定顺序把 Percent、TargetPercent、TargetValue、Value、TargetAmount 逐级改写，直到只剩 <code>Amount</code>（ARCHITECTURE §7.3）。枚举本身只定义“数量怎么读”，换算在内核里。</p></div>
-    <article class="card"><h3>Rejected 不是 Err</h3><p><code>OrderStatus::Rejected</code> 是返回值里的普通结果，原因在 <code>StatusInfo</code>。<code>Err</code> 留给 phasor-core 的不变量错误。</p></div>
-    <article class="card"><h3>三种交易视图共用一个 schema</h3><p><code>TradesType</code> 的三个值只改变成交如何归属到交易：按进场 FIFO、按出场平均、或按仓位聚合。这是移植时最常见的错误（§9.5）。</p></div>
+    <article class="card"><h3>SizeType 是一条级联</h3><p>phasor-exec 按固定顺序把 Percent、TargetPercent、TargetValue、Value、TargetAmount 逐级改写，直到只剩 <code>Amount</code>（ARCHITECTURE §7.3）。枚举本身只定义“数量怎么读”，换算在内核里。</p></article>
+    <article class="card"><h3>Rejected 不是 Err</h3><p><code>OrderStatus::Rejected</code> 是返回值里的普通结果，原因在 <code>StatusInfo</code>。<code>Err</code> 留给 phasor-core 的不变量错误。</p></article>
+    <article class="card"><h3>三种交易视图共用一个 schema</h3><p><code>TradesType</code> 的三个值只改变成交如何归属到交易：按进场 FIFO、按出场平均、或按仓位聚合。这是移植时最常见的错误（§9.5）。</p></article>
   </div>
 
   <!-- ============================================================ -->
@@ -386,9 +388,9 @@
     <div class="foot"><p class="small" style="margin:0" id="px-note"></p></div>
   </div>
   <div class="grid3">
-    <article class="card"><h3>raw 按每个实例的精度缩放</h3><p>测试里 <code>Price::from_raw(150_500, 3)</code> 是 150.500 JPY，<code>from_raw(6_500_012_345_678, 8)</code> 是 65,000.12345678：raw = 值 × 10<sup>precision</sup>。模块注释里“raw = 值 × 10<sup>PRECISION</sup>（9）”描述的是默认刻度，不是每个实例。</p></div>
-    <article class="card"><h3>derive 的比较只看字段</h3><p><code>Eq</code> 与 <code>Ord</code> 是 derive 的：先比 raw 再比 precision。精度不同时它们没有数值意义——<code>1.00</code> 与 <code>1.000</code> 不相等，<code>1.00</code> 还“大于” <code>5.0</code>。注释说“精度不同的价格做运算前必须先对齐”，目前没有提供对齐的函数。</p></div>
-    <article class="card"><h3>为什么要准备 i128</h3><p><code>PriceRaw</code> 是类型别名。9 位小数下 i64 的上限约 92 亿，价格够用，但链上 18 位小数的数量放不下；高精度变体（16 位小数，<code>i128</code>）只需改别名，不用重写。</p></div>
+    <article class="card"><h3>raw 按每个实例的精度缩放</h3><p>测试里 <code>Price::from_raw(150_500, 3)</code> 是 150.500 JPY，<code>from_raw(6_500_012_345_678, 8)</code> 是 65,000.12345678：raw = 值 × 10<sup>precision</sup>。模块注释里“raw = 值 × 10<sup>PRECISION</sup>（9）”描述的是默认刻度，不是每个实例。</p></article>
+    <article class="card"><h3>derive 的比较只看字段</h3><p><code>Eq</code> 与 <code>Ord</code> 是 derive 的：先比 raw 再比 precision。精度不同时它们没有数值意义——<code>1.00</code> 与 <code>1.000</code> 不相等，<code>1.00</code> 还“大于” <code>5.0</code>。注释说“精度不同的价格做运算前必须先对齐”，目前没有提供对齐的函数。</p></article>
+    <article class="card"><h3>为什么要准备 i128</h3><p><code>PriceRaw</code> 是类型别名。9 位小数下 i64 的上限约 92 亿，价格够用，但链上 18 位小数的数量放不下；高精度变体（16 位小数，<code>i128</code>）只需改别名，不用重写。</p></article>
   </div>
 
   <!-- ============================================================ -->
@@ -534,10 +536,10 @@
 
   <h2 id="rules">不能绕开的规则</h2>
   <div class="grid2">
-    <article class="card"><h3>判别值是磁盘格式</h3><p>枚举以整数写进 <code>OrderRecords</code>、日志和 <code>CashRecords</code>，被 Python 层和差分测试读回。测试 <code>discriminants_are_pinned</code> 固定了其中几个；新增变体只能追加在末尾，不能重排。</p></div>
-    <article class="card"><h3>撮合枚举的语义跟参考实现走</h3><p>除了 <code>CashFlowKind</code>，每个撮合枚举的变体和含义都对应 vectorbt。想“改进”某个模式的语义，等于让 <code>tests/fixtures/*.tsv</code> 对不上——那些夹具不能为了让改动通过而重新生成。</p></div>
-    <article class="card"><h3>解析从右边切</h3><p><code>InstrumentId</code> 用 <code>rsplit_once('.')</code>，<code>BarType</code> 用 <code>rsplitn(5, '-')</code>：标的名可以含 <code>.</code> 和 <code>-</code>，交易所名不能含 <code>.</code>（<code>from_parts</code> 显式拒绝）。改成从左边切会让 <code>BTC-USDT</code> 这类标的全部解析错。</p></div>
-    <article class="card"><h3>定点类型先别拿来算</h3><p>阶段 1 没有任何地方构造 <code>Price</code> / <code>Quantity</code>，也没有对齐精度的运算。要用它们之前，先补上“按精度对齐”的比较与算术，否则 derive 出的 <code>Ord</code> 会在精度不同时给出错误的大小关系。</p></div>
+    <article class="card"><h3>判别值是磁盘格式</h3><p>枚举以整数写进 <code>OrderRecords</code>、日志和 <code>CashRecords</code>，被 Python 层和差分测试读回。测试 <code>discriminants_are_pinned</code> 固定了其中几个；新增变体只能追加在末尾，不能重排。</p></article>
+    <article class="card"><h3>撮合枚举的语义跟参考实现走</h3><p>除了 <code>CashFlowKind</code>，每个撮合枚举的变体和含义都对应 vectorbt。想“改进”某个模式的语义，等于让 <code>tests/fixtures/*.tsv</code> 对不上——那些夹具不能为了让改动通过而重新生成。</p></article>
+    <article class="card"><h3>解析从右边切</h3><p><code>InstrumentId</code> 用 <code>rsplit_once('.')</code>，<code>BarType</code> 用 <code>rsplitn(5, '-')</code>：标的名可以含 <code>.</code> 和 <code>-</code>，交易所名不能含 <code>.</code>（<code>from_parts</code> 显式拒绝）。改成从左边切会让 <code>BTC-USDT</code> 这类标的全部解析错。</p></article>
+    <article class="card"><h3>定点类型先别拿来算</h3><p>阶段 1 没有任何地方构造 <code>Price</code> / <code>Quantity</code>，也没有对齐精度的运算。要用它们之前，先补上“按精度对齐”的比较与算术，否则 derive 出的 <code>Ord</code> 会在精度不同时给出错误的大小关系。</p></article>
   </div>
 
   <h2>源文件</h2>

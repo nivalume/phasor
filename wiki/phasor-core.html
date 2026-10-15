@@ -139,7 +139,9 @@
     <a href="index.html">wiki</a>
     <a href="architecture.html">架构</a>
     <a href="phasor-model.html">phasor-model</a>
+    <a href="phasor-generic.html">phasor-generic</a>
     <a href="phasor-exec.html">phasor-exec</a>
+    <a href="phasor-expr.html">phasor-expr</a>
     <a href="phasor-sim.html">phasor-sim</a>
     <a href="phasor-records.html">phasor-records</a>
     <a href="phasor-signals.html">phasor-signals</a>
@@ -428,9 +430,9 @@
     <div class="foot"><p class="small" style="margin:0">朴素加法最后剩下 <code>-1.1e-16</code>：仓位是负的，引擎会认为这一列持有一个极小的空头，下一根 K 线的“是否有持仓”分支就走错了。<code>add</code> 发现两个操作数异号且量级接近，直接返回精确的 <code>0.0</code>。</p></div>
   </div>
   <div class="grid3">
-    <article class="card"><h3>异号时比大小，不求和</h3><p><code>is_addition_zero</code> 对异号操作数比较 <code>|a|</code> 与 <code>|b|</code>，而不是看 <code>a + b</code> 离 0 多远：两个几乎抵消的大数相加，有效数字几乎全丢，和的大小在相对容差下没有意义。</p></div>
-    <article class="card"><h3>sign 不是 signum</h3><p><code>f64::signum(0.0) = 1.0</code>、<code>signum(-0.0) = -1.0</code>，会把零操作数送进“异号”分支。这里的 <code>sign</code> 返回整数，两个零都是 0，NaN 单独是 <code>i8::MIN</code>。</p></div>
-    <article class="card"><h3>容差内既不大也不小</h3><p><code>is_less(a, b)</code> 不等于 <code>!is_close_or_less(b, a)</code>：容差之内的两个数是“相等”，不是“小于”，也不是“大于”。</p></div>
+    <article class="card"><h3>异号时比大小，不求和</h3><p><code>is_addition_zero</code> 对异号操作数比较 <code>|a|</code> 与 <code>|b|</code>，而不是看 <code>a + b</code> 离 0 多远：两个几乎抵消的大数相加，有效数字几乎全丢，和的大小在相对容差下没有意义。</p></article>
+    <article class="card"><h3>sign 不是 signum</h3><p><code>f64::signum(0.0) = 1.0</code>、<code>signum(-0.0) = -1.0</code>，会把零操作数送进“异号”分支。这里的 <code>sign</code> 返回整数，两个零都是 0，NaN 单独是 <code>i8::MIN</code>。</p></article>
+    <article class="card"><h3>容差内既不大也不小</h3><p><code>is_less(a, b)</code> 不等于 <code>!is_close_or_less(b, a)</code>：容差之内的两个数是“相等”，不是“小于”，也不是“大于”。</p></article>
   </div>
 
   <!-- ============================================================ -->

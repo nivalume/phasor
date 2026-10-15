@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>phasor-expr 设计</title>
+<style>
+  :root {
+    --bg: #1e1e1e;
+    --chrome: #181818;
+    --elev: #262626;
+    --text: #f0f0f0;
+    --secondary: #b8b8b8;
+    --muted: #909090;
+    --stroke: #303030;
+    --stroke2: #3d3d3d;
+    --fill: #2b2b2b;
+    --accent: #3a7afe;
+    --good: #4caf7a;
+    --bad: #d35d5d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.55;
+    font-size: 14px;
+  }
+  a { color: #8eb6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header.top {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: 16px; align-items: center;
+    padding: 10px 22px; background: var(--chrome); border-bottom: 1px solid var(--stroke); font-size: 13px;
+  }
+  header.top strong { font-size: 14px; }
+  header.top nav { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+  header.top nav a { color: var(--secondary); }
+  header.top nav a.sep { color: var(--muted); }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 22px 72px; }
+  h1 { font-size: 24px; line-height: 30px; font-weight: 600; margin: 0 0 8px; }
+  h2 { font-size: 18px; line-height: 24px; font-weight: 600; margin: 32px 0 10px; }
+  h3 { font-size: 15px; font-weight: 600; margin: 18px 0 4px; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--secondary); }
+  .small { color: var(--muted); font-size: 12px; line-height: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 8px; }
+  .stat { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  .stat b { display: block; font-size: 20px; font-weight: 650; margin-bottom: 2px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .panel { border: 1px solid var(--stroke); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+  .panel .cap { padding: 8px 12px; background: #242424; border-bottom: 1px solid var(--stroke); font-size: 12px; font-weight: 600; }
+  .panel .body { padding: 12px; background: var(--bg); overflow-x: auto; }
+  .panel .foot { padding: 8px 12px; border-top: 1px solid var(--stroke); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 8px; }
+  .legend button, .chip, .seg button {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--stroke2); background: transparent; color: var(--secondary);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .legend button.on, .seg button.on { color: var(--text); background: var(--fill); border-color: #5a5a5a; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; align-items: center; }
+  .seg .lbl { color: var(--muted); font-size: 12px; margin-right: 2px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .detail { min-height: 72px; border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: var(--elev); }
+  .detail h3 { margin: 0 0 4px; }
+  .uses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; vertical-align: top; border-top: 1px solid var(--stroke); }
+  th { color: var(--text); font-weight: 600; background: var(--elev); border-top: none; }
+  td { color: var(--secondary); }
+  .wrap { border: 1px solid var(--stroke); border-radius: 6px; overflow: hidden; overflow-x: auto; }
+  .types td:first-child { white-space: nowrap; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--stroke); border-radius: 8px; padding: 12px 14px; background: #202020; }
+  .card h3 { margin-top: 0; }
+  .card p { color: var(--secondary); font-size: 13px; margin: 0; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  pre {
+    margin: 0; padding: 10px 12px; background: var(--fill); border: 1px solid var(--stroke);
+    border-radius: 6px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px;
+  }
+  .note { border-left: 3px solid var(--accent); background: #242424; border-radius: 6px; padding: 10px 12px; color: var(--secondary); font-size: 13px; margin: 10px 0; }
+  .note.warn { border-left-color: var(--bad); }
+  ol.steps { margin: 6px 0 10px; padding-left: 22px; }
+  ol.steps li { color: var(--secondary); margin: 0 0 6px; }
+  ol.steps li b { color: var(--text); }
+  .panel .body > svg, .panel .body svg#dag, .panel .body svg#e-chart { max-width: 100%; height: auto; display: block; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+  input[type="text"], input[type="number"] {
+    background: var(--fill); color: var(--text); border: 1px solid var(--stroke2); border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 5px 8px;
+  }
+  input[type="text"] { width: 100%; }
+  input[type="number"] { width: 96px; }
+  label.field { display: block; color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  label.field span { display: block; margin-bottom: 3px; }
+  label.inline { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12px; margin-right: 14px; }
+  .err { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 4px; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  .kpi { border: 1px solid var(--stroke2); border-radius: 6px; padding: 4px 10px; font-size: 12px; color: var(--secondary); background: #232323; }
+  .kpi b { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  /* cell grids */
+  table.cells { width: auto; border-collapse: separate; border-spacing: 3px; font-size: 11px; }
+  table.cells th, table.cells td { border: none; padding: 0; background: none; }
+  table.cells th.rl { text-align: right; padding-right: 8px; font-weight: 500; color: var(--secondary); white-space: nowrap; font-size: 12px; }
+  table.cells th.ix { color: var(--muted); font-weight: 400; text-align: center; font-family: ui-monospace, Menlo, monospace; padding: 0 2px; }
+  table.cells td.c {
+    min-width: 46px; height: 28px; padding: 0 4px; text-align: center; vertical-align: middle; border-radius: 4px;
+    border: 1px solid var(--stroke2); background: #232323; color: var(--secondary);
+    font-family: ui-monospace, Menlo, monospace; cursor: default;
+  }
+  table.cells td.hot { outline: 2px solid #f0f0f0; outline-offset: -1px; color: var(--text); }
+  table.cells td.dim { opacity: 0.35; }
+  table.cells td.none { border-style: dashed; color: #666; }
+  .flexrow { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .flexrow > div { min-width: 0; }
+  @media (max-width: 860px) {
+    .stats, .grid2, .grid3, .controls { grid-template-columns: 1fr; }
+    main { padding: 20px 16px 60px; }
+    header.top { padding: 10px 16px; flex-wrap: wrap; }
+  }
+</style>
+<style>
+  header.top strong { white-space: nowrap; }
+  textarea {
+    width: 100%; min-height: 150px; resize: vertical;
+    background: var(--fill); color: var(--text); border: 1px solid var(--stroke2); border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; padding: 8px 10px;
+  }
+  select { background: var(--fill); color: var(--text); border: 1px solid var(--stroke2); border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 4px 6px; max-width: 100%; }
+  .scroll { max-height: 360px; overflow: auto; border: 1px solid var(--stroke); border-radius: 6px; }
+  .scroll table th { position: sticky; top: 0; }
+  .ast { font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 18px; white-space: pre; color: var(--secondary); background: var(--fill); border: 1px solid var(--stroke); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 320px; }
+  .ast b { color: #f0b088; font-weight: 600; }
+  .ast i { color: #8fe0d2; font-style: normal; }
+  .ast u { color: #e6c35c; text-decoration: none; }
+  .ladder { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; font-size: 12px; }
+  .ladder span.lv { border: 1px solid var(--stroke2); border-radius: 6px; padding: 3px 8px; background: #232323; font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+  .ladder span.ar { color: var(--muted); }
+  td.k { white-space: nowrap; }
+</style>
+</head>
+<body>
+<header class="top">
+  <strong>phasor-expr</strong>
+  <nav>
+    <a href="index.html">wiki</a>
+    <a href="architecture.html">架构</a>
+    <a href="phasor-core.html">phasor-core</a>
+    <a href="phasor-model.html">phasor-model</a>
+    <a href="phasor-generic.html">phasor-generic</a>
+    <a href="phasor-exec.html">phasor-exec</a>
+    <a href="phasor-sim.html">phasor-sim</a>
+    <a href="phasor-records.html">phasor-records</a>
+    <a href="phasor-signals.html">phasor-signals</a>
+    <a class="sep">|</a>
+    <a href="#concept">第一性原理</a>
+    <a href="#graph">依赖图</a>
+    <a href="#pipeline">流水线</a>
+    <a href="#lang">语言</a>
+    <a href="#compiler">编译器</a>
+    <a href="#eval">求值</a>
+    <a href="#kernels">计算核心</a>
+    <a href="#backends">后端</a>
+    <a href="#alpha">Alpha158/360</a>
+    <a href="#verify">验证</a>
+    <a href="#rules">规则</a>
+  </nav>
+</header>
+<main>
+  <h1>phasor-expr</h1>
+  <p class="muted">
+    因子表达式。把 Qlib 风格的字符串——<code>$close / Mean($close, 20) - 1</code>——编译一次，然后对任意多个面板求值，结果直接是列主序的 <code>Matrix</code>（时间 × 标的），
+    可以交给信号层和模拟层。它不是一个通用的解释器：整个因子集被编译成<b>一张</b>去重的依赖图，按标的并行求值，每个标的只需要几条暂存序列。
+  </p>
+  <div class="stats">
+    <div class="stat"><b>158 → 357 节点 / 17 槽位</b><span>Alpha158 编译后的图：148 个节点直接写进输出；Alpha360 是 722 个节点，只要 1 个槽位（354 个 <code>Ref</code> 是不占内存的视图）</span></div>
+    <div class="stat"><b>0 处不一致</b><span>对 qlib 生成的两份 fixture（Alpha158 80 行 × 3 个标的、Alpha360 64 行）原生和 Polars 两个后端都要通过；这个页面的 JS 移植也逐格通过</span></div>
+    <div class="stat"><b>约 10× 快于 Polars</b><span>2520 × 200 的 Alpha158：原生 0.60 s，Polars 后端 6.2 s。Polars 后端留着做独立的交叉验证</span></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="concept">从第一性原理看：因子为什么要一门语言，又为什么要编译</h2>
+  <p class="muted">先不看代码。一个因子是“面板 → 面板”的函数：输入是开高低收量（时间 × 标的），输出是同形状的一张表。要做这件事，有几个问题绕不过去。</p>
+
+  <h3>1. 为什么不直接写 Rust 函数</h3>
+  <p>
+    研究的节奏是“改一个窗口、换一个分母、再跑一遍”，每次重新编译 Rust 太慢；而且业界大量现成的因子库（Qlib 的 Alpha158 / Alpha360）本来就是字符串。
+    一门小语言让因子成为<b>数据</b>：可以存进配置、从 Python 传进来、在报告里原样显示，并且和参考实现逐字对照。
+  </p>
+
+  <h3>2. 因子之间大量重复</h3>
+  <p>
+    Alpha158 里几十个因子都用到 <code>Ref($close, 1)</code>，<code>Mean($close&gt;Ref($close,1), d)</code> 在 CNTP 和 CNTD 里各出现一次；<code>a+b</code> 和 <code>Add(a,b)</code> 是同一个东西。
+    逐个解释每个因子的语法树，会把同一个子表达式算上几十遍。所以整个因子集应当被编译成一张<b>共享子表达式</b>的有向无环图：节点由“算子 + 输入节点”唯一确定（hash-consing）。
+  </p>
+
+  <h3>3. 内存应该由“同时活着的中间结果”决定，而不是由节点数决定</h3>
+  <p>
+    357 个节点如果每个都存一整张 2520 × 200 的矩阵，就是 357 × 4 MB。但几乎所有算子都是<b>逐标的</b>的时间序列运算：一个标的的结果从不读另一个标的。
+    于是可以一次只算一个标的，中间结果只是一条 2520 长的序列（约 20 KB）；再按依赖顺序排好节点，一条中间序列在它最后一个读者之后就可以被复用——像寄存器分配。
+    Alpha158 最后只需要 17 条暂存序列。
+  </p>
+
+  <h3>4. 平移不该复制数据</h3>
+  <p>
+    <code>Ref(x, k)</code> 只是“晚 k 行读 x”。把它物化成一条新序列，Alpha360 就要多复制 354 次。正确的做法是把它当成<b>视图</b>：消费者带着偏移量直接读 <code>x</code>。
+    负的 <code>k</code> 读的是未来，必须真的计算，并且要能被检测出来（<code>uses_future()</code>）——它只能出现在标签里，不能出现在信号里。
+  </p>
+
+  <h3>5. 错误要在编译期报</h3>
+  <p>
+    窗口是 2.5、分位数是 1.5、<code>Ref</code> 的偏移是一个字段——这些都应该在 <code>compile</code> 时、带着因子名报出来，而不是在算完前 150 个因子之后才在第 151 个上失败。
+    字段缺失也一样：求值前先解析所有字段，并行部分就没有出错路径。
+  </p>
+
+  <h3>6. 两个后端互相检验</h3>
+  <p>
+    一个手写的高速后端，和一个尽量直接地翻译成 Polars Lazy 的后端，在同一份 qlib fixture 上都必须通过。两者实现完全不同（增量累加器 vs 逐窗 UDF），同时出错的概率很小。
+  </p>
+
+  <div class="wrap types">
+    <table>
+      <thead><tr><th>第一性原理的问题</th><th>phasor-expr 的回答</th><th>小节</th></tr></thead>
+      <tbody>
+        <tr><td>因子是数据</td><td>Qlib 语法：<code>$field</code>、中缀运算、44 个函数；Pratt 解析器，源码 ≤ 16 KiB，嵌套 ≤ 128</td><td><a href="#lang">语言</a></td></tr>
+        <tr><td>共享子表达式</td><td><code>Graph</code>：按 <code>(Op, inputs)</code> 哈希合并；逐元素字面量常量折叠</td><td><a href="#compiler">编译器</a></td></tr>
+        <tr><td>内存由活跃集决定</td><td><code>Graph::schedule</code>：依赖顺序 + 最后读者之后释放槽位；没人读的节点直接写输出</td><td><a href="#compiler">编译器</a></td></tr>
+        <tr><td>平移不复制</td><td><code>k ≥ 0</code> 的 <code>Ref</code> 是视图（链式视图合并偏移）；<code>k &lt; 0</code> 计算并使 <code>uses_future()</code> 为真</td><td><a href="#compiler">编译器</a></td></tr>
+        <tr><td>编译期报错</td><td>参数必须是字面量；窗口为非负整数（0 = 扩展），分位数在 [0, 1]，EMA / Delta 参数非负；错误带因子名</td><td><a href="#compiler">编译器</a></td></tr>
+        <tr><td>逐标的并行</td><td><code>rayon</code>：每个标的列一个任务，每个工作线程一份 <code>Scratch</code>，写各输出中互不相交的列切片</td><td><a href="#eval">求值</a></td></tr>
+        <tr><td>快</td><td>O(1) 增量累加器（定期重建、平移求和、常量窗口检测）、有序环 / 树状数组、单调队列</td><td><a href="#kernels">计算核心</a></td></tr>
+        <tr><td>互相检验</td><td><code>ComputeBackend</code> trait：<code>NativeBackend</code> 与 <code>PolarsBackend</code>（feature）</td><td><a href="#backends">后端</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="graph">依赖图</h2>
+  <p>
+    左边是上游：phasor-core 的 <code>Matrix</code> / <code>Error</code>，phasor-generic 的 <code>rolling_mean / max / min_1d</code>，phasor-model 的 <code>OhlcvPanel</code>，外部的 rayon 和可选的 polars。
+    中间是八个私有模块（lib.rs 定义 <code>FactorSet</code> 并再导出公开项），右边是使用者。点任一节点，只保留相关的线。
+  </p>
+  <div class="legend" id="legend"></div>
+  <div class="panel">
+    <div class="cap">线的颜色 = 被用到的模块。研究层不直接依赖这个 crate，而是经 Python 包调用（虚线）</div>
+    <div class="body">
+      <svg id="dep-graph" width="1040" height="560" viewBox="0 0 1040 560" role="img" aria-label="phasor-expr 依赖图"></svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">来源：Cargo.toml 与各模块的 <code>use</code>。phasor-signals、phasor-sim 不依赖它：因子矩阵经调用方（例如门面的 <code>SignalSweep</code> 或 Python 的策略函数）变成布尔信号。</p></div>
+  </div>
+  <div class="detail" id="detail">
+    <h3>点一个节点</h3>
+    <p class="muted" style="margin:0">上游：用到了什么。模块：它负责哪一段。下游：它怎么使用 FactorSet。</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="pipeline">从字符串到 Matrix</h2>
+  <div class="panel">
+    <div class="cap">compile 一次（左半），evaluate 多次（右半）</div>
+    <div class="body">
+      <svg width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="编译与求值流水线">
+        <defs>
+          <marker id="parr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a8a8a" /></marker>
+        </defs>
+        <g font-size="11">
+          <text x="16" y="18" fill="#909090">FactorSet::compile（每个因子集一次）</text>
+          <rect x="16" y="28" width="118" height="62" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="75" y="52" text-anchor="middle" font-weight="600" fill="#f0f0f0">(name, 源码)</text>
+          <text x="75" y="70" text-anchor="middle" font-size="10" fill="#909090">名字非空、不重复</text>
+          <rect x="152" y="28" width="118" height="62" rx="6" fill="#262626" stroke="#c9a227"/>
+          <text x="211" y="52" text-anchor="middle" font-weight="600" fill="#f0f0f0">lex + Pratt</text>
+          <text x="211" y="70" text-anchor="middle" font-size="10" fill="#e6c35c">parse.rs · validate 元数</text>
+          <rect x="288" y="28" width="118" height="62" rx="6" fill="#262626" stroke="#c9a227"/>
+          <text x="347" y="52" text-anchor="middle" font-weight="600" fill="#f0f0f0">Expression 树</text>
+          <text x="347" y="70" text-anchor="middle" font-size="10" fill="#e6c35c">fields · uses_future</text>
+          <rect x="424" y="28" width="140" height="62" rx="6" fill="#262626" stroke="#e07a3d"/>
+          <text x="494" y="48" text-anchor="middle" font-weight="600" fill="#f0f0f0">Graph::compile</text>
+          <text x="494" y="64" text-anchor="middle" font-size="10" fill="#f0b088">哈希合并 · 参数校验</text>
+          <text x="494" y="78" text-anchor="middle" font-size="10" fill="#f0b088">常量折叠</text>
+          <rect x="582" y="28" width="130" height="62" rx="6" fill="#262626" stroke="#e07a3d"/>
+          <text x="647" y="48" text-anchor="middle" font-weight="600" fill="#f0f0f0">schedule</text>
+          <text x="647" y="64" text-anchor="middle" font-size="10" fill="#f0b088">视图 · 槽位分配</text>
+          <text x="647" y="78" text-anchor="middle" font-size="10" fill="#f0b088">最后读者后释放</text>
+
+          <text x="16" y="132" fill="#909090">FactorSet::evaluate（每个面板一次）</text>
+          <rect x="16" y="142" width="200" height="62" rx="6" fill="#262626" stroke="#3d3d3d"/>
+          <text x="116" y="164" text-anchor="middle" font-weight="600" fill="#f0f0f0">FactorInputs</text>
+          <text x="116" y="182" text-anchor="middle" font-size="10" fill="#909090">from_ohlcv(&amp;OhlcvPanel)</text>
+          <text x="116" y="196" text-anchor="middle" font-size="10" fill="#909090">.with_field("vwap", &amp;[f64])</text>
+          <rect x="234" y="142" width="160" height="62" rx="6" fill="#262626" stroke="#3a7afe"/>
+          <text x="314" y="164" text-anchor="middle" font-weight="600" fill="#f0f0f0">解析全部字段</text>
+          <text x="314" y="182" text-anchor="middle" font-size="10" fill="#9ec1ff">缺字段在这里报错</text>
+          <text x="314" y="196" text-anchor="middle" font-size="10" fill="#9ec1ff">每个输出单独分配</text>
+          <rect x="412" y="142" width="300" height="62" rx="6" fill="#1a2744" stroke="#3a7afe"/>
+          <text x="562" y="164" text-anchor="middle" font-weight="600" fill="#f0f0f0">columns.into_par_iter() · run_column</text>
+          <text x="562" y="182" text-anchor="middle" font-size="10" fill="#9ec1ff">每个标的一个任务；每个线程一份 Scratch（graph.slots 条序列）</text>
+          <text x="562" y="196" text-anchor="middle" font-size="10" fill="#9ec1ff">按节点顺序 step()，写各输出的第 c 列切片</text>
+          <rect x="730" y="142" width="294" height="62" rx="6" fill="#262626" stroke="#4caf7a"/>
+          <text x="877" y="164" text-anchor="middle" font-weight="600" fill="#f0f0f0">FactorValues</text>
+          <text x="877" y="182" text-anchor="middle" font-size="10" fill="#9be0b6">name → Matrix（n_rows × n_cols，列主序）</text>
+          <text x="877" y="196" text-anchor="middle" font-size="10" fill="#9be0b6">→ 信号层、SignalSweep、Python</text>
+          <text x="16" y="236" fill="#b8b8b8">ComputeBackend 只替换右半：NativeBackend 走 run_column；PolarsBackend 把每个 Expression 翻译成 Polars Lazy 表达式，.over(symbol)，每批 64 个因子。</text>
+        </g>
+        <path d="M134 59 H152" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M270 59 H288" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M406 59 H424" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M564 59 H582" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M216 173 H234" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M394 173 H412" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M712 173 H730" stroke="#8a8a8a" marker-end="url(#parr)"/>
+        <path d="M712 59 C 760 59, 760 110, 562 110 C 520 110, 562 130, 562 142" fill="none" stroke="#e07a3d" stroke-dasharray="4 3" marker-end="url(#parr)"/>
+        <text x="770" y="64" font-size="10" fill="#f0b088">Graph 被每次 evaluate 复用</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="lang">语言</h2>
+  <p>
+    字段写作 <code>$name</code>（不区分大小写，统一小写）；OHLCV 由 <code>from_ohlcv</code> 提供，其他字段（例如 Alpha158 需要的 <code>vwap</code>）用 <code>with_field</code> 加入。
+    布尔结果是 <code>1.0 / 0.0</code>。运算符优先级从低到高：
+  </p>
+  <div class="ladder">
+    <span class="lv">|</span><span class="ar">&lt;</span><span class="lv">&amp;</span><span class="ar">&lt;</span><span class="lv">&gt; &lt; &gt;= &lt;= == !=</span><span class="ar">&lt;</span>
+    <span class="lv">+ −</span><span class="ar">&lt;</span><span class="lv">* /</span><span class="ar">&lt;</span><span class="lv">一元 + −</span><span class="ar">&lt;</span><span class="lv">**（右结合）</span>
+  </div>
+  <p class="small">所以 <code>-2**2</code> 是 <code>-(2**2) = -4</code>，和 Python 一样；<code>$a &gt; 1 &amp; $b &lt; 2</code> 是 <code>($a&gt;1) &amp; ($b&lt;2)</code>。单独的 <code>=</code> 或 <code>!</code> 是词法错误。</p>
+  <div class="wrap types">
+    <table>
+      <thead><tr><th>类别</th><th>函数</th><th>语义</th></tr></thead>
+      <tbody>
+        <tr><td>逐元素</td><td><code>Abs Sign Log Not</code>；<code>Add Sub Mul Div Power Gt Ge Lt Le Eq Ne And Or</code>；<code>Greater Less</code>；<code>If(c, a, b)</code></td><td>函数写法和运算符写法编译成同一个节点。比较是 NumPy 式的精确比较：和 NaN 比较得 0。<code>Greater / Less</code> 遇 NaN 得 NaN。</td></tr>
+        <tr><td>平移</td><td><code>Ref(x, n)</code>、<code>Delta(x, n)</code></td><td><code>Ref</code> 正数读过去（视图），负数读未来；<code>Delta = x − Ref(x, n)</code>，n 不能为负。</td></tr>
+        <tr><td>平滑</td><td><code>EMA(x, p)</code></td><td><code>p &lt; 1</code> 是 alpha，<code>p ≥ 1</code> 是 span（alpha = 2/(p+1)），<code>0</code> 是扩展窗口（每行重新加权，O(n)）。</td></tr>
+        <tr><td>滚动 <code>(x, N)</code></td><td><code>Mean Sum Std Var Max Min Med Mad Count Skew Kurt WMA Rank IdxMax IdxMin Slope Rsquare Resi</code></td><td><code>min_periods = 1</code>（qlib 语义：第 0 行就有值）；<code>N = 0</code> 是扩展窗口；NaN 占窗口位置但不参与计算。<code>Std/Var</code> 是样本（ddof = 1）；<code>Rank</code> 是最后一个值在窗口里的分位；<code>IdxMax/IdxMin</code> 从 1 开始。</td></tr>
+        <tr><td>滚动 <code>(x, N, q)</code></td><td><code>Quantile</code></td><td>线性插值，q ∈ [0, 1]。</td></tr>
+        <tr><td>成对 <code>(x, y, N)</code></td><td><code>Corr Cov</code></td><td>只用两边都不是 NaN 的行；<code>Corr</code> 在任一边的标准差 ≤ 2e-5 时为 NaN（qlib 的规则）。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">还不支持：截面算子（一行读所有标的，例如截面排名）、跨标的引用、掩码（ARCHITECTURE §5.7、§17.2）。正因为所有算子都只读本标的，图才可以按标的并行。</p>
+
+  <!-- ============================================================ -->
+  <h2 id="compiler">编译器实验台</h2>
+  <p>
+    下面是 <code>parse.rs</code> 和 <code>graph.rs</code> 的移植：词法、Pratt 解析、元数检查、哈希合并、常量折叠、参数校验、视图解析和槽位调度。每行一个 <code>名字 = 表达式</code>。
+    它对 Alpha158 给出的正是 ARCHITECTURE 写的 357 个节点、17 个槽位、148 个直接写输出，对 Alpha360 是 722 个节点、1 个槽位。
+  </p>
+  <div class="panel">
+    <div class="cap">FactorSet::compile，JS 移植</div>
+    <div class="body">
+      <div class="seg" id="c-presets"><span class="lbl">例子</span></div>
+      <textarea id="c-src" spellcheck="false"></textarea>
+      <div class="err" id="c-err"></div>
+      <div class="kpis" id="c-kpis"></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="c-note"></p></div>
+  </div>
+
+  <div class="panel">
+    <div class="cap" id="dag-cap">依赖图（节点按依赖深度分列）</div>
+    <div class="body">
+      <div class="legend" style="margin-bottom:6px">
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#3a7afe"></i>字段</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#666"></i>字面量</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#2fbfa8"></i>视图（Ref k≥0，不计算）</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#e07a3d"></i>计算，占槽位 sN</span>
+        <span class="chip" style="cursor:default"><i class="dot" style="background:#4caf7a"></i>计算，直接写输出</span>
+      </div>
+      <svg id="dag" width="1040" height="300" viewBox="0 0 1040 300" role="img" aria-label="编译后的依赖图"></svg>
+    </div>
+    <div class="foot"><p class="small" style="margin:0" id="dag-note">把鼠标移到节点上看它的算子、输入、槽位和被哪些因子用到。</p></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" style="margin:0">
+      <div class="cap">槽位时间线：横轴是调度顺序（节点下标），每条带子是一个节点占用某个槽位直到它最后一个读者</div>
+      <div class="body"><svg id="slots" width="520" height="200" viewBox="0 0 520 200" role="img" aria-label="槽位时间线"></svg></div>
+      <div class="foot"><p class="small" style="margin:0" id="slots-note"></p></div>
+    </div>
+    <div class="panel" style="margin:0">
+      <div class="cap">语法树（compile 之前保留的 Expression）</div>
+      <div class="body">
+        <div class="seg"><label class="inline">因子 <select id="ast-pick"></select></label></div>
+        <div class="ast" id="ast"></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>节点表</h3>
+  <div class="scroll"><table><thead><tr><th>#</th><th>算子</th><th>输入</th><th>视图</th><th>槽位</th><th>输出给</th><th>被读</th></tr></thead><tbody id="node-rows"></tbody></table></div>
+
+  <!-- ============================================================ -->
+  <h2 id="eval">求值：每个标的一个任务</h2>
+  <p>
+    上面编译出的因子集在一个合成面板上求值（2 个标的 × 80 根 K 线，<code>vwap</code> 由开高低收的均值近似）。求值器和原生后端的语义一致——同样的 <code>min_periods = 1</code>、同样的 NaN 规则、同样的 qlib 特例；
+    窗口统计用逐窗重算，而原生后端用增量累加器，两者在 1e-9 内一致（<code>eval.rs</code> 的测试正是这样对照的）。
+  </p>
+  <div class="panel">
+    <div class="cap">FactorSet::evaluate 在合成面板上，JS 移植</div>
+    <div class="body">
+      <div class="seg">
+        <label class="inline">因子 <select id="e-pick"></select></label>
+        <label class="inline">种子 <input type="number" id="e-seed" value="3" min="0" /></label>
+      </div>
+      <svg id="e-chart" width="1040" height="250" viewBox="0 0 1040 250" role="img" aria-label="因子值"></svg>
+      <div class="kpis" id="e-kpis"></div>
+      <div class="err" id="e-err"></div>
+    </div>
+    <div class="foot"><p class="small" style="margin:0">细线是两个标的的 close（右轴），粗线是所选因子（左轴）。“单独求值逐位相同”对应 Rust 测试 <code>each_symbol_evaluates_exactly_as_it_would_alone</code>：一个标的和别的标的放在一起算、还是单独算，结果的每一位都相同——这是按标的并行的前提。</p></div>
+  </div>
+  <div class="grid3">
+    <article class="card"><h3>没有锁，也没有 unsafe</h3><p>每个输出先按列切成 <code>&amp;mut [f64]</code>，第 c 个任务拿走每个输出的第 c 片。任务之间写的内存互不相交，借用检查器就能证明。</p></article>
+    <article class="card"><h3>页面惰性清零</h3><p>每个输出单独 <code>vec![0.0; n]</code>，由写入它的线程第一次触碰时才真正清零；原先克隆一个全零缓冲区，串行就要 350 ms。</p></article>
+    <article class="card"><h3>峰值内存就是输出</h3><p>中间结果是单个标的的序列（2,520 行约 20 KB），每个线程只有 <code>graph.slots</code> 条。2520 × 500 的 Alpha158 峰值 RSS 约 1.6 GB，几乎全是 158 个输出矩阵。</p></article>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="kernels">计算核心：每行 O(1) 的窗口</h2>
+  <div class="wrap types">
+    <table>
+      <thead><tr><th>算子</th><th>实现</th><th>每行代价</th></tr></thead>
+      <tbody>
+        <tr><td><code>Mean</code></td><td>phasor-generic 的前缀和（<code>rolling_mean_1d</code>，minp = 1）</td><td>O(1)</td></tr>
+        <tr><td><code>Max Min</code></td><td>phasor-generic 的单调队列</td><td>均摊 O(1)</td></tr>
+        <tr><td><code>Sum Std Var Skew Kurt WMA Slope Rsquare Resi Corr Cov Count</code></td><td><code>window.rs</code> 的增量累加器：进入窗口 push、离开 pop</td><td>O(1)</td></tr>
+        <tr><td><code>Quantile Med Rank Mad</code></td><td><code>order.rs</code>：窗口 ≤ 256 用有序环（二分 + 移位），更长或扩展窗口用按排序位置建的树状数组</td><td>O(window) 移位 / O(log n)</td></tr>
+        <tr><td><code>IdxMax IdxMin</code></td><td><code>order.rs</code> 的单调队列</td><td>均摊 O(1)</td></tr>
+        <tr><td><code>EMA</code></td><td>递推；<code>EMA(x, 0)</code> 每行重新加权整个前缀</td><td>O(1)；扩展为 O(n)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid3" style="margin-top:12px">
+    <article class="card"><h3>每 N 行重建一次</h3><p>加一个、减一个的舍入误差会累积。累加器每 <code>window</code> 行从窗口本身重算一次和，误差最多跨两个窗口；重建是 O(window)、每 window 行一次，总代价仍是 O(n)。</p></article>
+    <article class="card"><h3>平移求和</h3><p>值按“与第一个进入空窗口的值之差”求和：价格在 100 附近时，方差就不再是两个大平方数的小差，避免灾难性抵消。</p></article>
+    <article class="card"><h3>常量窗口检测</h3><p>qlib 在 <code>Corr</code> 的 <code>va == 0</code>、<code>Rsquare</code> 的 <code>yvar &lt;= 0</code> 处做精确比较。增量和在全等的值上会留下残差，所以 <code>Moments</code> 记录末尾有多少个相同的观测，全相同时报告精确的 0 方差。</p></article>
+  </div>
+  <p class="small" style="margin-top:8px">有序结构只存整数位置，所以 <code>Quantile / Med / Rank</code> 与对窗口排序的结果逐位相同；每个核心都在 NaN 段、常数段、高价位小波动、纯噪声上与逐窗重算对照（<code>incremental_windows_match_a_full_rescan</code>，容差 1e-9）。</p>
+
+  <!-- ============================================================ -->
+  <h2 id="backends">两个后端</h2>
+  <p>
+    <code>ComputeBackend</code> 只有两个方法：<code>name()</code> 和 <code>evaluate(set, inputs)</code>。<code>NativeBackend</code> 是默认；<code>PolarsBackend</code> 在 <code>polars</code> feature 下可用，
+    长表格式 + <code>.over(symbol)</code>，每批 64 个因子，qlib 特有的算子用 <code>rolling_map</code> 调用和原生后端测试里同一组逐窗函数。它的用途是<b>独立交叉验证</b>，不是性能。
+  </p>
+  <div class="panel">
+    <div class="cap">原生 vs Polars（4 线程，3 次取最好；ARCHITECTURE §5.6）。条长是对数刻度</div>
+    <div class="body"><div id="bench"></div></div>
+    <div class="foot"><p class="small" style="margin:0">Polars 慢在：每个算子都要重新按标的分组、qlib 算子是 O(window) 的 UDF、批次之间无法共享子表达式、<code>Option&lt;f64&gt;</code> 转换。原生后端的优势主要来自整张图只走一遍、共享节点和视图。</p></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="alpha">Alpha158 与 Alpha360</h2>
+  <p>
+    <code>alpha158()</code> 和 <code>alpha360()</code> 按 qlib 的 <code>Alpha158DL / Alpha360DL.get_feature_config()</code> 生成表达式并编译：名字、顺序、公式都和 qlib 一致（不含归一化和标签）。
+    Alpha158 = 9 个 K 线形态 + 4 个当前价格比 + 29 个滚动族 × 5 个窗口（5、10、20、30、60），顺序按族排列（ROC5…ROC60，再 MA5…MA60）。点一个族，把它的五个因子放进上面的编译器。
+  </p>
+  <div class="scroll" style="max-height:420px"><table><thead><tr><th>族</th><th>窗口</th><th>公式（d = 窗口）</th></tr></thead><tbody id="a-rows"></tbody></table></div>
+  <p class="small" style="margin-top:8px">
+    Alpha360 是 6 个字段 × 60 个滞后：<code>Ref($close, k)/$close</code>、开高低 vwap 同理，成交量除以 <code>$volume + 1e-12</code>。其中 354 个 <code>Ref</code> 都是视图，所以整个 Alpha360 编译后只需要 1 个槽位。
+    两个集合都需要显式的 <code>vwap</code> 字段（<code>required_fields()</code> 会列出它），都不读未来（<code>uses_future() = false</code>）。
+  </p>
+
+  <!-- ============================================================ -->
+  <h2 id="verify">验证</h2>
+  <div class="grid2">
+    <article class="card"><h3>tests/parity_qlib.rs</h3><p><code>qlib_alpha158.tsv</code>（qlib 0.9.8，80 行 × 3 个标的）与 <code>qlib_alpha360.tsv</code>（64 行 × 1 个标的），原生和 Polars 后端各跑一遍。NaN 位置必须完全一致；数值容差 <code>1e-6 × max(|期望|, 1)</code>，<code>CORR / CORD</code> 放宽到 1e-4——qlib 的滚动相关用增量和，这边每个窗口在 f64 里重算。</p></article>
+    <article class="card"><h3>这个页面的移植</h3><p>同样两份 fixture、同样的容差：Alpha158 的 37,920 格和 Alpha360 的 23,040 格全部一致；graph.rs 的四个结构测试（共享、折叠、槽位复用、视图）和七个编译期错误也全部复现。</p></article>
+    <article class="card"><h3>单元测试</h3><p>lib.rs：字面量广播与共享节点、缺字段在任何计算前报错、单独求值逐位相同、Alpha158 的形状和字段、条件与扩展窗口、零偏移的 Ref / Delta。eval.rs：每个增量核心对全量重算。</p></article>
+    <article class="card"><h3>基准</h3><p><code>benches/backends.rs</code>（需要 <code>polars</code> feature）对比两个后端；<code>examples/scale.rs</code> 测大面板的耗时和内存。</p></article>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="table">谁依赖它，用来做什么</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>使用者</th><th>用到的模块</th><th>用来做什么</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <h2 id="rules">不能绕开的规则</h2>
+  <div class="grid2">
+    <article class="card"><h3>语义跟 qlib 走</h3><p>min_periods = 1、样本标准差、和 NaN 比较得 0、<code>Corr</code> 的 2e-5 阈值、<code>WMA</code> 的权重包含 NaN 槽位——这些都是 qlib 的行为，不是“更合理”的选择。<code>tests/fixtures/qlib_*.tsv</code> 不能为了让改动通过而重新生成。</p></article>
+    <article class="card"><h3>新算子先问：它只读本标的吗</h3><p>按标的并行、每个标的一份 Scratch，都建立在“每个算子只读本标的”之上。截面算子需要把调度切成阶段（阶段内按列并行，阶段之间一次截面），见 graph.rs 模块注释。</p></article>
+    <article class="card"><h3>uses_future 的因子只能当标签</h3><p><code>Ref(x, -k)</code> 读未来。<code>FactorSet::uses_future()</code> 和 Python 的同名方法让调用方在把因子接到信号之前检查它。</p></article>
+    <article class="card"><h3>参数必须是字面量</h3><p>窗口、偏移、分位数、EMA 参数都在编译期解析成带类型的算子（<code>Rolling(kind, Window)</code>、<code>Ref(i64)</code>）；这样哈希合并才能识别相同的节点，错误才能在编译期报。</p></article>
+  </div>
+
+  <h2>源文件</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>文件</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">crates/phasor-expr/src/lib.rs</td><td>FactorSet（compile、names、required_fields、uses_future、evaluate / evaluate_with）与集成测试。</td></tr>
+        <tr><td class="mono">src/parse.rs</td><td>Expression、词法、Pratt 解析（优先级表）、validate 元数。</td></tr>
+        <tr><td class="mono">src/graph.rs</td><td>Window、Op、Node、Graph::compile、schedule（视图与槽位）、Builder（intern、fold、call）、逐元素语义。</td></tr>
+        <tr><td class="mono">src/eval.rs</td><td>FactorInputs、FactorValues、evaluate（rayon）、Scratch、Arg / Seg（视图按偏移分段读）、run_column、step、各逐窗参考函数。</td></tr>
+        <tr><td class="mono">src/window.rs · src/order.rs</td><td>O(1) 累加器（Moments、Sum、Count、Deviation、Wma、Regression、Pair、Shape）；有序环、树状数组、arg-extreme 单调队列。</td></tr>
+        <tr><td class="mono">src/backend.rs · src/polars_backend.rs</td><td>ComputeBackend trait、NativeBackend；PolarsBackend（feature）。</td></tr>
+        <tr><td class="mono">src/alpha158.rs · src/alpha360.rs</td><td>qlib 默认特征库的表达式。</td></tr>
+        <tr><td class="mono">tests/parity_qlib.rs · benches/backends.rs · examples/scale.rs</td><td>qlib fixture 差分测试、后端基准、规模测试。</td></tr>
+        <tr><td class="mono">docs/ARCHITECTURE.zh-CN.md §5</td><td>语言、解析、编译成依赖图、原生求值、计算核心、Polars 后端、内存与限制。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+/* ---------------- parse.rs (ported) ---------------- */
+class CompileError extends Error {}
+function lex(src) {
+  const out = [];
+  let i = 0;
+  const isDigit = (c) => c >= "0" && c <= "9";
+  const isAlpha = (c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
+  const isAlnum = (c) => isDigit(c) || isAlpha(c);
+  while (i < src.length) {
+    const c = src[i];
+    if (" \t\r\n".includes(c)) { i++; continue; }
+    if (c === "(") { out.push({ k: "(" }); i++; continue; }
+    if (c === ")") { out.push({ k: ")" }); i++; continue; }
+    if (c === ",") { out.push({ k: "," }); i++; continue; }
+    if ("+-*/><=!&|".includes(c)) {
+      const start = i; i++;
+      const two = src.slice(start, start + 2);
+      if (i < src.length && [">=", "<=", "==", "!=", "**"].includes(two)) i++;
+      if (i === start + 1 && (c === "=" || c === "!")) throw new CompileError(`operator "${c}" must be followed by '='`);
+      out.push({ k: "op", v: src.slice(start, i) });
+      continue;
+    }
+    if (c === "$") {
+      const start = i + 1; i = start;
+      while (i < src.length && (isAlnum(src[i]) || src[i] === "_")) i++;
+      if (i === start) throw new CompileError("expected a field name after '$'");
+      out.push({ k: "field", v: src.slice(start, i).toLowerCase() });
+      continue;
+    }
+    if (isDigit(c) || c === ".") {
+      const start = i; i++;
+      while (i < src.length && (isDigit(src[i]) || ".eE+-".includes(src[i]))) {
+        if ("+-".includes(src[i]) && !"eE".includes(src[i - 1])) break;
+        i++;
+      }
+      const text = src.slice(start, i);
+      const v = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(text) ? Number(text) : NaN;
+      if (Number.isNaN(v)) throw new CompileError(`invalid number "${text}"`);
+      out.push({ k: "num", v });
+      continue;
+    }
+    if (isAlpha(c) || c === "_") {
+      const start = i; i++;
+      while (i < src.length && (isAlnum(src[i]) || src[i] === "_")) i++;
+      out.push({ k: "name", v: src.slice(start, i) });
+      continue;
+    }
+    throw new CompileError(`unexpected character "${c}" at byte ${i}`);
+  }
+  out.push({ k: "end" });
+  return out;
+}
+const tokStr = (t) => (t.k === "op" || t.k === "num" || t.k === "field" || t.k === "name" ? `${t.k}(${t.v})` : t.k);
+const BP = { "|": [1, 2], "&": [3, 4], ">": [5, 6], "<": [5, 6], ">=": [5, 6], "<=": [5, 6], "==": [5, 6], "!=": [5, 6], "+": [7, 8], "-": [7, 8], "*": [9, 10], "/": [9, 10], "**": [12, 11] };
+function parseExpr(src) {
+  if (src.length > 16384) throw new CompileError("expression exceeds 16384 bytes");
+  const tokens = lex(src);
+  let at = 0;
+  const peek = () => tokens[at];
+  const take = () => tokens[at++];
+  function expression(minBp, depth) {
+    if (depth > 128) throw new CompileError("expression nesting exceeds 128");
+    let left;
+    const t = take();
+    if (t.k === "num") left = { t: "num", v: t.v };
+    else if (t.k === "field") left = { t: "field", name: t.v };
+    else if (t.k === "op" && (t.v === "+" || t.v === "-")) left = { t: "un", op: t.v, c: expression(11, depth + 1) };
+    else if (t.k === "(") {
+      left = expression(0, depth + 1);
+      if (take().k !== ")") throw new CompileError("expected ')'");
+    } else if (t.k === "name") {
+      if (take().k !== "(") throw new CompileError(`expected '(' after ${t.v}`);
+      const args = [];
+      if (peek().k !== ")") {
+        for (;;) {
+          args.push(expression(0, depth + 1));
+          if (peek().k !== ",") break;
+          take();
+        }
+      }
+      if (take().k !== ")") throw new CompileError(`expected ')' after ${t.v} arguments`);
+      left = { t: "call", name: t.v, args };
+    } else throw new CompileError(`expected expression, found ${tokStr(t)}`);
+    while (peek().k === "op") {
+      const op = peek().v;
+      const bp = BP[op];
+      if (!bp) break;
+      if (bp[0] < minBp) break;
+      take();
+      const right = expression(bp[1], depth + 1);
+      left = { t: "bin", op, l: left, r: right };
+    }
+    return left;
+  }
+  const expr = expression(0, 0);
+  if (peek().k !== "end") throw new CompileError(`unexpected token ${tokStr(peek())}`);
+  validate(expr);
+  return expr;
+}
+const ARITY = {};
+for (const n of ["Abs", "Sign", "Log", "Not"]) ARITY[n] = 1;
+for (const n of ["Greater", "Less", "Power", "Add", "Sub", "Mul", "Div", "Gt", "Ge", "Lt", "Le", "Eq", "Ne", "And", "Or"]) ARITY[n] = 2;
+ARITY.If = 3;
+for (const n of ["Ref", "Mean", "Std", "Sum", "Max", "Min", "Rank", "IdxMax", "IdxMin", "Slope", "Rsquare", "Resi", "Var", "Skew", "Kurt", "Med", "Mad", "Count", "Delta", "WMA", "EMA"]) ARITY[n] = 2;
+for (const n of ["Quantile", "Corr", "Cov"]) ARITY[n] = 3;
+function validate(e) {
+  if (e.t === "call") {
+    if (!(e.name in ARITY)) throw new CompileError(`unsupported operator "${e.name}"`);
+    if (e.args.length !== ARITY[e.name]) throw new CompileError(`${e.name} received ${e.args.length} arguments`);
+  }
+  if (e.t === "un") validate(e.c);
+  if (e.t === "bin") { validate(e.l); validate(e.r); }
+  if (e.t === "call") e.args.forEach(validate);
+}
+function exprFields(e, out) {
+  if (e.t === "field") out.add(e.name);
+  else if (e.t === "un") exprFields(e.c, out);
+  else if (e.t === "bin") { exprFields(e.l, out); exprFields(e.r, out); }
+  else if (e.t === "call") e.args.forEach((a) => exprFields(a, out));
+  return out;
+}
+function usesFuture(e) {
+  if (e.t === "call") {
+    const a = e.args[1];
+    const neg = e.name === "Ref" && a && ((a.t === "num" && a.v < 0) || (a.t === "un" && a.op === "-" && a.c.t === "num" && a.c.v > 0));
+    return neg || e.args.some(usesFuture);
+  }
+  if (e.t === "un") return usesFuture(e.c);
+  if (e.t === "bin") return usesFuture(e.l) || usesFuture(e.r);
+  return false;
+}
+
+/* ---------------- graph.rs (ported) ---------------- */
+const f64buf = new Float64Array(1), u32buf = new Uint32Array(f64buf.buffer);
+const bitsKey = (v) => { f64buf[0] = v; return u32buf[1].toString(16) + ":" + u32buf[0].toString(16); };
+const UNARY_FN = { Abs: "Abs", Sign: "Sign", Log: "Log", Not: "Not" };
+const BIN_SYM = { "+": "Add", "-": "Sub", "*": "Mul", "/": "Div", "**": "Pow", ">": "Gt", "<": "Lt", ">=": "Ge", "<=": "Le", "==": "Eq", "!=": "Ne", "&": "And", "|": "Or" };
+const BIN_FN = { Power: "Pow", Add: "Add", Sub: "Sub", Mul: "Mul", Div: "Div", Gt: "Gt", Ge: "Ge", Lt: "Lt", Le: "Le", Eq: "Eq", Ne: "Ne", And: "And", Or: "Or", Greater: "Greater", Less: "Less" };
+const ROLLING = ["Mean", "Std", "Var", "Sum", "Max", "Min", "Quantile", "Med", "Mad", "Count", "Skew", "Kurt", "WMA", "Rank", "IdxMax", "IdxMin", "Slope", "Rsquare", "Resi"];
+function unaryOp(op, v) {
+  switch (op) {
+    case "Neg": return -v;
+    case "Abs": return Math.abs(v);
+    case "Sign": return v === 0 ? 0 : Number.isNaN(v) ? NaN : v > 0 ? 1 : -1;
+    case "Log": return Math.log(v);
+    case "Not": return v === 0 ? 1 : 0;
+  }
+}
+function binaryOp(op, a, b) {
+  switch (op) {
+    case "Add": return a + b;
+    case "Sub": return a - b;
+    case "Mul": return a * b;
+    case "Div": return a / b;
+    case "Pow": return Math.pow(a, b);
+    case "Gt": return a > b ? 1 : 0;
+    case "Lt": return a < b ? 1 : 0;
+    case "Ge": return a >= b ? 1 : 0;
+    case "Le": return a <= b ? 1 : 0;
+    case "Eq": return a === b ? 1 : 0;
+    case "Ne": return a !== b ? 1 : 0;
+    case "And": return a !== 0 && b !== 0 ? 1 : 0;
+    case "Or": return a !== 0 || b !== 0 ? 1 : 0;
+    case "Greater": return Number.isNaN(a) || Number.isNaN(b) ? NaN : Math.max(a, b);
+    case "Less": return Number.isNaN(a) || Number.isNaN(b) ? NaN : Math.min(a, b);
+  }
+}
+const ifElse = (c, a, b) => (c !== 0 ? a : b);
+function literalNumber(e, label) {
+  if (e.t === "num") return e.v;
+  if (e.t === "un" && e.op === "-") return -literalNumber(e.c, label);
+  throw new CompileError(`${label} must be a numeric literal`);
+}
+function literalInteger(e, label) {
+  const v = literalNumber(e, label);
+  if (!Number.isFinite(v) || v % 1 !== 0) throw new CompileError(`${label} must be an integer`);
+  return v;
+}
+function literalWindow(e) {
+  const v = literalInteger(e, "window");
+  if (v < 0) throw new CompileError("window cannot be negative");
+  return v === 0 ? "All" : v;
+}
+const opKey = (op) => JSON.stringify(op);
+function compileGraph(factors) {
+  const nodes = [], interned = new Map(), fields = [];
+  function fold(op, inputs) {
+    if (!["Unary", "Binary", "If"].includes(op.k)) return null;
+    const vals = inputs.map((id) => (nodes[id].op.k === "Const" ? nodes[id].op.v : null));
+    if (vals.some((v) => v === null)) return null;
+    if (op.k === "Unary") return { v: unaryOp(op.op, vals[0]) };
+    if (op.k === "Binary") return { v: binaryOp(op.op, vals[0], vals[1]) };
+    return { v: ifElse(vals[0], vals[1], vals[2]) };
+  }
+  function intern(op, inputs) {
+    const f = fold(op, inputs);
+    if (f) return intern({ k: "Const", bits: bitsKey(f.v), v: f.v }, []);
+    const keyOp = op.k === "Const" ? { k: "Const", bits: op.bits } : op;
+    const key = opKey(keyOp) + "|" + inputs.join(",");
+    if (interned.has(key)) return interned.get(key);
+    const id = nodes.length;
+    nodes.push({ id, op, inputs, slot: null, outputs: [], read: false, view: null, factors: new Set() });
+    interned.set(key, id);
+    return id;
+  }
+  function node(e) {
+    if (e.t === "num") return intern({ k: "Const", bits: bitsKey(e.v), v: e.v }, []);
+    if (e.t === "field") {
+      let i = fields.indexOf(e.name);
+      if (i < 0) { fields.push(e.name); i = fields.length - 1; }
+      return intern({ k: "Field", i, name: e.name }, []);
+    }
+    if (e.t === "un") {
+      if (e.op === "+") return node(e.c);
+      return intern({ k: "Unary", op: "Neg" }, [node(e.c)]);
+    }
+    if (e.t === "bin") {
+      const op = BIN_SYM[e.op];
+      if (!op) throw new CompileError(`unsupported operator ${e.op}`);
+      const inputs = [node(e.l), node(e.r)];
+      return intern({ k: "Binary", op }, inputs);
+    }
+    const n = e.name, a = e.args;
+    if (UNARY_FN[n]) { const input = node(a[0]); return intern({ k: "Unary", op: UNARY_FN[n] }, [input]); }
+    if (BIN_FN[n]) { const inputs = [node(a[0]), node(a[1])]; return intern({ k: "Binary", op: BIN_FN[n] }, inputs); }
+    if (ROLLING.includes(n)) {
+      let q;
+      if (n === "Quantile") {
+        q = literalNumber(a[2], "quantile");
+        if (!(q >= 0 && q <= 1)) throw new CompileError("quantile must be in 0..=1");
+      }
+      const w = literalWindow(a[1]);
+      const input = node(a[0]);
+      return intern(n === "Quantile" ? { k: "Rolling", kind: n, q, w } : { k: "Rolling", kind: n, w }, [input]);
+    }
+    if (n === "If") { const inputs = [node(a[0]), node(a[1]), node(a[2])]; return intern({ k: "If" }, inputs); }
+    if (n === "Ref") { const off = literalInteger(a[1], "Ref offset"); const input = node(a[0]); return intern({ k: "Ref", off }, [input]); }
+    if (n === "Delta") {
+      const off = literalInteger(a[1], "Delta offset");
+      if (off < 0) throw new CompileError("Delta offset cannot be negative");
+      const input = node(a[0]);
+      return intern({ k: "Delta", off }, [input]);
+    }
+    if (n === "EMA") {
+      const p = literalNumber(a[1], "EMA parameter");
+      if (p < 0) throw new CompileError("EMA parameter cannot be negative");
+      const alpha = p > 0 ? (p < 1 ? p : 2 / (p + 1)) : null;
+      const input = node(a[0]);
+      return intern({ k: "Ema", alpha }, [input]);
+    }
+    if (n === "Corr" || n === "Cov") {
+      const w = literalWindow(a[2]);
+      const inputs = [node(a[0]), node(a[1])];
+      return intern({ k: "Pair", corr: n === "Corr", w }, inputs);
+    }
+    throw new CompileError(`unsupported operator ${n}`);
+  }
+  const outputs = [];
+  for (const [name, expr] of factors) {
+    try { outputs.push(node(expr)); }
+    catch (err) { if (err instanceof CompileError) throw new CompileError(`factor "${name}": ${err.message}`); throw err; }
+  }
+  const g = { nodes, outputs, fields, slots: 0, lastRead: [] };
+  schedule(g);
+  return g;
+}
+function schedule(g) {
+  const nodes = g.nodes;
+  for (const nd of nodes) {
+    if (nd.op.k !== "Ref" || nd.op.off < 0) continue;
+    const input = nodes[nd.inputs[0]];
+    nd.view = input.op.k === "Const" ? null : input.view ? [input.view[0], input.view[1] + nd.op.off] : [input.id, nd.op.off];
+  }
+  const base = (id) => (nodes[id].view ? nodes[id].view[0] : id);
+  const lastRead = Array(nodes.length).fill(null);
+  for (let at = 0; at < nodes.length; at++) for (const input of nodes[at].inputs) { nodes[input].read = true; lastRead[base(input)] = at; }
+  g.outputs.forEach((node, pos) => nodes[node].outputs.push(pos));
+  const free = [];
+  let slots = 0;
+  for (let at = 0; at < nodes.length; at++) {
+    const nd = nodes[at];
+    const computed = !["Field", "Const"].includes(nd.op.k) && !nd.view;
+    nd.computed = computed;
+    if (computed && nd.read) {
+      nd.slot = free.length ? free.pop() : slots++;
+    }
+    const released = [];
+    for (const i of nd.inputs) {
+      const input = base(i);
+      if (lastRead[input] === at && !released.includes(input)) {
+        released.push(input);
+        if (nodes[input].slot !== null) free.push(nodes[input].slot);
+      }
+    }
+  }
+  g.slots = slots;
+  g.lastRead = lastRead;
+}
+class FactorSet {
+  constructor(pairs) {
+    const seen = new Set(), compiled = [];
+    for (const [name, src] of pairs) {
+      if (!name) throw new CompileError("factor name cannot be empty");
+      if (seen.has(name)) throw new CompileError(`duplicate factor name "${name}"`);
+      seen.add(name);
+      let expr;
+      try { expr = parseExpr(src); } catch (e) { if (e instanceof CompileError) throw new CompileError(`factor "${name}": ${e.message}`); throw e; }
+      compiled.push([name, expr]);
+    }
+    if (!compiled.length) throw new CompileError("a factor set cannot be empty");
+    this.factors = compiled;
+    this.graph = compileGraph(compiled);
+  }
+  requiredFields() { const s = new Set(); for (const [, e] of this.factors) exprFields(e, s); return [...s].sort(); }
+  usesFuture() { return this.factors.some(([, e]) => usesFuture(e)); }
+  stats() {
+    const n = this.graph.nodes;
+    return {
+      nodes: n.length, slots: this.graph.slots,
+      views: n.filter((x) => x.view).length,
+      computed: n.filter((x) => x.computed).length,
+      direct: n.filter((x) => x.computed && !x.read).length,
+      fields: n.filter((x) => x.op.k === "Field").length,
+      consts: n.filter((x) => x.op.k === "Const").length,
+    };
+  }
+}
+
+/* ---------------- Alpha158 / Alpha360 (ported) ---------------- */
+function alpha158Pairs() {
+  const f = [
+    ["KMID", "($close-$open)/$open"], ["KLEN", "($high-$low)/$open"], ["KMID2", "($close-$open)/($high-$low+1e-12)"],
+    ["KUP", "($high-Greater($open,$close))/$open"], ["KUP2", "($high-Greater($open,$close))/($high-$low+1e-12)"],
+    ["KLOW", "(Less($open,$close)-$low)/$open"], ["KLOW2", "(Less($open,$close)-$low)/($high-$low+1e-12)"],
+    ["KSFT", "(2*$close-$high-$low)/$open"], ["KSFT2", "(2*$close-$high-$low)/($high-$low+1e-12)"],
+  ];
+  for (const field of ["open", "high", "low", "vwap"]) f.push([`${field.toUpperCase()}0`, `$${field}/$close`]);
+  const fam = (d) => [
+    ["ROC", `Ref($close,${d})/$close`], ["MA", `Mean($close,${d})/$close`], ["STD", `Std($close,${d})/$close`],
+    ["BETA", `Slope($close,${d})/$close`], ["RSQR", `Rsquare($close,${d})`], ["RESI", `Resi($close,${d})/$close`],
+    ["MAX", `Max($high,${d})/$close`], ["MIN", `Min($low,${d})/$close`],
+    ["QTLU", `Quantile($close,${d},0.8)/$close`], ["QTLD", `Quantile($close,${d},0.2)/$close`], ["RANK", `Rank($close,${d})`],
+    ["RSV", `($close-Min($low,${d}))/(Max($high,${d})-Min($low,${d})+1e-12)`],
+    ["IMAX", `IdxMax($high,${d})/${d}`], ["IMIN", `IdxMin($low,${d})/${d}`], ["IMXD", `(IdxMax($high,${d})-IdxMin($low,${d}))/${d}`],
+    ["CORR", `Corr($close,Log($volume+1),${d})`], ["CORD", `Corr($close/Ref($close,1),Log($volume/Ref($volume,1)+1),${d})`],
+    ["CNTP", `Mean($close>Ref($close,1),${d})`], ["CNTN", `Mean($close<Ref($close,1),${d})`],
+    ["CNTD", `Mean($close>Ref($close,1),${d})-Mean($close<Ref($close,1),${d})`],
+    ["SUMP", `Sum(Greater($close-Ref($close,1),0),${d})/(Sum(Abs($close-Ref($close,1)),${d})+1e-12)`],
+    ["SUMN", `Sum(Greater(Ref($close,1)-$close,0),${d})/(Sum(Abs($close-Ref($close,1)),${d})+1e-12)`],
+    ["SUMD", `(Sum(Greater($close-Ref($close,1),0),${d})-Sum(Greater(Ref($close,1)-$close,0),${d}))/(Sum(Abs($close-Ref($close,1)),${d})+1e-12)`],
+    ["VMA", `Mean($volume,${d})/($volume+1e-12)`], ["VSTD", `Std($volume,${d})/($volume+1e-12)`],
+    ["WVMA", `Std(Abs($close/Ref($close,1)-1)*$volume,${d})/(Mean(Abs($close/Ref($close,1)-1)*$volume,${d})+1e-12)`],
+    ["VSUMP", `Sum(Greater($volume-Ref($volume,1),0),${d})/(Sum(Abs($volume-Ref($volume,1)),${d})+1e-12)`],
+    ["VSUMN", `Sum(Greater(Ref($volume,1)-$volume,0),${d})/(Sum(Abs($volume-Ref($volume,1)),${d})+1e-12)`],
+    ["VSUMD", `(Sum(Greater($volume-Ref($volume,1),0),${d})-Sum(Greater(Ref($volume,1)-$volume,0),${d}))/(Sum(Abs($volume-Ref($volume,1)),${d})+1e-12)`],
+  ];
+  const rolling = [];
+  for (const d of [5, 10, 20, 30, 60]) for (const [name, e] of fam(d)) rolling.push([name, d, e]);
+  // Qlib groups by family, then window.
+  const order = fam(5).map(([n]) => n);
+  for (const n of order) for (const [name, d, e] of rolling) if (name === n) f.push([`${name}${d}`, e]);
+  return f;
+}
+function alpha360Pairs() {
+  const f = [];
+  for (const field of ["close", "open", "high", "low", "vwap"]) {
+    const p = field.toUpperCase();
+    for (let off = 59; off >= 0; off--) f.push([`${p}${off}`, off === 0 ? `$${field}/$close` : `Ref($${field},${off})/$close`]);
+  }
+  for (let off = 59; off >= 0; off--) f.push([`VOLUME${off}`, off === 0 ? "$volume/($volume+1e-12)" : `Ref($volume,${off})/($volume+1e-12)`]);
+  return f;
+}
+
+/* ---------------- evaluation (per symbol; window reducers as in eval.rs) ---------------- */
+const clean = (w) => w.filter((v) => !Number.isNaN(v));
+function rMean(w) { const c = clean(w); return c.length ? c.reduce((s, v) => s + v, 0) / c.length : NaN; }
+function rSum(w) { const c = clean(w); return c.length ? c.reduce((s, v) => s + v, 0) : NaN; }
+function rCount(w) { const c = clean(w).length; return c ? c : NaN; }
+function rStd(w) { const c = clean(w); if (c.length <= 1) return NaN; const m = c.reduce((s, v) => s + v, 0) / c.length; return Math.sqrt(c.reduce((s, v) => s + (v - m) ** 2, 0) / (c.length - 1)); }
+function rVar(w) { const s = rStd(w); return s * s; }
+function rMax(w) { const c = clean(w); return c.length ? Math.max(...c) : NaN; }
+function rMin(w) { const c = clean(w); return c.length ? Math.min(...c) : NaN; }
+function quantile(w, q) {
+  const c = clean(w).sort((a, b) => a - b);
+  if (!c.length) return NaN;
+  const idx = (c.length - 1) * q, lo = Math.floor(idx), fr = idx - lo;
+  return c[lo] + fr * (c[Math.ceil(idx)] - c[lo]);
+}
+function mad(w) { const c = clean(w); if (!c.length) return NaN; const m = c.reduce((s, v) => s + v, 0) / c.length; return c.reduce((s, v) => s + Math.abs(v - m), 0) / c.length; }
+function skew(w) {
+  const c = clean(w), n = c.length; if (n < 3) return NaN;
+  const m = c.reduce((s, v) => s + v, 0) / n;
+  const m2 = c.reduce((s, v) => s + (v - m) ** 2, 0), m3 = c.reduce((s, v) => s + (v - m) ** 3, 0);
+  return n * Math.sqrt(n - 1) / (n - 2) * m3 / m2 ** 1.5;
+}
+function kurt(w) {
+  const c = clean(w), n = c.length; if (n < 4) return NaN;
+  const m = c.reduce((s, v) => s + v, 0) / n;
+  const m2 = c.reduce((s, v) => s + (v - m) ** 2, 0), m4 = c.reduce((s, v) => s + (v - m) ** 4, 0);
+  const bf = n * m4 / (m2 * m2) - 3;
+  return (n - 1) / ((n - 2) * (n - 3)) * ((n + 1) * bf + 6);
+}
+function wma(w) {
+  const ws = (w.length * (w.length + 1)) / 2; let sum = 0, cnt = 0;
+  w.forEach((v, i) => { if (!Number.isNaN(v)) { sum += (i + 1) / ws * v; cnt++; } });
+  return cnt ? sum / cnt : NaN;
+}
+function rankLast(w) {
+  if (!w.length) return NaN;
+  const last = w[w.length - 1]; if (Number.isNaN(last)) return NaN;
+  const c = clean(w);
+  const below = c.filter((v) => v < last).length, eq = c.filter((v) => v === last).length;
+  return (below + (eq + 1) / 2) / c.length;
+}
+function argExtreme(w, minimum) {
+  let best = 0;
+  for (let i = 1; i < w.length; i++) {
+    const b = w[best], v = w[i];
+    if ((!Number.isNaN(b) && Number.isNaN(v)) || (!Number.isNaN(b) && !Number.isNaN(v) && (minimum ? v < b : v > b))) best = i;
+  }
+  return best + 1;
+}
+function regression(w) {
+  const pts = []; w.forEach((v, i) => { if (!Number.isNaN(v)) pts.push([i + 1, v]); });
+  if (pts.length < 2) return [NaN, NaN, NaN];
+  const n = pts.length;
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  for (const [x, y] of pts) { sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; }
+  const xvar = n * sxx - sx * sx, yvar = n * syy - sy * sy, cov = n * sxy - sx * sy;
+  const slope = cov / xvar, intercept = sy / n - slope * sx / n;
+  const sampleStd = Math.sqrt(yvar / (n * (n - 1)));
+  const rsq = xvar <= 0 || yvar <= 0 || sampleStd <= 2e-5 ? NaN : cov * cov / (xvar * yvar);
+  const resid = w[w.length - 1] - (slope * w.length + intercept);
+  return [slope, rsq, resid];
+}
+function corr(a, b) {
+  const sstd = (vals) => { const c = clean(vals); if (c.length < 2) return NaN; const m = c.reduce((s, v) => s + v, 0) / c.length; return Math.sqrt(c.reduce((s, v) => s + (v - m) ** 2, 0) / (c.length - 1)); };
+  if (sstd(a) <= 2e-5 || sstd(b) <= 2e-5) return NaN;
+  const pairs = a.map((x, i) => [x, b[i]]).filter(([x, y]) => !Number.isNaN(x) && !Number.isNaN(y));
+  if (pairs.length < 2) return NaN;
+  const ma = pairs.reduce((s, p) => s + p[0], 0) / pairs.length, mb = pairs.reduce((s, p) => s + p[1], 0) / pairs.length;
+  let va = 0, vb = 0, cv = 0;
+  for (const [x, y] of pairs) { va += (x - ma) ** 2; vb += (y - mb) ** 2; cv += (x - ma) * (y - mb); }
+  if (va === 0 || vb === 0) return NaN;
+  return cv / Math.sqrt(va * vb);
+}
+function cov(a, b) {
+  const pairs = a.map((x, i) => [x, b[i]]).filter(([x, y]) => !Number.isNaN(x) && !Number.isNaN(y));
+  if (pairs.length < 2) return NaN;
+  const n = pairs.length, ma = pairs.reduce((s, p) => s + p[0], 0) / n, mb = pairs.reduce((s, p) => s + p[1], 0) / n;
+  return pairs.reduce((s, p) => s + (p[0] - ma) * (p[1] - mb), 0) / (n - 1);
+}
+function emaAdjusted(vals, alpha) {
+  const decay = 1 - alpha; let num = 0, den = 0;
+  return vals.map((v) => { num *= decay; den *= decay; if (!Number.isNaN(v)) { num += v; den += 1; } return den === 0 ? NaN : num / den; });
+}
+function emaExpanding(vals) {
+  return vals.map((_, i) => {
+    const len = i + 1, pre = vals.slice(0, len);
+    if (pre.every((v) => Number.isNaN(v))) return NaN;
+    const decay = 1 - 2 / (1 + len);
+    let den = 0; for (let k = 0; k < len; k++) den += decay ** (len - k - 1);
+    let s = 0; pre.forEach((v, k) => { if (!Number.isNaN(v)) s += decay ** (len - k - 1) / den * v; });
+    return s;
+  });
+}
+const ROLL_FN = {
+  Mean: rMean, Sum: rSum, Count: rCount, Std: rStd, Var: rVar, Max: rMax, Min: rMin, Med: (w) => quantile(w, 0.5), Mad: mad,
+  Skew: skew, Kurt: kurt, WMA: wma, Rank: rankLast, IdxMax: (w) => argExtreme(w, false), IdxMin: (w) => argExtreme(w, true),
+  Slope: (w) => regression(w)[0], Rsquare: (w) => regression(w)[1], Resi: (w) => regression(w)[2],
+};
+const shiftBy = (x, k) => x.map((_, i) => (i - k >= 0 && i - k < x.length ? x[i - k] : NaN));
+// Evaluates one symbol: fields maps name -> series. Returns per-node series (views materialized).
+function evaluateColumn(set, fields, nRows) {
+  const g = set.graph, vals = [];
+  for (const nd of g.nodes) {
+    const op = nd.op, at = (i) => vals[nd.inputs[i]];
+    let v;
+    switch (op.k) {
+      case "Field": if (!fields[op.name]) throw new CompileError(`factor input is missing field $${op.name}`); v = fields[op.name]; break;
+      case "Const": v = Array(nRows).fill(op.v); break;
+      case "Unary": v = at(0).map((x) => unaryOp(op.op, x)); break;
+      case "Binary": { const a = at(0), b = at(1); v = a.map((x, i) => binaryOp(op.op, x, b[i])); break; }
+      case "If": { const c = at(0), a = at(1), b = at(2); v = c.map((x, i) => ifElse(x, a[i], b[i])); break; }
+      case "Ref": v = shiftBy(at(0), op.off); break;
+      case "Delta": { const a = at(0), s = shiftBy(a, op.off); v = a.map((x, i) => x - s[i]); break; }
+      case "Ema": v = op.alpha === null ? emaExpanding(at(0)) : emaAdjusted(at(0), op.alpha); break;
+      case "Rolling": {
+        const a = at(0), w = Math.max(1, op.w === "All" ? Math.max(nRows, 1) : op.w);
+        const f = op.kind === "Quantile" ? (win) => quantile(win, op.q) : ROLL_FN[op.kind];
+        v = a.map((_, i) => f(a.slice(Math.max(0, i + 1 - w), i + 1)));
+        break;
+      }
+      case "Pair": {
+        const a = at(0), b = at(1), w = Math.max(1, op.w === "All" ? Math.max(nRows, 1) : op.w);
+        v = a.map((_, i) => { const s = Math.max(0, i + 1 - w); return (op.corr ? corr : cov)(a.slice(s, i + 1), b.slice(s, i + 1)); });
+        break;
+      }
+    }
+    vals.push(v);
+  }
+  return vals;
+}
+function evaluate(set, panel) {
+  // panel: { nRows, nCols, fields: { name: column-major array } }
+  const out = set.factors.map(() => []);
+  for (let c = 0; c < panel.nCols; c++) {
+    const fields = {};
+    for (const [name, data] of Object.entries(panel.fields)) fields[name] = data.slice(c * panel.nRows, (c + 1) * panel.nRows);
+    const vals = evaluateColumn(set, fields, panel.nRows);
+    set.graph.outputs.forEach((node, pos) => out[pos].push(...vals[node]));
+  }
+  return out;
+}
+
+/* ---------------- shared helpers ---------------- */
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (name, attrs) => { const n = document.createElementNS(NS, name); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+function seg(hostId, items, onPick) {
+  const host = document.getElementById(hostId);
+  const lbl = host.querySelector(".lbl");
+  host.innerHTML = "";
+  if (lbl) host.appendChild(lbl);
+  const buttons = items.map((it, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = it.name;
+    b.addEventListener("click", () => select(i));
+    host.appendChild(b);
+    return b;
+  });
+  function select(i) {
+    buttons.forEach((b, k) => b.classList.toggle("on", k === i));
+    onPick(items[i], i);
+  }
+  return { select, clear: () => buttons.forEach((b) => b.classList.remove("on")) };
+}
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const fmt = (v, d = 4) => {
+  if (Number.isNaN(v)) return "NaN";
+  if (!Number.isFinite(v)) return v > 0 ? "inf" : "-inf";
+  if (v !== 0 && (Math.abs(v) >= 1e6 || Math.abs(v) < 1e-4)) return v.toExponential(2);
+  const r = Math.round(v * 10 ** d) / 10 ** d;
+  return String(Object.is(r, -0) ? 0 : r);
+};
+
+/* ---------------- dependency graph ---------------- */
+const COLORS = { parse: "#c9a227", graph: "#e07a3d", eval: "#3a7afe", window: "#2fbfa8", order: "#8fbf4a", backend: "#b07cd8", alpha: "#d35d5d", lib: "#9a9a9a" };
+const MODULES = [
+  { id: "lib", sub: "FactorSet", blurb: "compile / evaluate / evaluate_with、names、required_fields、uses_future；名字非空且不重复，集合不能为空。" },
+  { id: "parse", sub: "Expression · Pratt", blurb: "词法、优先级爬升、元数校验。Expression 树保留下来，供 required_fields、uses_future 和 Polars 后端使用。" },
+  { id: "graph", sub: "Graph · schedule", blurb: "哈希合并、参数校验、常量折叠、视图、槽位调度。整个因子集一张图。" },
+  { id: "eval", sub: "FactorInputs · run_column", blurb: "按标的并行求值；Arg / Seg 让逐元素算子按偏移分段读视图；逐窗参考函数也在这里。" },
+  { id: "window", sub: "O(1) 累加器", blurb: "Sum、Count、Std、Var、Skew、Kurt、WMA、回归、Corr / Cov 的增量实现：定期重建、平移求和、常量窗口检测。" },
+  { id: "order", sub: "有序环 · 树状数组", blurb: "Quantile、Med、Rank、Mad 的有序结构；IdxMax / IdxMin 的单调队列。" },
+  { id: "backend", sub: "Native · Polars", blurb: "ComputeBackend trait；NativeBackend 调 eval，PolarsBackend（feature）翻译成 Polars Lazy。" },
+  { id: "alpha", sub: "alpha158 · alpha360", blurb: "qlib 默认特征库的表达式生成器，返回编译好的 FactorSet。" },
+];
+const UP = [
+  { id: "phasor-core", sub: "Matrix · Error", mods: ["lib", "graph", "eval", "backend"], role: "输出是 Matrix（from_column_major）；所有错误是 Error::Invariant，带因子名。" },
+  { id: "phasor-generic", sub: "rolling_mean/max/min_1d", mods: ["eval"], role: "Mean、Max、Min 直接调用 phasor-generic 的一维滚动函数，minp = Some(1)——qlib 语义，所以和 indicators 的 minp = window 不同。rolling_apply_1d 只在测试里用来对照。" },
+  { id: "phasor-model", sub: "OhlcvPanel", mods: ["eval"], role: "FactorInputs::from_ohlcv(&OhlcvPanel) 借用面板的五个字段（空 Vec 表示没提供）。" },
+  { id: "rayon", sub: "外部 · 按标的并行", mods: ["eval"], role: "columns.into_par_iter().for_each_init(Scratch::new, run_column)：每个工作线程一份暂存。工作区里只有这个 crate 用 rayon；phasor-sim 用 std::thread::scope。" },
+  { id: "polars", sub: "外部 · 可选 0.46", mods: ["backend"], role: "只在 polars feature 下编译：PolarsBackend 与 benches/backends.rs。", dashed: true },
+];
+const DOWN = [
+  { id: "phasor", sub: "门面 · prelude", uses: ["lib", "backend", "alpha"], role: "pub use phasor_expr as expr；prelude 放 ComputeBackend、FactorInputs、FactorSet、FactorValues、NativeBackend、alpha158、alpha360，polars feature 下还有 PolarsBackend。examples/factor_sweep.rs 和 tests/factor_path.rs 走“因子 → 信号 → from_signals”。" },
+  { id: "phasor-py", sub: "phasor._phasor._FactorSet", uses: ["lib", "alpha"], role: "expr.rs：_FactorSet.compile / names / required_fields / uses_future / evaluate（释放 GIL 求值），以及 alpha158() / alpha360()。" },
+  { id: "research", sub: "phasor_lab（经 Python）", uses: ["lib"], dashed: true, role: "研究层通过 Python 包调用 FactorSet；它不是 Rust 依赖。" },
+];
+const depSvg = document.getElementById("dep-graph");
+const detail = document.getElementById("detail");
+let pinned = null;
+const paths = [], gnodes = [];
+function nodeBox(id) {
+  const ui = UP.findIndex((u) => u.id === id);
+  if (ui >= 0) return { x: 16, y: 70 + ui * 92, w: 190, h: 54 };
+  const mi = MODULES.findIndex((m) => m.id === id);
+  if (mi >= 0) return { x: 300, y: 56 + mi * 60, w: 260, h: 48 };
+  const di = DOWN.findIndex((d) => d.id === id);
+  return { x: 780, y: 140 + di * 110, w: 244, h: 56 };
+}
+function edgeList() {
+  const edges = [];
+  for (const u of UP) for (const m of u.mods) edges.push({ from: u.id, to: m, color: "#8a8a8a", up: u.id, mod: m, dashed: u.dashed });
+  for (const d of DOWN) for (const m of d.uses) edges.push({ from: m, to: d.id, color: COLORS[m], mod: m, dashed: d.dashed });
+  return edges;
+}
+function edgeOpacity(focus, e) {
+  if (!focus) return 0.5;
+  if (focus.kind === "mod") return e.mod === focus.id ? 0.95 : 0.04;
+  if (focus.kind === "up") return e.up === focus.id ? 0.95 : 0.04;
+  return e.to === focus.id ? 0.95 : 0.04;
+}
+function applyFocus(focus) {
+  for (const p of paths) p.el.setAttribute("opacity", String(edgeOpacity(focus, p)));
+  for (const n of gnodes) {
+    const on = focus && focus.id === n.id;
+    n.rect.setAttribute("stroke-width", on ? "1.8" : "1");
+    if (n.kind === "mod") n.rect.setAttribute("fill", on ? COLORS[n.id] + "44" : "#262626");
+    else { n.rect.setAttribute("stroke", on ? "#8eb6ff" : "#3d3d3d"); n.rect.setAttribute("fill", on ? "#303030" : "#262626"); }
+  }
+  for (const b of document.querySelectorAll("#legend button")) b.classList.toggle("on", Boolean(focus && focus.kind === "mod" && b.dataset.id === focus.id));
+}
+function buildGraph() {
+  depSvg.appendChild(svgEl("rect", { x: 284, y: 12, width: 292, height: 536, rx: 10, fill: "#181818", stroke: "#303030" }));
+  depSvg.appendChild(svgEl("text", { x: 430, y: 34, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" })).textContent = "phasor-expr";
+  depSvg.appendChild(svgEl("text", { x: 111, y: 56, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "上游";
+  depSvg.appendChild(svgEl("text", { x: 902, y: 126, "text-anchor": "middle", "font-size": 10, fill: "#909090" })).textContent = "使用者";
+  for (const e of edgeList()) {
+    const a = nodeBox(e.from), b = nodeBox(e.to);
+    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mid = (x1 + x2) / 2;
+    const path = svgEl("path", { d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`, fill: "none", stroke: e.color, "stroke-width": "1.4" });
+    if (e.dashed) path.setAttribute("stroke-dasharray", "5 4");
+    depSvg.appendChild(path);
+    paths.push({ el: path, ...e });
+  }
+  const addNode = (id, kind, title, sub, stroke, dashed) => {
+    const box = nodeBox(id);
+    const g = svgEl("g", { style: "cursor:pointer" });
+    const rect = svgEl("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 6, fill: "#262626", stroke, "stroke-width": 1 });
+    if (dashed) rect.setAttribute("stroke-dasharray", "4 3");
+    const label = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 - 2, "text-anchor": "middle", "font-size": 12, "font-weight": 650, fill: "#f0f0f0" });
+    label.textContent = title;
+    const s = svgEl("text", { x: box.x + box.w / 2, y: box.y + box.h / 2 + 12, "text-anchor": "middle", "font-size": 10, fill: "#b0b0b0" });
+    s.textContent = sub;
+    g.append(rect, label, s);
+    g.addEventListener("click", () => { pinned = pinned && pinned.id === id ? null : { kind, id }; showDetail(pinned); applyFocus(pinned); });
+    g.addEventListener("mouseenter", () => { if (pinned) return; showDetail({ kind, id }); applyFocus({ kind, id }); });
+    depSvg.appendChild(g);
+    gnodes.push({ id, kind, rect });
+  };
+  for (const u of UP) addNode(u.id, "up", u.id, u.sub, "#3d3d3d", u.dashed);
+  for (const m of MODULES) addNode(m.id, "mod", m.id === "lib" ? "lib.rs" : m.id, m.sub, COLORS[m.id]);
+  for (const d of DOWN) addNode(d.id, "down", d.id, d.sub, "#3d3d3d", d.dashed);
+  depSvg.addEventListener("mouseleave", () => { if (pinned) return; showDetail(null); applyFocus(null); });
+  applyFocus(null);
+}
+const chip = (m) => `<span class="chip" style="cursor:default"><i class="dot" style="background:${COLORS[m]}"></i>${m}</span>`;
+function showDetail(focus) {
+  if (!focus) { detail.innerHTML = `<h3>点一个节点</h3><p class="muted" style="margin:0">上游：用到了什么。模块：它负责哪一段。下游：它怎么使用 FactorSet。</p>`; return; }
+  if (focus.kind === "mod") { const m = MODULES.find((x) => x.id === focus.id); detail.innerHTML = `<h3>${m.id === "lib" ? "lib.rs" : m.id}</h3><p class="muted" style="margin:0">${m.blurb}</p>`; return; }
+  if (focus.kind === "up") { const u = UP.find((x) => x.id === focus.id); detail.innerHTML = `<h3>${u.id}</h3><p class="muted" style="margin:0">${u.role}</p><div class="uses">${u.mods.map(chip).join("")}</div>`; return; }
+  const d = DOWN.find((x) => x.id === focus.id);
+  detail.innerHTML = `<h3>${d.id}</h3><p class="muted" style="margin:0">${d.role}</p><div class="uses">${d.uses.map(chip).join("")}</div>`;
+}
+function buildLegend() {
+  const host = document.getElementById("legend");
+  host.innerHTML = MODULES.map((m) => `<button type="button" data-id="${m.id}"><i class="dot" style="background:${COLORS[m.id]}"></i>${m.id === "lib" ? "lib.rs" : m.id}</button>`).join("");
+  for (const btn of host.querySelectorAll("button")) btn.addEventListener("click", () => {
+    const id = btn.dataset.id;
+    pinned = pinned && pinned.id === id ? null : { kind: "mod", id };
+    showDetail(pinned); applyFocus(pinned);
+  });
+}
+function buildTable() {
+  document.getElementById("rows").innerHTML = DOWN.map((d) =>
+    `<tr><td class="mono">${d.id}</td><td>${d.uses.map((u) => `<span class="chip" style="padding:1px 8px;cursor:default"><i class="dot" style="background:${COLORS[u]}"></i>${u}</span>`).join(" ")}</td><td>${d.role}</td></tr>`).join("");
+}
+
+/* ---------------- compiler explorer ---------------- */
+const toLines = (pairs) => pairs.map(([n, e]) => `${n} = ${e}`).join("\n");
+const C_PRESETS = [
+  { name: "ARCHITECTURE 的例子", src: "trend = $close / Mean($close, 20) - 1\nroc = Ref($close, 1) / $close\nvol = Std($close / Ref($close, 1) - 1, 20)", note: "三个因子共享 $close 和 Ref($close, 1)；Ref 是视图，不占槽位。" },
+  { name: "两种写法是一个节点", src: "a = Ref($close,1)/$close\nb = Div(Ref($close,1), $close)\nc = +Ref($close, 1)", note: "graph.rs 的测试 shared_subexpressions_and_spellings_are_one_node：只有 3 个节点（$close、Ref、Div），a 和 b 指向同一个节点，一元 + 直接消失。" },
+  { name: "常量折叠", src: "a = -(1 + 2) * 3\nb = If(1 > 2, 4, 5)\nc = $close * (2 ** 3)", note: "操作数全是字面量的逐元素节点在编译期算掉：a = −9、b = 5、c 里的 2**3 变成 8。字面量不占槽位。" },
+  { name: "槽位复用", src: "chain = Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs(Abs($close))))))))))", note: "十层的链只需要 2 个槽位：每个节点写进一个和它输入不同的槽位，读完就释放；最后一层没人读，直接写输出。" },
+  { name: "视图与未来", src: "past = Ref(Ref(Abs($close),1),2) / $close\nlabel = Ref($close,-1)", note: "Ref(Ref(x,1),2) 合并成“x 偏移 3”的视图，它让 Abs 一直活到最后读者；Ref($close,−1) 读未来，必须计算，并让 uses_future() 为真。" },
+  { name: "编译期错误", src: "ok = Mean($close, 5)\nbad = Quantile($close, 5, 1.5)", note: "参数校验在 Graph::compile 里，报错带因子名；试试 Mean($close, 2.5)、Ref($close, $open)、Magic($close)、$close = 1。" },
+  { name: "Alpha158（158 个）", pairs: () => alpha158Pairs(), note: "357 个节点、17 个槽位、148 个直接写输出——和 ARCHITECTURE §5.3 一致。节点太多，下面的图只画前 70 个。" },
+  { name: "Alpha360（360 个）", pairs: () => alpha360Pairs(), note: "722 个节点、1 个槽位：354 个 Ref 全是视图，360 个除法没人读、直接写输出，唯一占槽位的是 $volume + 1e-12。" },
+];
+let compiled = null;
+function opLabel(nd) {
+  const o = nd.op;
+  switch (o.k) {
+    case "Field": return `$${o.name}`;
+    case "Const": return fmt(o.v, 6);
+    case "Unary": return o.op === "Neg" ? "−x" : o.op;
+    case "Binary": return { Add: "+", Sub: "−", Mul: "×", Div: "÷", Pow: "**", Gt: ">", Lt: "<", Ge: "≥", Le: "≤", Eq: "==", Ne: "!=", And: "&", Or: "|", Greater: "Greater", Less: "Less" }[o.op];
+    case "If": return "If";
+    case "Ref": return `Ref ${o.off}`;
+    case "Delta": return `Delta ${o.off}`;
+    case "Ema": return o.alpha === null ? "EMA 0" : `EMA α${fmt(o.alpha, 3)}`;
+    case "Rolling": return `${o.kind}${o.kind === "Quantile" ? " " + o.q : ""} ${o.w === "All" ? "∞" : o.w}`;
+    case "Pair": return `${o.corr ? "Corr" : "Cov"} ${o.w === "All" ? "∞" : o.w}`;
+  }
+}
+function nodeColor(nd) {
+  if (nd.op.k === "Field") return "#3a7afe";
+  if (nd.op.k === "Const") return "#666";
+  if (nd.view) return "#2fbfa8";
+  return nd.slot !== null ? "#e07a3d" : "#4caf7a";
+}
+function parseSource(text) {
+  const pairs = [];
+  text.split("\n").forEach((line, i) => {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) return;
+    const eq = t.search(/=(?!=)/);
+    if (eq <= 0 || ["<", ">", "!", "="].includes(t[eq - 1])) throw new CompileError(`第 ${i + 1} 行：需要“名字 = 表达式”`);
+    pairs.push([t.slice(0, eq).trim(), t.slice(eq + 1).trim()]);
+  });
+  return pairs;
+}
+function compileFrom(pairs, note) {
+  const err = document.getElementById("c-err");
+  try {
+    compiled = new FactorSet(pairs);
+    err.textContent = "";
+  } catch (e) {
+    if (!(e instanceof CompileError)) throw e;
+    err.textContent = `Err(Invariant): ${e.message}`;
+    compiled = null;
+  }
+  renderCompiled();
+  if (note !== undefined) document.getElementById("c-note").textContent = note;
+  fillPickers();
+  renderEval();
+}
+function renderCompiled() {
+  const k = document.getElementById("c-kpis");
+  if (!compiled) { k.innerHTML = ""; document.getElementById("dag").innerHTML = ""; document.getElementById("slots").innerHTML = ""; document.getElementById("node-rows").innerHTML = ""; document.getElementById("ast").textContent = ""; return; }
+  const s = compiled.stats();
+  k.innerHTML =
+    `<span class="kpi">因子 <b>${compiled.factors.length}</b></span>` +
+    `<span class="kpi">节点 <b>${s.nodes}</b></span>` +
+    `<span class="kpi">字段 / 字面量 <b>${s.fields} / ${s.consts}</b></span>` +
+    `<span class="kpi">视图 <b>${s.views}</b></span>` +
+    `<span class="kpi">计算节点 <b>${s.computed}</b></span>` +
+    `<span class="kpi">直接写输出 <b>${s.direct}</b></span>` +
+    `<span class="kpi">槽位 <b>${s.slots}</b></span>` +
+    `<span class="kpi">required_fields <b>${compiled.requiredFields().join(", ")}</b></span>` +
+    `<span class="kpi">uses_future <b class="${compiled.usesFuture() ? "no" : ""}">${compiled.usesFuture()}</b></span>`;
+  renderDag();
+  renderSlots();
+  renderNodeTable();
+}
+function factorsOf(nd) {
+  // which factors (by name) reach this node
+  if (!compiled._reach) {
+    const g = compiled.graph, reach = g.nodes.map(() => new Set());
+    g.outputs.forEach((out, pos) => {
+      const stack = [out];
+      while (stack.length) { const id = stack.pop(); if (reach[id].has(pos)) continue; reach[id].add(pos); stack.push(...g.nodes[id].inputs); }
+    });
+    compiled._reach = reach;
+  }
+  return [...compiled._reach[nd.id]].map((p) => compiled.factors[p][0]);
+}
+function renderDag() {
+  const svg = document.getElementById("dag");
+  svg.innerHTML = "";
+  const g = compiled.graph, LIMIT = 70;
+  const shown = g.nodes.slice(0, LIMIT);
+  const depth = [];
+  for (const nd of shown) depth[nd.id] = nd.inputs.length ? 1 + Math.max(...nd.inputs.map((i) => depth[i])) : 0;
+  const layers = [];
+  for (const nd of shown) (layers[depth[nd.id]] ||= []).push(nd);
+  const maxRows = Math.max(...layers.map((l) => l.length));
+  const W = 1040, colW = Math.min(150, (W - 40) / Math.max(layers.length, 1)), rowH = Math.max(13, Math.min(30, 560 / maxRows)), bw = Math.min(120, colW - 18), bh = rowH - 6;
+  const fs = bh >= 16 ? 10 : 8;
+  const H = Math.max(120, maxRows * rowH + 40);
+  svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const pos = {};
+  layers.forEach((layer, li) => layer.forEach((nd, ri) => { pos[nd.id] = { x: 20 + li * colW, y: 20 + ri * rowH + (maxRows - layer.length) * rowH / 2 }; }));
+  const edgeG = svgEl("g", {}), nodeG = svgEl("g", {});
+  svg.append(edgeG, nodeG);
+  const edges = [];
+  for (const nd of shown) for (const i of nd.inputs) {
+    const a = pos[i], b = pos[nd.id];
+    if (!a || !b) continue;
+    const p = svgEl("path", { d: `M ${a.x + bw} ${a.y + bh / 2} C ${a.x + bw + 20} ${a.y + bh / 2}, ${b.x - 20} ${b.y + bh / 2}, ${b.x} ${b.y + bh / 2}`, fill: "none", stroke: "#5a5a5a", "stroke-width": 1 });
+    edgeG.appendChild(p); edges.push({ from: i, to: nd.id, el: p });
+  }
+  const note = document.getElementById("dag-note");
+  for (const nd of shown) {
+    const p = pos[nd.id], c = nodeColor(nd);
+    const grp = svgEl("g", { style: "cursor:pointer" });
+    const r = svgEl("rect", { x: p.x, y: p.y, width: bw, height: bh, rx: 4, fill: c + "33", stroke: c, "stroke-width": nd.outputs.length ? 2 : 1 });
+    if (nd.view) r.setAttribute("stroke-dasharray", "4 2");
+    const t = svgEl("text", { x: p.x + 6, y: p.y + bh / 2 + fs / 2 - 1, "font-size": fs, fill: "#f0f0f0", "font-family": "ui-monospace, Menlo, monospace" });
+    t.textContent = `${nd.id} ${opLabel(nd)}`.slice(0, Math.floor(bw / (fs * 0.62)));
+    grp.append(r, t);
+    if (nd.slot !== null) { const st = svgEl("text", { x: p.x + bw - 4, y: p.y + bh / 2 + fs / 2 - 1, "text-anchor": "end", "font-size": fs - 1, fill: "#f0b088" }); st.textContent = `s${nd.slot}`; grp.appendChild(st); }
+    grp.addEventListener("mouseenter", () => {
+      for (const e of edges) e.el.setAttribute("stroke", e.to === nd.id ? "#8eb6ff" : e.from === nd.id ? "#e6c35c" : "#3a3a3a");
+      const fs = factorsOf(nd);
+      note.innerHTML = `节点 ${nd.id}：<code>${esc(opLabel(nd))}</code>，输入 [${nd.inputs.join(", ")}]` +
+        (nd.view ? `；视图 = 节点 ${nd.view[0]} 偏移 ${nd.view[1]} 行（不计算、不占槽位）` : "") +
+        (nd.slot !== null ? `；槽位 s${nd.slot}，在节点 ${compiled.graph.lastRead[nd.id]} 读完后释放` : nd.computed ? "；没人读，直接写输出" : "") +
+        `。${nd.outputs.length ? `是因子 ${nd.outputs.map((o) => compiled.factors[o][0]).join("、")} 的输出；` : ""}被 ${fs.length} 个因子用到${fs.length <= 8 ? `：${fs.join("、")}` : ""}。蓝线是输入，黄线是读者。`;
+    });
+    nodeG.appendChild(grp);
+  }
+  document.getElementById("dag-cap").textContent = g.nodes.length > LIMIT ? `依赖图（共 ${g.nodes.length} 个节点，只画前 ${LIMIT} 个）` : `依赖图（${g.nodes.length} 个节点，按依赖深度分列；粗边框 = 某个因子的输出）`;
+}
+function renderSlots() {
+  const svg = document.getElementById("slots");
+  svg.innerHTML = "";
+  const g = compiled.graph, n = g.nodes.length;
+  const W = 520, L = 34, R = 8, T = 10, rowH = Math.max(6, Math.min(18, 160 / Math.max(g.slots, 1)));
+  const H = Math.max(80, T + g.slots * rowH + 30);
+  svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = (i) => L + (i / Math.max(n, 1)) * (W - L - R);
+  for (let s = 0; s < g.slots; s++) {
+    const t = svgEl("text", { x: L - 6, y: T + s * rowH + rowH * 0.75, "text-anchor": "end", "font-size": 9, fill: "#909090" }); t.textContent = `s${s}`; svg.appendChild(t);
+  }
+  let live = 0, peakAt = 0;
+  const events = [];
+  for (const nd of g.nodes) if (nd.slot !== null) {
+    const end = g.lastRead[nd.id] ?? nd.id;
+    svg.appendChild(svgEl("rect", { x: x(nd.id), y: T + nd.slot * rowH + 1, width: Math.max(1.5, x(end + 1) - x(nd.id) - 0.5), height: rowH - 2, rx: 2, fill: "#e07a3d", opacity: 0.75 }));
+    events.push([nd.id, 1], [end + 1, -1]);
+  }
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let peak = 0; for (const [at, d] of events) { live += d; if (live > peak) { peak = live; peakAt = at; } }
+  const axis = svgEl("text", { x: L, y: H - 8, "font-size": 9, fill: "#909090" }); axis.textContent = `节点 0`; svg.appendChild(axis);
+  const axis2 = svgEl("text", { x: W - R, y: H - 8, "text-anchor": "end", "font-size": 9, fill: "#909090" }); axis2.textContent = `节点 ${n - 1}`; svg.appendChild(axis2);
+  document.getElementById("slots-note").textContent = g.slots
+    ? `${g.slots} 个槽位被 ${g.nodes.filter((nd) => nd.slot !== null).length} 个节点轮流使用；同时活着的最多 ${peak} 条（在节点 ${peakAt} 附近）。没有它，每个计算节点都要一条自己的序列。`
+    : "这个因子集不需要任何暂存：所有计算节点都直接写进输出，或者都是视图 / 字段 / 字面量。";
+}
+function renderNodeTable() {
+  const g = compiled.graph;
+  const rows = g.nodes.slice(0, 400).map((nd) =>
+    `<tr><td class="mono">${nd.id}</td><td class="mono" style="color:${nodeColor(nd)}">${esc(opLabel(nd))}</td><td class="mono">${nd.inputs.join(", ")}</td><td class="mono">${nd.view ? `${nd.view[0]} +${nd.view[1]}` : ""}</td><td class="mono">${nd.slot !== null ? "s" + nd.slot : ""}</td><td>${nd.outputs.map((o) => esc(compiled.factors[o][0])).join(", ")}</td><td>${nd.read ? "是" : ""}</td></tr>`);
+  if (g.nodes.length > 400) rows.push(`<tr><td colspan="7" class="small">还有 ${g.nodes.length - 400} 个节点未列出</td></tr>`);
+  document.getElementById("node-rows").innerHTML = rows.join("");
+}
+function astText(e, depth = 0) {
+  const pad = "  ".repeat(depth);
+  switch (e.t) {
+    case "num": return `${pad}<u>${fmt(e.v, 12)}</u>\n`;
+    case "field": return `${pad}<i>$${esc(e.name)}</i>\n`;
+    case "un": return `${pad}<b>unary ${e.op}</b>\n` + astText(e.c, depth + 1);
+    case "bin": return `${pad}<b>${esc(e.op)}</b>\n` + astText(e.l, depth + 1) + astText(e.r, depth + 1);
+    case "call": return `${pad}<b>${esc(e.name)}</b>(\n` + e.args.map((a) => astText(a, depth + 1)).join("") + `${pad})\n`;
+  }
+}
+function fillPickers() {
+  const ap = document.getElementById("ast-pick"), ep = document.getElementById("e-pick");
+  const names = compiled ? compiled.factors.map(([n]) => n) : [];
+  const keepA = ap.value, keepE = ep.value;
+  const opts = names.map((n, i) => `<option value="${i}">${esc(n)}</option>`).join("");
+  ap.innerHTML = opts; ep.innerHTML = opts;
+  const ia = names.indexOf(compiled && compiled.factors[keepA] ? compiled.factors[keepA][0] : ""), ie = names.indexOf(compiled && compiled.factors[keepE] ? compiled.factors[keepE][0] : "");
+  ap.value = ia >= 0 ? ia : 0; ep.value = ie >= 0 ? ie : 0;
+  renderAst();
+}
+function renderAst() {
+  const host = document.getElementById("ast");
+  if (!compiled) { host.textContent = ""; return; }
+  const [name, e] = compiled.factors[Number(document.getElementById("ast-pick").value) || 0];
+  host.innerHTML = `<span style="color:#909090"># ${esc(name)}</span>\n` + astText(e);
+}
+
+/* ---------------- evaluation demo ---------------- */
+function synthPanel(seed) {
+  let s = (seed * 2654435761 + 12345) >>> 0;
+  const rnd = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+  const nRows = 80, nCols = 2;
+  const f = { open: [], high: [], low: [], close: [], volume: [], vwap: [] };
+  for (let c = 0; c < nCols; c++) {
+    let close = 100 + 20 * c;
+    for (let r = 0; r < nRows; r++) {
+      const open = close;
+      close = Math.max(1, close * Math.exp(0.02 * gauss()));
+      const high = Math.max(open, close) * (1 + 0.01 * rnd()), low = Math.min(open, close) * (1 - 0.01 * rnd());
+      f.open.push(open); f.close.push(close); f.high.push(high); f.low.push(low);
+      f.volume.push(Math.round(1000 + 400 * rnd() + (r % 7 === 0 ? 800 : 0)));
+      f.vwap.push((open + high + low + close) / 4);
+    }
+  }
+  return { nRows, nCols, fields: f };
+}
+function lineChart(svg, series) {
+  svg.innerHTML = "";
+  const W = 1040, H = 250, L = 56, R = 56, T = 14, B = 24;
+  const groups = { left: [], right: [] };
+  for (const s of series) groups[s.axis].push(...s.data.filter((v) => Number.isFinite(v)));
+  const range = (vals) => { if (!vals.length) return [0, 1]; let mn = Math.min(...vals), mx = Math.max(...vals); if (mn === mx) { mn -= 1; mx += 1; } return [mn, mx]; };
+  const rl = range(groups.left), rr = range(groups.right);
+  const n = Math.max(...series.map((s) => s.data.length));
+  const x = (i) => L + (i / Math.max(1, n - 1)) * (W - L - R);
+  const y = (v, r) => T + (1 - (v - r[0]) / (r[1] - r[0])) * (H - T - B);
+  for (let k = 0; k <= 4; k++) {
+    const yy = T + (k / 4) * (H - T - B);
+    svg.appendChild(svgEl("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "#2b2b2b" }));
+    const a = svgEl("text", { x: L - 6, y: yy + 4, "text-anchor": "end", "font-size": 10, fill: "#b8b8b8" }); a.textContent = fmt(rl[1] - (k / 4) * (rl[1] - rl[0]), 3); svg.appendChild(a);
+    const b = svgEl("text", { x: W - R + 6, y: yy + 4, "font-size": 10, fill: "#666" }); b.textContent = fmt(rr[1] - (k / 4) * (rr[1] - rr[0]), 1); svg.appendChild(b);
+  }
+  for (const s of series) {
+    const r = s.axis === "left" ? rl : rr;
+    let d = "", pen = false;
+    s.data.forEach((v, i) => { if (Number.isFinite(v)) { d += `${pen ? "L" : "M"} ${x(i).toFixed(1)} ${y(v, r).toFixed(1)} `; pen = true; } else pen = false; });
+    svg.appendChild(svgEl("path", { d, fill: "none", stroke: s.color, "stroke-width": s.width, opacity: s.opacity ?? 1 }));
+  }
+  series.filter((s) => s.label).forEach((s, i) => {
+    svg.appendChild(svgEl("rect", { x: L + 10 + i * 190, y: T + 2, width: 12, height: 3, fill: s.color }));
+    const t = svgEl("text", { x: L + 28 + i * 190, y: T + 7, "font-size": 11, fill: "#b8b8b8" }); t.textContent = s.label; svg.appendChild(t);
+  });
+}
+function renderEval() {
+  const err = document.getElementById("e-err"), k = document.getElementById("e-kpis"), svg = document.getElementById("e-chart");
+  if (!compiled) { svg.innerHTML = ""; k.innerHTML = ""; return; }
+  const seed = Math.max(0, Math.floor(Number(document.getElementById("e-seed").value)) || 0);
+  const panel = synthPanel(seed);
+  const pick = Number(document.getElementById("e-pick").value) || 0;
+  let out, alone;
+  try {
+    const t0 = performance.now();
+    out = evaluate(compiled, panel);
+    const ms = performance.now() - t0;
+    // evaluate symbol 1 on its own
+    const one = { nRows: panel.nRows, nCols: 1, fields: Object.fromEntries(Object.entries(panel.fields).map(([n, v]) => [n, v.slice(panel.nRows)])) };
+    alone = evaluate(compiled, one);
+    err.textContent = "";
+    const v = out[pick], N = panel.nRows;
+    lineChart(svg, [
+      { data: panel.fields.close.slice(0, N), color: "#5a6a8a", width: 1, axis: "right", label: "close · 标的 0" },
+      { data: panel.fields.close.slice(N), color: "#6a5a3a", width: 1, axis: "right", label: "close · 标的 1" },
+      { data: v.slice(0, N), color: "#5ea0ff", width: 2, axis: "left", label: `${compiled.factors[pick][0]} · 标的 0` },
+      { data: v.slice(N), color: "#e6c35c", width: 2, axis: "left", label: `${compiled.factors[pick][0]} · 标的 1` },
+    ]);
+    const same = out.every((col, i) => col.slice(N).every((x, r) => Object.is(x, alone[i][r]) || (Number.isNaN(x) && Number.isNaN(alone[i][r]))));
+    const firstVal = v.findIndex((x) => !Number.isNaN(x));
+    k.innerHTML =
+      `<span class="kpi">形状 <b>${N} × ${panel.nCols}</b>（每个因子一个 Matrix）</span>` +
+      `<span class="kpi">第一个非 NaN 的行 <b>${firstVal < 0 ? "无" : firstVal}</b></span>` +
+      `<span class="kpi">NaN 个数 <b>${v.filter((x) => Number.isNaN(x)).length}</b></span>` +
+      `<span class="kpi">最后一行 <b>${fmt(v[N - 1], 6)} · ${fmt(v[2 * N - 1], 6)}</b></span>` +
+      `<span class="kpi">标的 1 单独求值逐位相同 <b class="${same ? "yes" : "no"}">${same}</b></span>` +
+      `<span class="kpi">本页 JS 求值耗时 <b>${ms.toFixed(1)} ms</b></span>`;
+  } catch (e) {
+    if (!(e instanceof CompileError)) throw e;
+    err.textContent = `Err(Invariant): ${e.message}`; svg.innerHTML = ""; k.innerHTML = "";
+  }
+}
+
+/* ---------------- benchmark & alpha tables ---------------- */
+const BENCH = [
+  ["1024 × 16 · 4 个逐元素因子", 0.3, 5.0], ["2520 × 200 · 6 个滚动因子（w=20）", 31, 102],
+  ["2520 × 200 · Alpha158", 600, 6200], ["2520 × 200 · Alpha360", 410, 2700], ["2520 × 500 · Alpha158", 1500, 19400],
+];
+function buildBench() {
+  const max = Math.log10(Math.max(...BENCH.map((b) => b[2])) * 10);
+  const bar = (v, c) => `<div style="background:#262626;border-radius:3px;height:12px;margin:2px 0"><div style="width:${(Math.log10(v * 10) / max) * 100}%;height:100%;border-radius:3px;background:${c}"></div></div>`;
+  const ms = (v) => (v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${v} ms`);
+  document.getElementById("bench").innerHTML = BENCH.map(([k, a, b]) =>
+    `<div style="display:grid;grid-template-columns:240px 1fr 150px;gap:10px;align-items:center;margin:6px 0">
+      <span style="color:#b8b8b8;font-size:12px">${k}</span>
+      <div>${bar(a, "#3a7afe")}${bar(b, "#b07cd8")}</div>
+      <span class="mono" style="font-size:11px"><span style="color:#9ec1ff">原生 ${ms(a)}</span><br><span style="color:#d3b5ee">Polars ${ms(b)}</span> · ${(b / a).toFixed(1)}×</span>
+    </div>`).join("");
+}
+function buildAlpha() {
+  const pairs = alpha158Pairs();
+  const rows = [];
+  rows.push(...pairs.slice(0, 13).map(([n, e]) => ({ fam: n, win: "—", e, names: [n] })));
+  for (let i = 13; i < pairs.length; i += 5) {
+    const fam = pairs[i][0].replace(/\d+$/, "");
+    rows.push({ fam, win: "5 · 10 · 20 · 30 · 60", e: pairs[i][1].replace(/(?<![\d.])5(?![\d.])/g, "d"), names: pairs.slice(i, i + 5).map((p) => p[0]) });
+  }
+  const host = document.getElementById("a-rows");
+  host.innerHTML = rows.map((r, i) => `<tr data-i="${i}" style="cursor:pointer"><td class="mono k">${r.fam}</td><td class="small">${r.win}</td><td class="mono">${esc(r.e)}</td></tr>`).join("");
+  host.querySelectorAll("tr").forEach((tr) => tr.addEventListener("click", () => {
+    const r = rows[Number(tr.dataset.i)];
+    const chosen = pairs.filter(([n]) => r.names.includes(n));
+    document.getElementById("c-src").value = toLines(chosen);
+    cSeg.clear();
+    compileFrom(chosen, `已载入 Alpha158 的 ${r.fam} 族（${chosen.length} 个因子）：注意它们之间共享了多少节点。`);
+    document.getElementById("compiler").scrollIntoView({ behavior: "smooth" });
+  }));
+}
+
+let cSeg;
+buildLegend(); buildGraph(); buildTable();
+cSeg = seg("c-presets", C_PRESETS, (p) => {
+  const pairs = p.pairs ? p.pairs() : parseSource(p.src);
+  document.getElementById("c-src").value = p.pairs ? toLines(pairs) : p.src;
+  compileFrom(pairs, p.note);
+});
+cSeg.select(0);
+document.getElementById("c-src").addEventListener("input", () => {
+  cSeg.clear();
+  try { compileFrom(parseSource(document.getElementById("c-src").value), ""); }
+  catch (e) { if (!(e instanceof CompileError)) throw e; document.getElementById("c-err").textContent = e.message; }
+});
+document.getElementById("ast-pick").addEventListener("input", renderAst);
+document.getElementById("e-pick").addEventListener("input", renderEval);
+document.getElementById("e-seed").addEventListener("input", renderEval);
+buildBench();
+buildAlpha();
+</script>
+</body>
+</html>
