@@ -154,6 +154,7 @@ fn matches_the_reference_stats_table() {
             account_type: FlexArray::scalar(phasor_model::AccountType::Cash),
             initial_margin: FlexArray::scalar(f64::NAN),
             margin_basis: FlexArray::scalar(phasor_model::MarginBasis::Notional),
+            multiplier: FlexArray::scalar(1.0),
             cash_limit: FlexArray::scalar(f64::INFINITY),
             reject_prob: FlexArray::scalar(0.0),
             seed: 0,

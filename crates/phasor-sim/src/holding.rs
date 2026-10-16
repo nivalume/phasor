@@ -12,7 +12,9 @@
 //!
 //! `price` is `mark_price`, or the close where it is `NaN`, or the column's
 //! last valuation price where both are; with none of them the charge is
-//! skipped, as settling is. A positive rate is a cost to the holder.
+//! skipped, as settling is. A positive rate is a cost to the holder. For a
+//! column with a contract multiplier, `price` is multiplied by it: the
+//! charge is on the notional.
 //!
 //! Every rate is **per bar**: what one bar's holding costs, for the time
 //! until the next bar. A bar with no settlement is `NaN` or zero. Turning an
@@ -72,7 +74,11 @@ pub(crate) struct Held {
     pub(crate) position: f64,
     pub(crate) debt: f64,
     pub(crate) margin: bool,
+    /// Already multiplied by `multiplier`.
     pub(crate) val_price: f64,
+    /// The column's contract multiplier, which the charges' price is
+    /// multiplied by.
+    pub(crate) multiplier: f64,
 }
 
 /// Applies `amount`, uncapped, and records it.
@@ -121,6 +127,7 @@ pub(crate) fn charge<S: RecordSink>(
         if price.is_nan() {
             price = rates.close.get(row, col);
         }
+        price *= h.multiplier;
         if price.is_nan() {
             price = h.val_price;
         }
@@ -209,6 +216,7 @@ mod tests {
             debt,
             margin,
             val_price: 8.0,
+            multiplier: 1.0,
         }
     }
 
@@ -344,6 +352,7 @@ mod tests {
                 debt: 0.0,
                 margin: true,
                 val_price: f64::NAN,
+                multiplier: 1.0,
             },
         ];
         charge(

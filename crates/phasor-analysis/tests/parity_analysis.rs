@@ -205,7 +205,7 @@ fn matches_the_reference_end_to_end() {
         let held = assets(&orders, n_rows, n_cols);
         let curve = value(
             &cash(&cash_flow(&orders, n_rows, n_cols), &init_cash),
-            &asset_value(&held, &close),
+            &asset_value(&held, &close, None),
         );
         let rets = returns(&curve, &init_cash);
 

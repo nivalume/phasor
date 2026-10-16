@@ -122,15 +122,37 @@ pub fn assets(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Matrix {
     out
 }
 
-/// Cash moved on each bar, per column: `-size * price - fees` for every fill,
-/// plus every cash flow that was not a fill.
+/// Each column's contract multiplier, read off its fills, or `None` when
+/// every column's is 1.
+///
+/// Only a run that keeps balances can have one other than 1, and it is
+/// constant down a column, so a column's first fill gives it; a column that
+/// never filled holds nothing to multiply.
+#[must_use]
+pub fn multipliers(orders: &OrderRecords, n_cols: usize) -> Option<Vec<f64>> {
+    if orders
+        .multiplier
+        .iter()
+        .all(|m| m.to_bits() == 1.0_f64.to_bits())
+    {
+        return None;
+    }
+    let mut out = vec![1.0; n_cols];
+    for (r, &m) in orders.multiplier.iter().enumerate() {
+        out[orders.col[r] as usize] = m;
+    }
+    Some(out)
+}
+
+/// Cash moved on each bar, per column: `-size * price * multiplier - fees`
+/// for every fill, plus every cash flow that was not a fill.
 #[must_use]
 pub fn cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Matrix {
     let mut out = Matrix::zeros(n_rows, n_cols);
     for i in 0..orders.len() {
         let col = orders.col[i] as usize;
         let size = signed_size(orders.size[i], orders.side[i]);
-        let flow = -size * orders.price[i] - orders.fees[i];
+        let flow = -size * (orders.price[i] * orders.multiplier_of(i)) - orders.fees[i];
         let row = orders.idx[i] as usize;
         let cell = &mut out.column_mut(col)[row];
         *cell = add(*cell, flow);
@@ -305,7 +327,7 @@ fn levered_free_cash_flow(orders: &OrderRecords, map: &ColMap, out: &mut Matrix)
             } else {
                 0.0
             };
-            let final_cash = -size * orders.price[r] - orders.fees[r];
+            let final_cash = -size * (orders.price[r] * orders.multiplier_of(r)) - orders.fees[r];
             let diff = add(final_cash, -add(new_reserve, -reserve));
             reserve = new_reserve;
             let cell = &mut out.column_mut(col)[orders.idx[r] as usize];
@@ -355,16 +377,27 @@ pub fn cash(flow: &Matrix, init_cash: &FlexArray<'_, f64>) -> Matrix {
     out
 }
 
-/// Position value at each bar: close times assets.
+/// Position value at each bar: close times assets, times each column's
+/// contract multiplier where there are any (see [`multipliers`]).
 #[must_use]
-pub fn asset_value(assets: &Matrix, close: &FlexArray<'_, f64>) -> Matrix {
+pub fn asset_value(
+    assets: &Matrix,
+    close: &FlexArray<'_, f64>,
+    multiplier: Option<&[f64]>,
+) -> Matrix {
     let (n_rows, n_cols) = (assets.n_rows(), assets.n_cols());
     let mut out = Matrix::zeros(n_rows, n_cols);
     for col in 0..n_cols {
         let src = assets.column(col);
         let dst = out.column_mut(col);
-        for row in 0..n_rows {
-            dst[row] = close.get(row, col) * src[row];
+        if let Some(m) = multiplier.map(|m| m[col]) {
+            for row in 0..n_rows {
+                dst[row] = close.get(row, col) * m * src[row];
+            }
+        } else {
+            for row in 0..n_rows {
+                dst[row] = close.get(row, col) * src[row];
+            }
         }
     }
     out
@@ -488,7 +521,8 @@ pub fn returns_from_orders(
 ) -> Result<Matrix> {
     let assets = assets(orders, n_rows, n_cols);
     let cash = cash(&cash_flow(orders, n_rows, n_cols), init_cash);
-    let value = value(&cash, &asset_value(&assets, close));
+    let multiplier = multipliers(orders, n_cols);
+    let value = value(&cash, &asset_value(&assets, close, multiplier.as_deref()));
     Ok(returns(&value, init_cash))
 }
 
@@ -578,7 +612,7 @@ mod tests {
         assert_eq!(assets(&o, 3, 1).column(0), [2.0, 2.0, 0.0]);
         let c = cash(&cash_flow(&o, 3, 1), &init);
         assert_eq!(c.column(0), [80.0, 80.0, 110.0]);
-        let v = value(&c, &asset_value(&assets(&o, 3, 1), &close));
+        let v = value(&c, &asset_value(&assets(&o, 3, 1), &close, None));
         // 80 + 2*10, 80 + 2*12, 110 + 0.
         assert_eq!(v.column(0), [100.0, 104.0, 110.0]);
         let r = returns(&v, &init);
@@ -596,7 +630,7 @@ mod tests {
         let init = FlexArray::scalar(100.0);
         let v = value(
             &cash(&cash_flow(&o, 1, 1), &init),
-            &asset_value(&assets(&o, 1, 1), &close),
+            &asset_value(&assets(&o, 1, 1), &close, None),
         );
         // Paid 10 for the asset plus 1 in fees; the asset is still worth 10.
         assert_eq!(v.column(0), [99.0]);

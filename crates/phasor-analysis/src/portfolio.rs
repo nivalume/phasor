@@ -599,13 +599,15 @@ impl<'a> Portfolio<'a> {
             isolated[col] |= self.orders.isolated.get(r) == Some(&true);
         }
         let assets = self.assets();
+        let multiplier = series::multipliers(&self.orders, self.n_cols);
         for col in (0..self.n_cols).filter(|&col| margin[col] && !isolated[col]) {
             let group = self.groups.of_column(col);
+            let m = multiplier.as_ref().map_or(1.0, |m| m[col]);
             for row in 0..self.n_rows {
                 let position = assets.get(row, col);
                 if position != 0.0 {
                     let cell = &mut free.column_mut(group)[row];
-                    *cell = add(*cell, position * self.close.get(row, col));
+                    *cell = add(*cell, position * (self.close.get(row, col) * m));
                 }
             }
         }
@@ -669,7 +671,8 @@ impl<'a> Portfolio<'a> {
     #[must_use]
     pub fn column_asset_value(&self) -> &Matrix {
         self.cache.column_asset_value.get_or_init(|| {
-            let mut value = series::asset_value(self.assets(), &self.close);
+            let multiplier = series::multipliers(&self.orders, self.n_cols);
+            let mut value = series::asset_value(self.assets(), &self.close, multiplier.as_deref());
             if self.groups.is_shared() {
                 for col in 0..self.n_cols {
                     for row in 0..self.n_rows {

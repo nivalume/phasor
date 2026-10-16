@@ -552,7 +552,8 @@ impl PyPortfolio {
     /// its own cash, whether the column trades on margin and on isolated
     /// margin, and whether the fill was a liquidation. A margin column's
     /// `debt` is its position's cost basis and its `locked_cash` the initial
-    /// margin posted. Other runs leave them out
+    /// margin posted. Such a run, and any with a contract multiplier, also adds
+    /// `multiplier`, the fill's column's. Other runs leave them out
     /// rather than return them empty, so every array in the dict has one entry
     /// per fill.
     fn orders<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -575,6 +576,10 @@ impl PyPortfolio {
             out.set_item(
                 "liquidation",
                 self.orders.liquidation.clone().into_pyarray(py),
+            )?;
+            out.set_item(
+                "multiplier",
+                self.orders.multiplier.clone().into_pyarray(py),
             )?;
         }
         Ok(out)
@@ -628,7 +633,8 @@ impl PyPortfolio {
     /// margin's three, all in the request: `req_account_type` (0 cash, 1
     /// margin), `req_initial_margin` and `req_margin_basis` (0 notional, 1
     /// unit). And `liquidation`, true for a row the exchange's liquidation
-    /// wrote rather than the strategy's order.
+    /// wrote rather than the strategy's order, and `multiplier`, the column's
+    /// contract multiplier: prices are prices, cash and values are cash.
     ///
     /// One row per order **considered**, filled or not, which is the difference
     /// from [`Self::orders`] and the whole reason to ask for logs. Without them
@@ -702,6 +708,7 @@ impl PyPortfolio {
         out.set_item("req_raise_reject", l.req_raise_reject.clone())?;
         out.set_item("req_log", l.req_log.clone())?;
         out.set_item("liquidation", l.liquidation.clone())?;
+        put_f("multiplier", l.multiplier.clone())?;
         Ok(out)
     }
 
@@ -742,6 +749,9 @@ impl PyPortfolio {
     }
 
     /// The trades, in whichever view this portfolio is scored with.
+    ///
+    /// `multiplier` is the column's contract multiplier: `pnl` is in cash, so
+    /// multiplied by it, and `ret`, a fraction of the entry value, is not.
     fn trades<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let pf = self.core()?;
         // Derived (and cached) without the GIL; the arrays are built with it.
@@ -766,6 +776,7 @@ impl PyPortfolio {
         let status: Vec<i64> = t.status.iter().map(|s| i64::from(*s)).collect();
         out.set_item("status", status.into_pyarray(py))?;
         out.set_item("parent_id", t.parent_id.clone().into_pyarray(py))?;
+        out.set_item("multiplier", t.multiplier.clone().into_pyarray(py))?;
         Ok(out)
     }
 
@@ -1073,6 +1084,7 @@ fn deposits_view<'a>(
     account_type = None,
     initial_margin = None,
     margin_basis = "notional",
+    multiplier = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1141,6 +1153,7 @@ fn from_signals(
     account_type: Option<&Bound<'_, PyAny>>,
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
+    multiplier: Option<&Bound<'_, PyAny>>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1224,6 +1237,7 @@ fn from_signals(
         mark_price,
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
+    let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
@@ -1397,6 +1411,15 @@ fn from_signals(
         })?,
         initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
         margin_basis: FlexArray::Scalar(margin_basis),
+        // One per column: the wrapper maps a source column's through
+        // `column_map`, and the engine refuses one that changes down a column.
+        multiplier: flex_or_f64(
+            &multiplier_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.multiplier,
+        )?,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
@@ -1529,6 +1552,7 @@ fn from_signals(
     account_type = None,
     initial_margin = None,
     margin_basis = "notional",
+    multiplier = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1587,6 +1611,7 @@ fn from_orders(
     account_type: Option<&Bound<'_, PyAny>>,
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
+    multiplier: Option<&Bound<'_, PyAny>>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1646,6 +1671,7 @@ fn from_orders(
         mark_price,
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
+    let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let p = Shared::borrow(
         size,
         price,
@@ -1754,6 +1780,15 @@ fn from_orders(
         })?,
         initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
         margin_basis: FlexArray::Scalar(margin_basis),
+        // One per column: the wrapper maps a source column's through
+        // `column_map`, and the engine refuses one that changes down a column.
+        multiplier: flex_or_f64(
+            &multiplier_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.multiplier,
+        )?,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,

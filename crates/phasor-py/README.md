@@ -158,6 +158,23 @@ pf = phasor.from_orders(close, size=size, init_cash=1_000.0, cash_sharing=True,
                         initial_margin=np.array([np.nan, 0.1]))
 ```
 
+## Contract multiplier
+
+`multiplier` is what one unit of position is worth per unit of price: 50 for an
+E-mini S&P 500 future, 1 (the default) for a share. A number, or one value per
+column (per source column with `column_map`); it cannot change within a
+column. A fill moves `size * price * multiplier` of cash, and fees, margin,
+dividends, holding charges and the liquidation test all follow that notional.
+Sizes, `min_size`, `size_granularity` and a `"unit"` margin stay in
+contracts; prices, stops and `pf.orders()["price"]` stay prices. `pf.trades()`
+carries `multiplier`, with `pnl` multiplied and `ret` not.
+
+```python
+# One E-mini on 12,000 of margin per contract: a 10-point move is 500.
+pf = phasor.from_orders(close, size=size, init_cash=20_000.0, account_type="margin",
+                        initial_margin=12_000.0, margin_basis="unit", multiplier=50.0)
+```
+
 ## Liquidation
 
 `maintenance_margin` (in `margin_basis`, like `initial_margin`) makes an

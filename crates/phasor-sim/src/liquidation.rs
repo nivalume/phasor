@@ -112,10 +112,13 @@ pub(crate) struct Column {
     pub(crate) isolated: bool,
     /// What its maintenance margin is measured in.
     pub(crate) basis: MarginBasis,
-    /// Its last valuation price, the price of last resort.
+    /// Its last valuation price, the price of last resort, already
+    /// multiplied by `multiplier`.
     pub(crate) val_price: f64,
     /// The level a stop that fired on the bar was hit at; `NaN` otherwise.
     pub(crate) stop: f64,
+    /// Its contract multiplier: the path runs at its prices times it.
+    pub(crate) multiplier: f64,
 }
 
 /// A column's path through the bar and what it owes the maintenance margin.
@@ -162,7 +165,8 @@ fn rate(inputs: &Inputs<'_, '_>, row: usize, col: usize, basis: MarginBasis) -> 
     Ok(rate)
 }
 
-/// The path of a column holding a position through bar `row`.
+/// The path of a column holding a position through bar `row`, in prices
+/// times the column's multiplier.
 fn path(inputs: &Inputs<'_, '_>, row: usize, col: usize, c: &Column, rate: f64) -> Path {
     let close = inputs.close.get(row, col);
     let mut open = inputs.open.get(row, col);
@@ -180,15 +184,18 @@ fn path(inputs: &Inputs<'_, '_>, row: usize, col: usize, c: &Column, rate: f64) 
             if high.is_nan() { open.max(close) } else { high }
         };
     }
+    open *= c.multiplier;
+    check *= c.multiplier;
     if check.is_nan() {
         check = c.val_price;
     }
     if !c.stop.is_nan() {
         // Hit on the way: the less adverse of the two.
+        let stop = c.stop * c.multiplier;
         check = if long {
-            check.max(c.stop)
+            check.max(stop)
         } else {
-            check.min(c.stop)
+            check.min(stop)
         };
     }
     let start = if open.is_nan() { check } else { open };
@@ -310,6 +317,9 @@ pub(crate) struct At<'o> {
     /// flag the liquidation keeps.
     pub(crate) template: &'o Order,
     pub(crate) isolated: bool,
+    /// The column's contract multiplier, which `price` is already
+    /// multiplied by.
+    pub(crate) multiplier: f64,
 }
 
 /// Closes a column at `price`, charging `liquidation_fee` of the notional,
@@ -360,19 +370,27 @@ pub(crate) fn fill<S: RecordSink + LogSink>(
     let mut order_id = -1_i64;
     if result.is_filled() {
         let side = result.side.expect("a filled order always carries a side");
-        sink.push_order(at.row, at.col, result.size, result.price, result.fees, side);
+        sink.push_order(
+            at.row,
+            at.col,
+            result.size,
+            result.price / at.multiplier,
+            result.fees,
+            side,
+        );
         sink.push_balances(Balances {
             debt: after.debt,
             locked_cash: after.locked_cash,
             margin: true,
             isolated: at.isolated,
             liquidation: true,
+            multiplier: at.multiplier,
         });
         order_id = *fills;
         *fills += 1;
     }
     if request.log {
-        sink.push_log(&LogEntry {
+        let mut entry = LogEntry {
             group: at.group,
             col: at.col,
             idx: at.row,
@@ -398,7 +416,10 @@ pub(crate) fn fill<S: RecordSink + LogSink>(
             result,
             order_id,
             liquidation: true,
-        });
+            multiplier: 1.0,
+        };
+        crate::unscale_log(&mut entry, at.multiplier);
+        sink.push_log(&entry);
     }
     Ok(after)
 }
@@ -509,6 +530,7 @@ mod tests {
             basis: MarginBasis::Notional,
             val_price: f64::NAN,
             stop: f64::NAN,
+            multiplier: 1.0,
         }
     }
 
@@ -704,6 +726,7 @@ mod tests {
             col: 0,
             template: &template,
             isolated: false,
+            multiplier: 1.0,
         };
         // Long 4 settled at 128 with 100 posted.
         let before = ProcessOrderState {

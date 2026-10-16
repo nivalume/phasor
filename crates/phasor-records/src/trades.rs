@@ -67,6 +67,10 @@ pub struct TradeRecords {
     pub status: Vec<i8>,
     /// Which position this trade belongs to.
     pub parent_id: Vec<i64>,
+    /// The column's contract multiplier. `pnl` is in cash, so it is
+    /// multiplied by it; `ret` is a fraction of the entry value, which is
+    /// multiplied too, so it is not.
+    pub multiplier: Vec<f64>,
 }
 
 /// PnL and return for one trade.
@@ -82,9 +86,10 @@ fn trade_stats(
     exit_price: f64,
     exit_fees: f64,
     direction: TradeDirection,
+    multiplier: f64,
 ) -> (f64, f64) {
-    let entry_val = size * entry_price;
-    let exit_val = size * exit_price;
+    let entry_val = size * entry_price * multiplier;
+    let exit_val = size * exit_price * multiplier;
     let mut val_diff = add(exit_val, -entry_val);
     if val_diff != 0.0 && direction == TradeDirection::Short {
         val_diff = -val_diff;
@@ -111,6 +116,7 @@ impl TradeRecords {
             direction: Vec::new(),
             status: Vec::new(),
             parent_id: Vec::new(),
+            multiplier: Vec::new(),
         }
     }
 
@@ -195,6 +201,7 @@ impl TradeRecords {
         direction: TradeDirection,
         status: TradeStatus,
         parent_id: i64,
+        multiplier: f64,
     ) {
         let (pnl, ret) = trade_stats(
             size,
@@ -203,6 +210,7 @@ impl TradeRecords {
             exit_price,
             exit_fees,
             direction,
+            multiplier,
         );
         self.col.push(col);
         self.size.push(size);
@@ -217,6 +225,7 @@ impl TradeRecords {
         self.direction.push(direction as i8);
         self.status.push(status as i8);
         self.parent_id.push(parent_id);
+        self.multiplier.push(multiplier);
     }
 
     /// Copies record `i` of `src` verbatim, renumbering its parent.
@@ -240,6 +249,8 @@ impl TradeRecords {
         self.direction.push(src.direction[i]);
         self.status.push(src.status[i]);
         self.parent_id.push(parent_id);
+        self.multiplier
+            .push(src.multiplier.get(i).copied().unwrap_or(1.0));
     }
 }
 
@@ -349,6 +360,7 @@ fn flush_entry_trades(
             pos.direction,
             status,
             parent_id,
+            orders.multiplier_of(c),
         );
     }
 }
@@ -566,6 +578,7 @@ pub fn exit_trades(
                     direction,
                     TradeStatus::Closed,
                     parent_id,
+                    orders.multiplier_of(c),
                 );
 
                 if is_close(size, entry_size_sum) {
@@ -593,6 +606,7 @@ pub fn exit_trades(
                     direction,
                     TradeStatus::Closed,
                     parent_id,
+                    orders.multiplier_of(c),
                 );
 
                 entry_size_sum = size - closed_size;
@@ -620,6 +634,7 @@ pub fn exit_trades(
                 direction,
                 TradeStatus::Open,
                 parent_id,
+                orders.multiplier_of(range.end - 1),
             );
         }
     }
@@ -687,6 +702,7 @@ pub fn positions(trades: &TradeRecords, n_cols: usize) -> Result<TradeRecords> {
                         TradeStatus::Closed
                     },
                     id,
+                    trades.multiplier.get(start).copied().unwrap_or(1.0),
                 );
             }
             start = end;

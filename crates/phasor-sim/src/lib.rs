@@ -98,14 +98,18 @@ pub(crate) fn count_where<T: Copy>(
 }
 
 /// Whether any column of a run may borrow or trade on margin: whether
-/// `leverage` exceeds 1 anywhere in it, or any column is a margin column.
+/// `leverage` exceeds 1 anywhere in it, or any column is a margin column —
+/// or has a contract multiplier other than 1, which the loops apply in the
+/// same copy.
 ///
 /// Decided once per run, because it decides whether the records keep
 /// balances, and they keep them for every fill or for none. The defaults, a
-/// scalar 1 and a scalar cash account, are answered without a scan.
+/// scalar 1, a scalar cash account and a scalar 1, are answered without a
+/// scan.
 pub(crate) fn any_levered(
     leverage: &phasor_core::flex::FlexArray<'_, f64>,
     account_type: &phasor_core::flex::FlexArray<'_, AccountType>,
+    multiplier: &phasor_core::flex::FlexArray<'_, f64>,
     n_rows: usize,
     n_cols: usize,
 ) -> bool {
@@ -113,6 +117,59 @@ pub(crate) fn any_levered(
         || count_where(account_type, n_rows, 0..n_cols, |a| {
             a == AccountType::Margin
         }) > 0
+        // Bits rather than `!=`: a `NaN` is not 1 either, and is refused
+        // by `multipliers` rather than read as one.
+        || count_where(multiplier, n_rows, 0..n_cols, |m| {
+            m.to_bits() != 1.0_f64.to_bits()
+        }) > 0
+}
+
+/// The contract multiplier of each of the columns `cols`: what one unit of
+/// position is worth per unit of price.
+///
+/// The loops run a multiplied column at its prices times its multiplier —
+/// every value, cash flow, margin and charge follows from them — and write
+/// the prices back unscaled into the records and logs. Sizes stay in
+/// contracts, so `min_size`, `size_granularity` and a per-unit margin are per
+/// contract. A property of the column for the whole run: one that changes
+/// down a column is an error, because the records keep one per fill and the
+/// analysis values a position at it.
+pub(crate) fn multipliers(
+    multiplier: &phasor_core::flex::FlexArray<'_, f64>,
+    n_rows: usize,
+    cols: std::ops::Range<usize>,
+) -> phasor_core::error::Result<Vec<f64>> {
+    cols.map(|col| {
+        let first = multiplier.get(0, col);
+        if !first.is_finite() || first <= 0.0 {
+            return Err(phasor_core::error::Error::Invariant(format!(
+                "multiplier must be finite and greater than 0; got {first} for column {col}"
+            )));
+        }
+        if multiplier.varies_by_row()
+            && (1..n_rows).any(|i| multiplier.get(i, col).to_bits() != first.to_bits())
+        {
+            return Err(phasor_core::error::Error::Invariant(format!(
+                "multiplier changes down column {col}; a column has one contract multiplier \
+                 for the whole run"
+            )));
+        }
+        Ok(first)
+    })
+    .collect()
+}
+
+/// Writes a log entry's prices back as the strategy wrote them, from the
+/// multiplied prices the loop ran a column at.
+///
+/// Dividing by the multiplier undoes multiplying by it to within a rounding
+/// error, and exactly at 1.
+pub(crate) fn unscale_log(entry: &mut phasor_records::LogEntry, multiplier: f64) {
+    entry.val_price /= multiplier;
+    entry.new_val_price /= multiplier;
+    entry.request.price /= multiplier;
+    entry.result.price /= multiplier;
+    entry.multiplier = multiplier;
 }
 
 /// Which of the columns `cols` are margin columns.

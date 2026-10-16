@@ -229,6 +229,7 @@ fn matches_the_reference_loop() {
             account_type: FlexArray::Scalar(phasor_model::AccountType::Cash),
             initial_margin: FlexArray::Scalar(f64::NAN),
             margin_basis: FlexArray::Scalar(phasor_model::MarginBasis::Notional),
+            multiplier: FlexArray::Scalar(1.0),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,

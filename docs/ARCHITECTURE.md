@@ -760,6 +760,38 @@ dividend: the dividend is owed to the position the stop then closes, as on an
 ex-date, and the deposit is in the cash the bar's orders size from. A
 position opened on a bar is first tested for its stops and for liquidation on
 the next one, and first charged at the close of the bar it opened on.
+
+### 8.9 Contract multiplier
+
+`multiplier` is what one unit of position is worth per unit of price: 50 for
+an E-mini S&P 500 future, 1 (the default) for a share. Per column, and
+constant down it (`multipliers` in `crates/phasor-sim/src/lib.rs` refuses one
+that changes, and one that is not finite and above 0).
+
+- **Where it is applied.** A multiplier other than 1 sends the run to the
+  `LEV` copy (`any_levered` counts it), which runs a multiplied column at its
+  prices times its multiplier. The kernel is unchanged: given `price × m`, a
+  fill moves `size × price × m` of cash, and fees, `Value`/`Percent`/target
+  sizes, a notional margin and the group's value all follow. Dividends are
+  paid on `position × m` shares; the holding charges and the liquidation path
+  multiply their price (§8.6, §8.7).
+- **What stays in contracts or prices.** Sizes, `min_size`,
+  `size_granularity`, `max_size` and a `Unit` margin are per contract. Stops,
+  `price` and `val_price` are prices: `from_signals` keeps a column's
+  valuation price unscaled, because its stops read it, and multiplies it
+  where it values, settles, charges or executes; `from_orders` keeps it
+  multiplied. The records and logs get the prices back, divided by `m` (to
+  within a rounding error; exactly at 1), and each fill's `multiplier`.
+- **Cost.** None on a run without one: the default run never reaches the
+  `LEV` copy, and the copy itself only gains a multiply per price.
+
+`crates/phasor-analysis/tests/multiplier.rs` checks the defining property on
+random runs of both loops (cash and margin columns, leverage, shared
+accounts, funding, dividends, liquidations): a run at `k` is the run at 1
+with every amount-sized order `k` times larger, its sizes `k` times smaller
+and everything in cash the same; plus a futures position by hand, the
+refusals and threads.
+
 ---
 
 ## 9. Records: phasor-records
@@ -770,9 +802,9 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 
 | Record | Fields | Row = |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill, `margin` and `isolated` (the column's account type and margin mode) and `liquidation`, in leveraged or margin runs only (empty otherwise; `push_balances` takes them as one `Balances`) | one fill |
-| `LogRecords` | 45: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode`, `req_account_type`, `req_initial_margin`, `req_margin_basis`, `liquidation` | one order considered, or one liquidation |
-| `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
+| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill, `margin` and `isolated` (the column's account type and margin mode), `liquidation` and `multiplier` (§8.9), in leveraged, margin or multiplied runs only (empty otherwise, and then every multiplier is 1; `push_balances` takes them as one `Balances`) | one fill |
+| `LogRecords` | 46: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode`, `req_account_type`, `req_initial_margin`, `req_margin_basis`, `liquidation`, `multiplier` | one order considered, or one liquidation |
+| `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id, multiplier`; `pnl` is multiplied, `ret` is not | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | phasor-signals ranges |
 | `CashRecords` | `col, idx, amount, kind`; `kind` is `Deposit`, `Earning`, `Dividend` (§8.5), `Funding`, `Financing`, `Interest`, `BorrowFee` (§8.6) or `Liquidation` (§8.7) | one cash flow that was not a fill |
@@ -845,6 +877,7 @@ groups), `from_orders` / `from_signals` (run the simulation).
 - With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
 - Leverage: a fill's cash flow is its full price, so `cash()` is own cash less what longs borrowed and can go below zero, while `value()` stays equity. `free_cash` cannot be rebuilt from fills alone once a short's collateral depends on λ, so in a leveraged run `free_cash_flow` reads each fill's recorded `debt + locked_cash` as the short's reserve (a leveraged long reserves nothing). `gross_exposure` of a 2× long is therefore 2.
 - Margin columns: their fills are charged their full price too, so `value = cash + position × close` is the equity the per-bar settlements add up to, and `value()` needs nothing new. `free_cash_flow` reads a margin fill's `locked_cash` as its reserve, on either side, and `Portfolio::free_cash` adds each margin column's `position × close` back into its account, which the account never paid: free cash is then equity less the margin posted, the simulation's own figure. `gross_exposure` counts the whole contract over that. An isolated column's profit is not free, so for it `free_cash` adds back its signed cost basis, the `debt` its last fill recorded, instead of `position × close`. A liquidation is a fill and a write-off a cash record, so neither needs anything new.
+- Contract multiplier (§8.9): a fill's cash flow is `size × price × multiplier` and a position is worth `position × close × multiplier`, with each column's multiplier read off its fills (`series::multipliers`, `None` when all are 1, which leaves the chain as it was). The margin columns' `position × close` in `free_cash` is multiplied the same way.
 
 ### 10.3 Metrics
 

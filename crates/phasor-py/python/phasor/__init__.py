@@ -304,6 +304,24 @@ def _column_map(value):
     return a.tolist()
 
 
+def _multiplier(value: Any, column_map: Any) -> Any:
+    """A contract multiplier: a number, or one value per column of ``close``.
+
+    With a ``column_map`` the values are per source column and are mapped
+    here, as the engine wants one per simulated column.
+    """
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    array = np.asarray(value, dtype=np.float64)
+    if array.ndim == 0:
+        return float(array)
+    if array.ndim != 1:
+        raise ValueError("multiplier must be a number or one value per column")
+    if column_map is not None:
+        array = array[np.asarray(column_map, dtype=np.intp)]
+    return np.ascontiguousarray(array)
+
+
 def from_signals(
     close,
     entries,
@@ -328,6 +346,7 @@ def from_signals(
     account_type=None,
     initial_margin=None,
     margin_basis="notional",
+    multiplier=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -485,6 +504,18 @@ def from_signals(
         ``pf.value()`` is the equity, ``pf.free_cash()`` the equity less the
         margin posted, and ``pf.orders()`` gains ``debt`` (the cost basis),
         ``locked_cash`` (the margin) and ``margin``.
+    multiplier
+        What one unit of position is worth per unit of price: 50 for an
+        E-mini S&P 500 future, 1 (the default) for a share. A number, or one
+        value per column (per source column with ``column_map``); it cannot
+        change within a column. A fill moves ``size * price * multiplier`` of
+        cash, and fees, margin, dividends, holding charges and the
+        liquidation test are all on that notional. Sizes, ``min_size``,
+        ``size_granularity`` and a ``"unit"`` margin stay in contracts, and
+        prices, stops and ``pf.orders()["price"]`` stay prices. A run with a
+        multiplier other than 1 adds ``multiplier`` to ``pf.orders()``, as a
+        levered run does; ``pf.trades()`` always has it, with ``pnl``
+        multiplied and ``ret`` not.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -580,6 +611,7 @@ def from_signals(
         account_type=_account_type(account_type),
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
+        multiplier=_multiplier(multiplier, column_map),
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
@@ -644,6 +676,7 @@ def from_orders(
     account_type=None,
     initial_margin=None,
     margin_basis="notional",
+    multiplier=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -768,6 +801,18 @@ def from_orders(
         ``pf.value()`` is the equity, ``pf.free_cash()`` the equity less the
         margin posted, and ``pf.orders()`` gains ``debt`` (the cost basis),
         ``locked_cash`` (the margin) and ``margin``.
+    multiplier
+        What one unit of position is worth per unit of price: 50 for an
+        E-mini S&P 500 future, 1 (the default) for a share. A number, or one
+        value per column (per source column with ``column_map``); it cannot
+        change within a column. A fill moves ``size * price * multiplier`` of
+        cash, and fees, margin, dividends, holding charges and the
+        liquidation test are all on that notional. Sizes, ``min_size``,
+        ``size_granularity`` and a ``"unit"`` margin stay in contracts, and
+        prices, stops and ``pf.orders()["price"]`` stay prices. A run with a
+        multiplier other than 1 adds ``multiplier`` to ``pf.orders()``, as a
+        levered run does; ``pf.trades()`` always has it, with ``pnl``
+        multiplied and ``ret`` not.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -861,6 +906,7 @@ def from_orders(
         account_type=_account_type(account_type),
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
+        multiplier=_multiplier(multiplier, column_map),
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,

@@ -83,7 +83,7 @@ pub trait RecordSink {
 
 /// What a fill left its column with, beyond the fill itself, in a run that
 /// may borrow or trade on margin.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Balances {
     /// What the column owes: a long's borrowing, a short's proceeds, or a
     /// margin column's cost basis.
@@ -97,6 +97,22 @@ pub struct Balances {
     pub isolated: bool,
     /// Whether the fill was a liquidation rather than an order.
     pub liquidation: bool,
+    /// The column's contract multiplier: what one unit of position is worth
+    /// per unit of price.
+    pub multiplier: f64,
+}
+
+impl Default for Balances {
+    fn default() -> Self {
+        Self {
+            debt: 0.0,
+            locked_cash: 0.0,
+            margin: false,
+            isolated: false,
+            liquidation: false,
+            multiplier: 1.0,
+        }
+    }
 }
 
 /// A sink a parallel simulation can allocate per thread and merge afterwards.
@@ -197,6 +213,11 @@ pub struct OrderRecords {
     /// Whether the fill was a liquidation: the exchange closing a position
     /// the account could no longer carry. Empty exactly when `debt` is.
     pub liquidation: Vec<bool>,
+    /// The fill's column's contract multiplier: the fill moves
+    /// `size × price × multiplier` of cash, and a position is worth
+    /// `position × price × multiplier`. Empty exactly when `debt` is, and then
+    /// 1 everywhere: a multiplier other than 1 makes the run keep balances.
+    pub multiplier: Vec<f64>,
     /// Cash that moved without a fill: deposits, earnings.
     ///
     /// Carried here rather than beside the fills so that everything which
@@ -223,6 +244,7 @@ impl OrderRecords {
             margin: Vec::new(),
             isolated: Vec::new(),
             liquidation: Vec::new(),
+            multiplier: Vec::new(),
             cash: CashRecords::new(),
         }
     }
@@ -242,6 +264,7 @@ impl OrderRecords {
             margin: Vec::new(),
             isolated: Vec::new(),
             liquidation: Vec::new(),
+            multiplier: Vec::new(),
             cash: CashRecords::new(),
         }
     }
@@ -256,6 +279,13 @@ impl OrderRecords {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.col.is_empty()
+    }
+
+    /// The contract multiplier of fill `i`'s column: 1 when the run kept no
+    /// balances, because only a run that keeps them can have another.
+    #[must_use]
+    pub fn multiplier_of(&self, i: usize) -> f64 {
+        self.multiplier.get(i).copied().unwrap_or(1.0)
     }
 
     /// The `id` of each record: its index, per the ordering contract.
@@ -280,6 +310,7 @@ impl OrderRecords {
         self.margin.extend_from_slice(&other.margin);
         self.isolated.extend_from_slice(&other.isolated);
         self.liquidation.extend_from_slice(&other.liquidation);
+        self.multiplier.extend_from_slice(&other.multiplier);
         debug_assert!(self.debt.is_empty() || self.debt.len() == self.len());
         self.cash.extend(&other.cash);
     }
@@ -308,7 +339,7 @@ impl OrderRecords {
         }
         reorder!(col, idx, size, price, fees, side);
         if !self.debt.is_empty() {
-            reorder!(debt, locked_cash, margin, isolated, liquidation);
+            reorder!(debt, locked_cash, margin, isolated, liquidation, multiplier);
         }
     }
 
@@ -342,6 +373,7 @@ impl OrderRecords {
             margin: Vec::new(),
             isolated: Vec::new(),
             liquidation: Vec::new(),
+            multiplier: Vec::new(),
             cash: CashRecords::new(),
         };
         // Cash flows are a handful per bar at most; one serial pass is enough.
@@ -354,6 +386,7 @@ impl OrderRecords {
             out.margin.extend_from_slice(&part.margin);
             out.isolated.extend_from_slice(&part.isolated);
             out.liquidation.extend_from_slice(&part.liquidation);
+            out.multiplier.extend_from_slice(&part.multiplier);
         }
         debug_assert!(out.debt.is_empty() || out.debt.len() == total);
         std::thread::scope(|scope| {
@@ -420,6 +453,7 @@ impl RecordSink for OrderRecords {
         self.margin.push(balances.margin);
         self.isolated.push(balances.isolated);
         self.liquidation.push(balances.liquidation);
+        self.multiplier.push(balances.multiplier);
     }
 }
 
@@ -478,6 +512,7 @@ mod tests {
             margin: true,
             isolated: true,
             liquidation: true,
+            multiplier: 50.0,
         });
         r.sort_by_column();
         assert_eq!(r.col, [0, 1]);
@@ -486,6 +521,7 @@ mod tests {
         assert_eq!(r.margin, [true, false]);
         assert_eq!(r.isolated, [true, false]);
         assert_eq!(r.liquidation, [true, false]);
+        assert_eq!(r.multiplier, [50.0, 1.0]);
 
         // A run without leverage keeps none, and sorting leaves it so.
         let mut plain = OrderRecords::new();
@@ -505,6 +541,7 @@ mod tests {
                     margin: k % 2 == 1,
                     isolated: k % 3 == 1,
                     liquidation: k % 2 == 0,
+                    multiplier: (k + 1) as f64,
                 });
             }
             part
@@ -519,6 +556,7 @@ mod tests {
             assert_eq!(merged.isolated.len(), merged.len());
             assert!(merged.isolated[n + 1] && !merged.isolated[n]);
             assert!(merged.liquidation[n] && !merged.liquidation[n + 1]);
+            assert_eq!(merged.multiplier[n + 1], 2.0);
         }
     }
 

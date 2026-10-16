@@ -93,6 +93,13 @@ pub struct FromOrders<'a> {
     /// Whether `initial_margin` is a fraction of the notional or cash per
     /// unit of size.
     pub margin_basis: FlexArray<'a, MarginBasis>,
+    /// What one unit of position is worth per unit of price, such as 50 for
+    /// an E-mini S&P future. A fill moves `size × price × multiplier` of
+    /// cash, and fees, margin and holding charges are on that notional;
+    /// sizes, `min_size` and a per-unit margin stay in contracts. Per column:
+    /// one that changes down a column is an error. `1`, the default, is a
+    /// share. See [`crate::multipliers`].
+    pub multiplier: FlexArray<'a, f64>,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     pub cash_limit: FlexArray<'a, f64>,
     /// Probability that an order is rejected at random, in `[0, 1]`.
@@ -258,8 +265,13 @@ impl FromOrders<'_> {
     /// owed whatever the balance. Decided once for the run, because the
     /// records keep balances for every fill of a run or for none.
     fn levered(&self) -> bool {
-        crate::any_levered(&self.leverage, &self.account_type, self.n_rows, self.n_cols)
-            || !self.rates().all_off()
+        crate::any_levered(
+            &self.leverage,
+            &self.account_type,
+            &self.multiplier,
+            self.n_rows,
+            self.n_cols,
+        ) || !self.rates().all_off()
     }
 }
 
@@ -342,6 +354,7 @@ impl Default for FromOrders<'_> {
             account_type: FlexArray::Scalar(AccountType::Cash),
             initial_margin: FlexArray::Scalar(f64::NAN),
             margin_basis: FlexArray::Scalar(MarginBasis::Notional),
+            multiplier: FlexArray::Scalar(1.0),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,
@@ -555,6 +568,14 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    // Each column's contract multiplier. The copy runs a column at its prices
+    // times it, so its state's valuation price is multiplied too, and writes
+    // the prices it records back unscaled.
+    let mult = if LEV {
+        crate::multipliers(&args.multiplier, args.n_rows, cols.clone())?
+    } else {
+        Vec::new()
+    };
     // Only an account with a margin column and a maintenance margin can be
     // liquidated; scratch for the test, reused across bars.
     let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
@@ -573,7 +594,15 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 &args.cash_dividends,
                 i,
                 cols.clone(),
-                |k| state[k].position,
+                // A dividend per share is paid on every share a contract
+                // holds.
+                |k| {
+                    if LEV {
+                        state[k].position * mult[k]
+                    } else {
+                        state[k].position
+                    }
+                },
                 &mut cash,
                 &mut free_cash,
                 sink,
@@ -613,6 +642,10 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     f64::NAN
                 };
             }
+            if LEV {
+                price[k] = p * mult[k];
+                val_price *= mult[k];
+            }
             if !val_price.is_nan() || !args.ffill_val_price {
                 state[k].last_val_price = val_price;
             }
@@ -637,6 +670,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 &orders,
                 &margin,
                 &isolated,
+                &mult,
                 &mut state,
                 &mut cash,
                 &mut free_cash,
@@ -779,15 +813,25 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             let mut order_id = -1_i64;
             if result.is_filled() {
                 let side = result.side.expect("a filled order always carries a side");
-                sink.push_order(i, col, result.size, result.price, result.fees, side);
                 if LEV {
+                    sink.push_order(
+                        i,
+                        col,
+                        result.size,
+                        result.price / mult[k],
+                        result.fees,
+                        side,
+                    );
                     sink.push_balances(Balances {
                         debt: exec_state.debt,
                         locked_cash: exec_state.locked_cash,
                         margin: margin[k],
                         isolated: isolated[k],
                         liquidation: false,
+                        multiplier: mult[k],
                     });
+                } else {
+                    sink.push_order(i, col, result.size, result.price, result.fees, side);
                 }
                 // The record's own index, so a log joins back to the fill it
                 // produced. Counted rather than read off the sink, because a
@@ -797,7 +841,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             }
 
             if order.order().log {
-                sink.push_log(&LogEntry {
+                let mut entry = LogEntry {
                     group,
                     col,
                     idx: i,
@@ -819,7 +863,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     result,
                     order_id,
                     liquidation: false,
-                });
+                    multiplier: 1.0,
+                };
+                if LEV {
+                    crate::unscale_log(&mut entry, mult[k]);
+                }
+                sink.push_log(&entry);
             }
 
             cash = exec_state.cash;
@@ -868,6 +917,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     debt: state[k].debt,
                     margin: margin[k],
                     val_price: state[k].last_val_price,
+                    multiplier: mult[k],
                 },
                 &mut cash,
                 &mut free_cash,
@@ -898,6 +948,7 @@ fn liquidate<S: RecordSink + LogSink>(
     orders: &[ValidatedOrder],
     margin: &[bool],
     isolated: &[bool],
+    mult: &[f64],
     state: &mut [ColumnState],
     cash: &mut f64,
     free_cash: &mut f64,
@@ -921,6 +972,7 @@ fn liquidate<S: RecordSink + LogSink>(
             basis: args.margin_basis.get(row, cols.start + k),
             val_price: state[k].last_val_price,
             stop: f64::NAN,
+            multiplier: mult[k],
         },
         *cash,
         on_path,
@@ -947,6 +999,7 @@ fn liquidate<S: RecordSink + LogSink>(
             col: cols.start + k,
             template: orders[k].order(),
             isolated: isolated[k],
+            multiplier: mult[k],
         };
         let after = crate::liquidation::fill(&inputs, &at, price, &before, sink, fills)?;
         let returned = after.free_cash - *free_cash;

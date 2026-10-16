@@ -136,6 +136,10 @@ pub struct FromSignals<'a> {
     /// Whether `initial_margin` is a fraction of the notional or cash per
     /// unit of size.
     pub margin_basis: FlexArray<'a, MarginBasis>,
+    /// What one unit of position is worth per unit of price, per column.
+    /// See [`crate::FromOrders::multiplier`]. Stops are levels of the price,
+    /// so a multiplier does not move them.
+    pub multiplier: FlexArray<'a, f64>,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     pub cash_limit: FlexArray<'a, f64>,
     /// Probability that an order is rejected at random, in `[0, 1]`.
@@ -268,6 +272,7 @@ impl Default for FromSignals<'_> {
             account_type: FlexArray::Scalar(AccountType::Cash),
             initial_margin: FlexArray::Scalar(f64::NAN),
             margin_basis: FlexArray::Scalar(MarginBasis::Notional),
+            multiplier: FlexArray::Scalar(1.0),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,
@@ -535,8 +540,13 @@ impl FromSignals<'_> {
     /// Whether the run's accounts may go below zero cash, as in
     /// `from_orders`: leverage, a margin column or a holding charge.
     fn levered(&self) -> bool {
-        crate::any_levered(&self.leverage, &self.account_type, self.n_rows, self.n_cols)
-            || !self.rates().all_off()
+        crate::any_levered(
+            &self.leverage,
+            &self.account_type,
+            &self.multiplier,
+            self.n_rows,
+            self.n_cols,
+        ) || !self.rates().all_off()
     }
 
     /// Resolves the default grouping and validates its width.
@@ -633,6 +643,7 @@ fn prepare_order(
     col: usize,
     state: &mut ColumnState,
     sizes_checked: bool,
+    multiplier: f64,
 ) -> Result<Option<Pending>> {
     let position = state.position;
     let mut stops = state.stops;
@@ -805,7 +816,8 @@ fn prepare_order(
         args.size.get(i, col),
         args.size_type.get(i, col),
         accumulate,
-        val_price_now,
+        // A value reversal is so many contracts' worth.
+        val_price_now * multiplier,
     )?;
 
     state.stops = stops;
@@ -912,6 +924,14 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    // Each column's contract multiplier. Unlike `from_orders`, a column's
+    // state keeps its valuation price unscaled, because the stops read it;
+    // the copy multiplies it where it values, settles, charges or executes.
+    let mult = if LEV {
+        crate::multipliers(&args.multiplier, args.n_rows, cols.clone())?
+    } else {
+        Vec::new()
+    };
     let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
     let mut on_path = Vec::new();
     let mut to_close = Vec::new();
@@ -948,7 +968,8 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         position: states[k].position,
         debt: states[k].debt,
         margin: margin[k],
-        val_price: states[k].last_val_price,
+        val_price: states[k].last_val_price * mult[k],
+        multiplier: mult[k],
     };
     for i in 0..args.n_rows {
         if at_open {
@@ -957,7 +978,15 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 &args.cash_dividends,
                 i,
                 cols.clone(),
-                |k| states[k].position,
+                // A dividend per share is paid on every share a contract
+                // holds.
+                |k| {
+                    if LEV {
+                        states[k].position * mult[k]
+                    } else {
+                        states[k].position
+                    }
+                },
                 &mut cash,
                 &mut free_cash,
                 sink,
@@ -971,7 +1000,8 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         }
         let mut any = false;
         for (k, col) in cols.clone().enumerate() {
-            pending[k] = prepare_order(args, i, col, &mut states[k], sizes_checked)?;
+            let m = if LEV { mult[k] } else { 1.0 };
+            pending[k] = prepare_order(args, i, col, &mut states[k], sizes_checked, m)?;
             any |= pending[k].is_some();
             // Every bar, quiet or not: the profit is the account's whether
             // or not a signal comes.
@@ -980,7 +1010,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 crate::margin::settle(
                     st.position,
                     &mut st.debt,
-                    st.last_val_price,
+                    st.last_val_price * mult[k],
                     &mut cash,
                     &mut free_cash,
                 );
@@ -990,6 +1020,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             let books = Books {
                 margin: &margin,
                 isolated: &isolated,
+                mult: &mult,
                 orders: &orders,
             };
             any = liquidate(
@@ -1037,11 +1068,16 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         let mut group_value = cash;
         for (k, st) in states.iter().enumerate() {
             if LEV && margin[k] {
-                group_value += crate::margin::unsettled(st.position, st.debt, st.last_val_price);
+                group_value +=
+                    crate::margin::unsettled(st.position, st.debt, st.last_val_price * mult[k]);
                 continue;
             }
             if st.position != 0.0 {
-                group_value += st.position * st.last_val_price;
+                group_value += if LEV {
+                    st.position * (st.last_val_price * mult[k])
+                } else {
+                    st.position * st.last_val_price
+                };
             }
             if LEV {
                 group_value -= st.long_debt();
@@ -1059,7 +1095,11 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                             cash,
                             states[k].position,
                             free_cash,
-                            states[k].last_val_price,
+                            if LEV {
+                                states[k].last_val_price * mult[k]
+                            } else {
+                                states[k].last_val_price
+                            },
                             group_value,
                         )
                     });
@@ -1077,14 +1117,21 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             } else {
                 &mut orders[k]
             };
-            order.set_bar(p.size, p.price, p.size_type, p.direction);
+            // The kernel runs a multiplied column at its prices times the
+            // multiplier; the stops and records keep the prices.
+            let m = if LEV { mult[k] } else { 1.0 };
+            if LEV {
+                order.set_bar(p.size, p.price * m, p.size_type, p.direction);
+            } else {
+                order.set_bar(p.size, p.price, p.size_type, p.direction);
+            }
             let col = cols.start + k;
             let mut position = states[k].position;
             let debt = states[k].debt;
             let locked_cash = states[k].locked_cash;
             let val_price_now = states[k].last_val_price;
             let mut stops = states[k].stops;
-            let price = order.order().price;
+            let price = p.price;
             let value = group_value;
             let state = ProcessOrderState {
                 cash,
@@ -1092,7 +1139,11 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 debt,
                 locked_cash,
                 free_cash,
-                val_price: val_price_now,
+                val_price: if LEV {
+                    val_price_now * m
+                } else {
+                    val_price_now
+                },
                 value,
                 oidx: 0,
                 lidx: 0,
@@ -1146,7 +1197,14 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             states[k].debt = exec_state.debt;
             states[k].locked_cash = exec_state.locked_cash;
             free_cash = exec_state.free_cash;
-            states[k].last_val_price = new_val_price;
+            // Re-marked to the fill's price, the price its record keeps.
+            states[k].last_val_price = if !LEV {
+                new_val_price
+            } else if result.is_filled() && args.update_value {
+                result.price / m
+            } else {
+                val_price_now
+            };
             group_value = new_value;
 
             // --- re-arm stops ---------------------------------------------
@@ -1157,7 +1215,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     let anchor = match args.stop_entry_price.get(i, col) {
                         StopEntryPrice::ValPrice => val_price_now,
                         StopEntryPrice::Price => price,
-                        StopEntryPrice::FillPrice => result.price,
+                        StopEntryPrice::FillPrice => {
+                            if LEV {
+                                result.price / m
+                            } else {
+                                result.price
+                            }
+                        }
                         StopEntryPrice::Close => args.close.get(i, col),
                     };
                     let sl = args.sl_stop.get(i, col);
@@ -1198,22 +1262,25 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             let mut order_id = -1_i64;
             if result.is_filled() {
                 let side = result.side.expect("a filled order always carries a side");
-                sink.push_order(i, col, result.size, result.price, result.fees, side);
                 if LEV {
+                    sink.push_order(i, col, result.size, result.price / m, result.fees, side);
                     sink.push_balances(Balances {
                         debt: exec_state.debt,
                         locked_cash: exec_state.locked_cash,
                         margin: margin[k],
                         isolated: isolated[k],
                         liquidation: false,
+                        multiplier: m,
                     });
+                } else {
+                    sink.push_order(i, col, result.size, result.price, result.fees, side);
                 }
                 order_id = *fills;
                 *fills += 1;
             }
 
             if order.order().log {
-                sink.push_log(&LogEntry {
+                let mut entry = LogEntry {
                     group,
                     col,
                     idx: i,
@@ -1235,7 +1302,16 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     result,
                     order_id,
                     liquidation: false,
-                });
+                    multiplier: 1.0,
+                };
+                if LEV {
+                    crate::unscale_log(&mut entry, m);
+                    // The state's prices, exactly, rather than divided back.
+                    entry.val_price = val_price_now;
+                    entry.new_val_price = states[k].last_val_price;
+                    entry.request.price = p.price;
+                }
+                sink.push_log(&entry);
             }
             states[k].position = position;
             states[k].stops = stops;
@@ -1270,6 +1346,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
 struct Books<'b> {
     margin: &'b [bool],
     isolated: &'b [bool],
+    mult: &'b [f64],
     orders: &'b [ValidatedOrder],
 }
 
@@ -1303,7 +1380,7 @@ fn liquidate<S: RecordSink + LogSink>(
     sink: &mut S,
     fills: &mut i64,
 ) -> Result<bool> {
-    let (margin, isolated) = (books.margin, books.isolated);
+    let (margin, isolated, mult) = (books.margin, books.isolated, books.mult);
     let inputs = args.liquidation();
     crate::liquidation::test(
         &inputs,
@@ -1316,8 +1393,9 @@ fn liquidate<S: RecordSink + LogSink>(
             margin: margin[k],
             isolated: isolated[k],
             basis: args.margin_basis.get(row, cols.start + k),
-            val_price: states[k].last_val_price,
+            val_price: states[k].last_val_price * mult[k],
             stop: pending[k].map_or(f64::NAN, |p| p.stop_hit),
+            multiplier: mult[k],
         },
         *cash,
         on_path,
@@ -1332,8 +1410,8 @@ fn liquidate<S: RecordSink + LogSink>(
             debt: st.debt,
             locked_cash: st.locked_cash,
             free_cash: *free_cash,
-            val_price: st.last_val_price,
-            value: group_value(*cash, states, margin),
+            val_price: st.last_val_price * mult[k],
+            value: group_value(*cash, states, margin, mult),
             oidx: 0,
             lidx: 0,
         };
@@ -1343,6 +1421,7 @@ fn liquidate<S: RecordSink + LogSink>(
             col: cols.start + k,
             template: books.orders[k].order(),
             isolated: isolated[k],
+            multiplier: mult[k],
         };
         let after = crate::liquidation::fill(&inputs, &at, price, &before, sink, fills)?;
         let returned = after.free_cash - *free_cash;
@@ -1378,15 +1457,16 @@ fn liquidate<S: RecordSink + LogSink>(
 
 /// What a group is worth at its columns' valuation prices, as the loop
 /// values it before a bar's orders.
-fn group_value(cash: f64, states: &[ColumnState], margin: &[bool]) -> f64 {
+fn group_value(cash: f64, states: &[ColumnState], margin: &[bool], mult: &[f64]) -> f64 {
     let mut value = cash;
     for (k, st) in states.iter().enumerate() {
+        let val_price = st.last_val_price * mult[k];
         if margin[k] {
-            value += crate::margin::unsettled(st.position, st.debt, st.last_val_price);
+            value += crate::margin::unsettled(st.position, st.debt, val_price);
             continue;
         }
         if st.position != 0.0 {
-            value += st.position * st.last_val_price;
+            value += st.position * val_price;
         }
         value -= st.long_debt();
     }

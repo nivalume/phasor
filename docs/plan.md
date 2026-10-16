@@ -29,7 +29,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 |---|---|---:|---:|---:|
 | P | 维护与技术债 | 3 | 0 | 0 |
 | A | 账户模型地基 | 2 | 1 | 1 |
-| B | 现金流、杠杆、合约 | 6 | 0 | 4 |
+| B | 现金流、杠杆、合约 | 7 | 0 | 3 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
 | D | 订单与止损 | 0 | 0 | 9 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
@@ -41,13 +41,13 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **16** | **10** | **53** |
+| **合计** | | **17** | **10** | **52** |
 
 ### 下一步（按优先级）
 
-1. **B6 合约乘数**：保证金账户（C1）、强平（C2）、持仓费和借贷利息（C3、C4）都已完成，期货回测还差每手的点值，现在一手期货的价值就是价格，保证金、持仓费和强平都按它算。
-2. **D1–D2 挂单、限价单**（连同 A3）：PRO 功能里最大的一块空缺。
-3. **C5 剩下的 NautilusTrader 对照**：手算场景和守恒检查已完成，对照要在外部环境里跑。
+1. **D1–D2 挂单、限价单**（连同 A3）：PRO 功能里最大的一块空缺。
+2. **C5 剩下的 NautilusTrader 对照**：手算场景和守恒检查已完成，对照要在外部环境里跑。
+3. **B5 `valuepercent` 和 `*100` 仓位类型**：工作量小，换算链各加一级。
 
 ---
 
@@ -191,10 +191,29 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
   - 为什么：按权益比例下单、用百分数写参数，都是常见用法。
   - 做什么：`SizeType` 加 `ValuePercent`、`Percent100`、`ValuePercent100`、`TargetPercent100`；换算链各加一级。`from_signals` 放开全部仓位类型随 D7 做。
 
-- [ ] **B6 合约乘数 `multiplier`**（M）
+- [x] **B6 合约乘数 `multiplier`**（M）
   - 为什么：期货一点的价值不是 1（例如 ES 每点 50 美元），不乘就算错盈亏和保证金。
-  - 做什么：按列设置；订单价值、现金流、盈亏、持仓市值都乘以它。涉及内核、`series.rs`、`trades.rs`。不处理换月。
-  - 验收：`multiplier = k` 和数量乘以 k 的结果相同（不触发整数粒度时）。
+  - 做了什么：
+    - [x] `multiplier` 按列设置，同一列内不能变；不是有限正数时报错。`from_orders`、`from_signals` 都有。
+    - [x] 内核不改。乘数不为 1 时整次运行走 B4 的 `LEV` 实例（`any_levered` 把它算进去），这份实例把该列按"价格 × 乘数"交给内核，所以成交现金流、手续费、`Value`/`Percent`/目标类数量、按名义价值的保证金、组净值都自动按名义价值算。分红按 `position × multiplier` 股付；持仓费和强平路径的价格也乘上乘数。数量、`min_size`、`size_granularity`、`max_size`、按单位的保证金都按合约计；止损、`price`、`val_price` 是价格，不乘。
+    - [x] 记录：成交记录、日志、交易记录各加 `multiplier` 一列（日志共 46 列）。成交记录和日志里的价格写回原价（除以乘数，乘数为 1 时逐位不变）。`TradeRecords` 的 `pnl` 乘了乘数，`ret` 不变（分母的入场价值也乘了）。
+    - [x] 分析层：每列的乘数从成交记录读出（`series::multipliers`，全为 1 时返回 `None`，重建链不变），成交现金流按 `size × price × multiplier`，持仓市值按 `position × close × multiplier`，保证金列的可用现金同样乘。
+    - [x] Python：`from_orders`、`from_signals` 加 `multiplier=None`，标量或每列一个值，有 `column_map` 时按源列映射。乘数不为 1 时 `orders()` 多出 `multiplier`；`trades()` 和 `logs()` 总有它。
+  - 没做：换月和连续合约；按合约规格表自动取乘数（属于 G 的数据层）；外汇的报价货币换算。
+  - 验收：
+    - 定义性质：乘数为 `k` 的运行等于乘数为 1、按数量下单的订单放大 `k` 倍的运行（数量小 `k` 倍，价格、手续费、余额、现金记录、净值、收益、可用现金、交易盈亏都相同），在两个循环的随机运行上检查，含现金列和保证金列、杠杆、逐仓、共享账户、资金费、分红、强平、止损和 `Value`/`TargetPercent` 数量，`k = 50` 和 `k = 0.1`；串行和多线程一致。手算一手 ES 期货（按单位保证金 12000，每点 50）的净值、可用现金和交易盈亏。非法输入报错。Python 5 组。
+    - 变异检查：去掉强平路径、持仓费、分红、`Value` 反手或分析层市值里的任何一处乘法，测试都会失败。
+    - 和改动前（c2bad21）比，默认参数下 `tests/fixtures/` 的对照测试原样通过。
+  - 性能（功能全关，和 c2bad21 比，单线程）：
+
+    | | `from_orders` | `from_signals` |
+    |---|---:|---:|
+    | 指令数（几何平均，各 workload 区间） | +0.29%（+0.21% ~ +0.34%） | +0.43%（+0.23% ~ +0.49%） |
+    | 时间（交替 10 轮的中位数） | −1.89% | +0.75% |
+
+    多出的指令没有细查来源；时间上在噪声范围内。
+
+  - 位置：`crates/phasor-sim/src/{lib,from_orders,from_signals,liquidation,holding}.rs`，`crates/phasor-records/src/{lib,logs,trades}.rs`，`crates/phasor-analysis/src/{series,portfolio}.rs`，`crates/phasor-py/src/lib.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.9、§9.1、§10.2。测试 `crates/phasor-analysis/tests/multiplier.rs`、`crates/phasor-py/tests/test_multiplier.py`。
 
 - [ ] **B7 负价格**（M）
   - 为什么：2020 年 4 月 WTI 原油期货跌到负价。现在有两处会拒绝非正价格：撮合内核（`kernel.rs` 的价格校验），以及生成交易记录时（`trades.rs`，`pf.trades()` 和 `stats()` 会因此报错）。
@@ -250,7 +269,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
     - 结算和路径无关：单列里不管中间结算几次，最后的现金都一样，所以只看一列测不出没有信号的 K 线有没有结算。测试改成共享账户里两列，第二列开仓的数量取决于第一列在没有信号的 K 线上结算出的盈亏。
     - 现金列在带杠杆的运行里按 B4 记账：现货多头的 `locked_cash` 是自己出的钱，不是 0。同组对冲的测试一开始按 0 写错了预期。
     - `uv sync` 不会重新编译 Python 扩展，改了 Rust 后要 `uv sync --reinstall-package phasor`，否则 pytest 跑的是旧扩展。
-  - 没做：`maintenance_margin`、逐仓、强平（C2）；资金费和隔夜融资（C3）；标记价格（C4）；合约乘数（B6），现在期货一手的价值就是价格；`call_seq="auto"` 按名义价值排序，不按保证金；Python 的 `margin_basis` 只接受标量。
+  - 没做：`maintenance_margin`、逐仓、强平（C2）；资金费和隔夜融资（C3）；标记价格（C4）；合约乘数（B6，已完成）；`call_seq="auto"` 按名义价值排序，不按保证金；Python 的 `margin_basis` 只接受标量。
   - 位置：`crates/phasor-exec/src/{kernel,types,lib}.rs`，`crates/phasor-model/src/enums.rs`，`crates/phasor-records/src/{lib,logs}.rs`，`crates/phasor-sim/src/{margin,from_orders,from_signals,lib}.rs`，`crates/phasor-analysis/src/{series,portfolio}.rs`，`crates/phasor-py/src/{lib,params,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §7.8、§8.4、§9.1、§10.2、§12.3。测试 `crates/phasor-sim/tests/margin.rs`、`crates/phasor-analysis/tests/margin.rs`、`crates/phasor-py/tests/test_order_controls.py`，内核单元测试在 `kernel.rs`，结算的单元测试在 `margin.rs`。
 
 - [x] **C2 强平**（L）
@@ -285,7 +304,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
     - [x] 永续资金费 `funding_rate` 是单独的一个输入（Rust 和 Python 都是），`payment = −position × price × rate`，费率为正时多头付、空头收，记为 `CashRecords(kind=Funding)`。做成单独的输入，而不是在 Python 里把它展开成"空头费率 = −多头费率"，是因为两种费用的记录类型不同，同一次运行里可以一列是永续、一列是 CFD。
     - [x] 收盘结算：在当根订单和 `cash_earnings` 之后，按订单之后的持仓，没有信号的 K 线也结算。持仓费不封顶（`cash_earnings` 的扣款最多扣到可用现金），所以只要用了任一持仓费，整次运行走 B4 的 `const LEV: bool` 实例：现金可以小于 0，之后只能平仓；成交记录带上余额。杠杆为 1 的列成交不变。
     - 移到 G1：`research/phasor_lab` 的 `funding_modeled` 改成真实开关。引擎这边已经能收资金费，缺的是数据：研究模块的数据目录只有 K 线，没有资金费率历史。
-  - 没做：合约乘数（B6），公式里还没有 `multiplier`。
+  - 没做：合约乘数随 B6 加上了，持仓费按 `position × price × multiplier` 计。
   - 位置：`crates/phasor-sim/src/holding.rs`（四种持仓费的计算和单元测试），`crates/phasor-sim/src/{from_orders,from_signals,lib,cash}.rs`，`crates/phasor-model/src/enums.rs`（`CashFlowKind` 加 `Funding`、`Financing`、`Interest`、`BorrowFee`，判别值 3–6）；`ARCHITECTURE.md` §8.6。测试和性能见 C4。
 
 - [x] **C4 标记价格和借贷利息**（M）
@@ -695,7 +714,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `cash_limit` | **有** | B9 |
 | `reject_prob` | **有**（带种子） | B9 |
 | `leverage`、`leverage_mode` | **有** | B4 |
-| `multiplier` | 无 | B6 |
+| `multiplier` | **有** | B6 |
 | 负价格 | 无 | B7 |
 | `cash_sharing`、`group_by` | 有（`group_lens`） | — |
 | `cash_deposits` | **有** | B1 |

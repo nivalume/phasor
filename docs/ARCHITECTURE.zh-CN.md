@@ -564,6 +564,17 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 6. **收盘**：`cash_earnings`，然后持仓费，按订单之后的持仓计算（§8.5、§8.6）。
 
 所以即使止损按开盘价成交，它也在开盘的入金和分红之后：分红付给随后被止损平掉的那笔持仓，和除息日的规则一致；入金已经在这根 K 线下单用的现金里。当根新开的仓，从下一根 K 线开始检查止损和强平，持仓费则从开仓那根的收盘就开始收。
+
+### 8.9 合约乘数
+
+`multiplier` 是一单位持仓每一单位价格值多少钱：E-mini 标普 500 期货是 50，股票是 1（默认）。按列设置，同一列内不能变（`crates/phasor-sim/src/lib.rs` 的 `multipliers` 拒绝列内变化的值，也拒绝非有限或不大于 0 的值）。
+
+- **在哪里乘。** 乘数不为 1 时，运行走 `LEV` 那份实例（`any_levered` 把它算进去），这份实例把乘了乘数的列按"价格 × 乘数"运行。内核不改：拿到 `price × m`，一笔成交的现金流就是 `size × price × m`，手续费、`Value`/`Percent`/目标类数量、按名义价值的保证金和组净值都随之正确。分红按 `position × m` 股支付；持仓费和强平路径把价格乘上乘数（§8.6、§8.7）。
+- **哪些仍按合约或价格计。** 数量、`min_size`、`size_granularity`、`max_size` 和 `Unit` 保证金都按合约计。止损、`price` 和 `val_price` 是价格：`from_signals` 的列状态里估值价不乘乘数，因为止损要读它，在估值、结算、收费、执行时再乘；`from_orders` 的列状态里存的是乘过的。成交记录和日志里写回的是价格（除以 `m`，有舍入误差，乘数为 1 时逐位一致），并带上每笔成交的 `multiplier`。
+- **开销。** 不设乘数的运行没有开销：默认运行根本进不了 `LEV` 那份实例，这份实例本身每个价格只多一次乘法。
+
+`crates/phasor-analysis/tests/multiplier.rs` 在两个循环的随机运行上（现金列和保证金列、杠杆、共享账户、资金费、分红、强平）检查定义性质：乘数为 `k` 的运行，等于乘数为 1、所有按数量下单的订单放大 `k` 倍的运行，数量小 `k` 倍，现金相关的量都相同；另有手算的期货持仓、非法输入和线程数检查。
+
 ---
 
 ## 9. 记录 phasor-records
@@ -574,9 +585,9 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 | 记录 | 字段 | 一行代表 |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side`；成交后的 `debt, locked_cash`，`margin` 和 `isolated`（这列的账户类型和保证金模式），以及 `liquidation`，只在带杠杆或有保证金列的运行里有（否则为空；`push_balances` 用一个 `Balances` 传入） | 一笔成交 |
-| `LogRecords` | 45 个：执行前状态、`req_*`、`new_*`、`res_*`、`order_id`；参考实现的 37 个，加上 `locked_cash`、`new_locked_cash`、`req_leverage`、`req_leverage_mode`、`req_account_type`、`req_initial_margin`、`req_margin_basis`、`liquidation` | 一笔被考虑的订单，或一次强平 |
-| `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | 推导得出（§9.5） |
+| `OrderRecords` | `col, idx, size, price, fees, side`；成交后的 `debt, locked_cash`，`margin` 和 `isolated`（这列的账户类型和保证金模式），`liquidation` 和 `multiplier`（§8.9），只在带杠杆、有保证金列或设了乘数的运行里有（否则为空，此时乘数都是 1；`push_balances` 用一个 `Balances` 传入） | 一笔成交 |
+| `LogRecords` | 46 个：执行前状态、`req_*`、`new_*`、`res_*`、`order_id`；参考实现的 37 个，加上 `locked_cash`、`new_locked_cash`、`req_leverage`、`req_leverage_mode`、`req_account_type`、`req_initial_margin`、`req_margin_basis`、`liquidation`、`multiplier` | 一笔被考虑的订单，或一次强平 |
+| `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id, multiplier`；`pnl` 乘了乘数，`ret` 不受影响 | 推导得出（§9.5） |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | 推导得出（§9.6） |
 | `RangeRecords` | start / end / status | phasor-signals 的区间 |
 | `CashRecords` | `col, idx, amount, kind`；`kind` 是 `Deposit`、`Earning`、`Dividend`（§8.5），或 `Funding`、`Financing`、`Interest`、`BorrowFee`（§8.6），或 `Liquidation`（§8.7） | 一笔不是成交的现金流 |
@@ -632,6 +643,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 - 有入金时，账户总收益改为把每根 K 线的收益连乘，不再用 `end / init − 1`；回撤在 `init_cash × Π(1 + r)` 上计算，不在净值曲线上算，所以出金不算回撤。
 - 杠杆：成交的现金流按全价计，所以 `cash()` 是自有现金减去多头借款，可以小于 0，而 `value()` 仍是权益。空头的保证金随 λ 变化后，`free_cash` 无法只从成交重建，所以带杠杆的运行里 `free_cash_flow` 读取每笔成交记下的 `debt + locked_cash` 作为空头的占用（带杠杆的多头不占用）。因此 2 倍多头的 `gross_exposure` 是 2。
 - 保证金列：成交同样按全价计现金流，所以 `value = cash + position × close` 就是逐根结算累加出来的权益，`value()` 不用改。`free_cash_flow` 把保证金列成交的 `locked_cash` 当作占用，多空都一样；`Portfolio::free_cash` 再把每个保证金列的 `position × close` 加回它的账户，因为账户从没付过这笔钱：可用现金就是权益减已押保证金，和模拟里的数一致。`gross_exposure` 以此为分母，分子按整张合约的市值计。逐仓列的盈亏不是可用现金，所以 `free_cash` 对它加回的是带符号的成本，即它最后一笔成交记下的 `debt`，而不是 `position × close`。强平是一笔成交，穿仓核销是一条现金记录，都不用改。
+- 合约乘数（§8.9）：成交的现金流是 `size × price × multiplier`，持仓市值是 `position × close × multiplier`，每列的乘数从它的成交记录读出（`series::multipliers`；全为 1 时返回 `None`，重建链和以前一样）。`free_cash` 里保证金列加回的 `position × close` 也同样乘上乘数。
 
 ### 10.3 指标
 

@@ -105,6 +105,10 @@ pub struct LogEntry {
     /// Whether the order was a liquidation, placed by the exchange rather
     /// than by the strategy.
     pub liquidation: bool,
+    /// The column's contract multiplier. Prices here are prices, as the
+    /// strategy wrote them; cash and values are cash, so a fill of `size`
+    /// at `price` moved `size × price × multiplier`.
+    pub multiplier: f64,
 }
 
 /// Logs, struct-of-arrays, one row per order considered.
@@ -215,6 +219,8 @@ pub struct LogRecords {
     pub order_id: Vec<i64>,
     /// Whether the order was a liquidation.
     pub liquidation: Vec<bool>,
+    /// The column's contract multiplier.
+    pub multiplier: Vec<f64>,
 }
 
 impl LogRecords {
@@ -267,6 +273,7 @@ impl LogRecords {
             res_status_info: Vec::new(),
             order_id: Vec::new(),
             liquidation: Vec::new(),
+            multiplier: Vec::new(),
         }
     }
 
@@ -353,6 +360,7 @@ impl LogRecords {
             .push(e.result.status_info.map_or(-1, |s| s as i64));
         self.order_id.push(e.order_id);
         self.liquidation.push(e.liquidation);
+        self.multiplier.push(e.multiplier);
     }
 
     /// Appends another set, preserving order.
@@ -406,6 +414,7 @@ impl LogRecords {
             res_status_info,
             order_id,
             liquidation,
+            multiplier,
         );
     }
 
@@ -618,6 +627,7 @@ mod tests {
             result,
             order_id,
             liquidation: false,
+            multiplier: 1.0,
         }
     }
 
@@ -743,7 +753,8 @@ mod tests {
         // The log's value is that nothing about the order is missing from it,
         // so the count is asserted rather than trusted. 38 in the reference,
         // less `id`, which is the record's index here as everywhere, plus
-        // leverage's four, margin's three and the liquidation flag.
+        // leverage's four, margin's three, the liquidation flag and the
+        // contract multiplier.
         let mut logs = LogRecords::new();
         logs.push(&entry(0, 0, filled(), 0));
         let widths = [
@@ -792,12 +803,13 @@ mod tests {
             logs.res_status_info.len(),
             logs.order_id.len(),
             logs.liquidation.len(),
+            logs.multiplier.len(),
         ];
         assert_eq!(
             widths.len(),
-            45,
-            "the reference's 38 fields, less the index, plus leverage's four, margin's three \
-             and the liquidation flag"
+            46,
+            "the reference's 38 fields, less the index, plus leverage's four, margin's three, \
+             the liquidation flag and the contract multiplier"
         );
         assert!(widths.iter().all(|&w| w == 1), "a field was not written");
     }
