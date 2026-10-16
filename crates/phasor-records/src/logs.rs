@@ -102,6 +102,9 @@ pub struct LogEntry {
     pub result: phasor_exec::OrderResult,
     /// Index of the order record this produced, or `-1` if nothing filled.
     pub order_id: i64,
+    /// Whether the order was a liquidation, placed by the exchange rather
+    /// than by the strategy.
+    pub liquidation: bool,
 }
 
 /// Logs, struct-of-arrays, one row per order considered.
@@ -210,6 +213,8 @@ pub struct LogRecords {
     pub res_status_info: Vec<i64>,
     /// The order record this produced, or `-1`.
     pub order_id: Vec<i64>,
+    /// Whether the order was a liquidation.
+    pub liquidation: Vec<bool>,
 }
 
 impl LogRecords {
@@ -261,6 +266,7 @@ impl LogRecords {
             res_status: Vec::new(),
             res_status_info: Vec::new(),
             order_id: Vec::new(),
+            liquidation: Vec::new(),
         }
     }
 
@@ -346,6 +352,7 @@ impl LogRecords {
         self.res_status_info
             .push(e.result.status_info.map_or(-1, |s| s as i64));
         self.order_id.push(e.order_id);
+        self.liquidation.push(e.liquidation);
     }
 
     /// Appends another set, preserving order.
@@ -398,6 +405,7 @@ impl LogRecords {
             res_status,
             res_status_info,
             order_id,
+            liquidation,
         );
     }
 
@@ -542,8 +550,8 @@ impl crate::RecordSink for Journal {
         crate::RecordSink::push_cash(&mut self.orders, row, col, amount, kind);
     }
 
-    fn push_balances(&mut self, debt: f64, locked_cash: f64, margin: bool) {
-        self.orders.push_balances(debt, locked_cash, margin);
+    fn push_balances(&mut self, balances: crate::Balances) {
+        self.orders.push_balances(balances);
     }
 }
 
@@ -609,6 +617,7 @@ mod tests {
             new_value: 1000.0,
             result,
             order_id,
+            liquidation: false,
         }
     }
 
@@ -734,7 +743,7 @@ mod tests {
         // The log's value is that nothing about the order is missing from it,
         // so the count is asserted rather than trusted. 38 in the reference,
         // less `id`, which is the record's index here as everywhere, plus
-        // leverage's four and margin's three.
+        // leverage's four, margin's three and the liquidation flag.
         let mut logs = LogRecords::new();
         logs.push(&entry(0, 0, filled(), 0));
         let widths = [
@@ -782,11 +791,13 @@ mod tests {
             logs.res_status.len(),
             logs.res_status_info.len(),
             logs.order_id.len(),
+            logs.liquidation.len(),
         ];
         assert_eq!(
             widths.len(),
-            44,
-            "the reference's 38 fields, less the index, plus leverage's four and margin's three"
+            45,
+            "the reference's 38 fields, less the index, plus leverage's four, margin's three \
+             and the liquidation flag"
         );
         assert!(widths.iter().all(|&w| w == 1), "a field was not written");
     }

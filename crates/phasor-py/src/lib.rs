@@ -73,7 +73,7 @@ use array::{
     flex_or_bool, flex_or_f64, to_py_err,
 };
 use expr::PyFactorSet;
-use params::{Holding, Shared};
+use params::{Holding, Liquidation, Shared};
 
 /// A completed run, and everything derivable from it.
 ///
@@ -547,10 +547,12 @@ impl PyPortfolio {
     /// a DataFrame from it without a transpose.
     ///
     /// A run with any column above leverage 1, any margin column or any
-    /// holding charge adds `debt`, `locked_cash` and `margin`: what each fill
-    /// left the column owing and tying up of its own cash, and whether the
-    /// column trades on margin. A margin column's `debt` is its position's cost basis and its
-    /// `locked_cash` the initial margin posted. Other runs leave them out
+    /// holding charge adds `debt`, `locked_cash`, `margin`, `isolated` and
+    /// `liquidation`: what each fill left the column owing and tying up of
+    /// its own cash, whether the column trades on margin and on isolated
+    /// margin, and whether the fill was a liquidation. A margin column's
+    /// `debt` is its position's cost basis and its `locked_cash` the initial
+    /// margin posted. Other runs leave them out
     /// rather than return them empty, so every array in the dict has one entry
     /// per fill.
     fn orders<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -569,6 +571,11 @@ impl PyPortfolio {
                 self.orders.locked_cash.clone().into_pyarray(py),
             )?;
             out.set_item("margin", self.orders.margin.clone().into_pyarray(py))?;
+            out.set_item("isolated", self.orders.isolated.clone().into_pyarray(py))?;
+            out.set_item(
+                "liquidation",
+                self.orders.liquidation.clone().into_pyarray(py),
+            )?;
         }
         Ok(out)
     }
@@ -579,8 +586,9 @@ impl PyPortfolio {
     /// earning's charge larger than the free cash is applied in part — so it
     /// can differ from what was passed in. `kind` is 0 for a deposit or
     /// withdrawal, 1 for an earning, 2 for a dividend, 3 for funding, 4 for
-    /// financing, 5 for interest on a long's debt and 6 for a short's borrow
-    /// fee. Rows are in column order, then bar order.
+    /// financing, 5 for interest on a long's debt, 6 for a short's borrow fee
+    /// and 7 for a liquidation's loss written off. Rows are in column order,
+    /// then bar order.
     fn cash_records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let cash = &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash;
         let out = PyDict::new(py);
@@ -596,7 +604,7 @@ impl PyPortfolio {
     /// column, zero where nothing of that kind moved.
     ///
     /// `kind` is `deposit`, `earning`, `dividend`, `funding`, `financing`,
-    /// `interest` or `borrowfee`. Per column even in a shared account, so a
+    /// `interest`, `borrowfee` or `liquidation`. Per column even in a shared account, so a
     /// pair's funding stays with the perpetual that paid or received it.
     ///
     /// # Errors
@@ -619,7 +627,8 @@ impl PyPortfolio {
     /// request. `req_leverage_mode` is 0 for lazy and 1 for eager. And
     /// margin's three, all in the request: `req_account_type` (0 cash, 1
     /// margin), `req_initial_margin` and `req_margin_basis` (0 notional, 1
-    /// unit).
+    /// unit). And `liquidation`, true for a row the exchange's liquidation
+    /// wrote rather than the strategy's order.
     ///
     /// One row per order **considered**, filled or not, which is the difference
     /// from [`Self::orders`] and the whole reason to ask for logs. Without them
@@ -692,6 +701,7 @@ impl PyPortfolio {
         out.set_item("req_allow_partial", l.req_allow_partial.clone())?;
         out.set_item("req_raise_reject", l.req_raise_reject.clone())?;
         out.set_item("req_log", l.req_log.clone())?;
+        out.set_item("liquidation", l.liquidation.clone())?;
         Ok(out)
     }
 
@@ -921,6 +931,40 @@ fn account_types(
         .map(Some)
 }
 
+/// `margin_mode` as one mode per column: `None` keeps the engine's default.
+///
+/// A string applies to every column and a list gives each its own, as for
+/// `account_type`; a cash column ignores it.
+fn margin_modes(
+    value: Option<&Bound<'_, PyAny>>,
+    n_cols: usize,
+) -> PyResult<Option<Vec<phasor_model::MarginMode>>> {
+    let bad = pyo3::exceptions::PyValueError::new_err;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Ok(name) = value.extract::<String>() {
+        let mode = parse::margin_mode(&name).map_err(bad)?;
+        return Ok(Some(vec![mode; n_cols]));
+    }
+    let names: Vec<String> = value.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "margin_mode must be 'cross', 'isolated', or one of them per column",
+        )
+    })?;
+    if names.len() != n_cols {
+        return Err(bad(format!(
+            "margin_mode has {} entries for {n_cols} columns",
+            names.len()
+        )));
+    }
+    names
+        .iter()
+        .map(|name| parse::margin_mode(name).map_err(bad))
+        .collect::<PyResult<_>>()
+        .map(Some)
+}
+
 /// Resolves group capital once, expanding only for the simulator's per-column API.
 fn account_inputs(
     shared: bool,
@@ -1054,6 +1098,9 @@ fn deposits_view<'a>(
     debt_rate = None,
     borrow_rate = None,
     mark_price = None,
+    margin_mode = None,
+    maintenance_margin = None,
+    liquidation_fee = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1119,6 +1166,9 @@ fn from_signals(
     debt_rate: Option<&Bound<'_, PyAny>>,
     borrow_rate: Option<&Bound<'_, PyAny>>,
     mark_price: Option<&Bound<'_, PyAny>>,
+    margin_mode: Option<&Bound<'_, PyAny>>,
+    maintenance_margin: Option<&Bound<'_, PyAny>>,
+    liquidation_fee: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1173,6 +1223,7 @@ fn from_signals(
         borrow_rate,
         mark_price,
     )?;
+    let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
@@ -1200,6 +1251,7 @@ fn from_signals(
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
     let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
     let account_types = account_types(account_type, n_cols)?;
+    let margin_modes = margin_modes(margin_mode, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     if !matches!(
         st,
@@ -1365,6 +1417,23 @@ fn from_signals(
         debt_rate: debt,
         borrow_rate: borrow,
         mark_price: mark,
+        margin_mode: margin_modes.as_ref().map_or(Ok(d.margin_mode), |modes| {
+            FlexArray::per_column(modes, n_cols).map_err(to_py_err)
+        })?,
+        maintenance_margin: flex_or_f64(
+            &lq.maintenance_margin,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.maintenance_margin,
+        )?,
+        liquidation_fee: flex_or_f64(
+            &lq.liquidation_fee,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.liquidation_fee,
+        )?,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -1442,6 +1511,9 @@ fn from_signals(
     close,
     *,
     size = None,
+    open = None,
+    high = None,
+    low = None,
     size_type = "amount",
     price = None,
     direction = "both",
@@ -1474,6 +1546,9 @@ fn from_signals(
     debt_rate = None,
     borrow_rate = None,
     mark_price = None,
+    margin_mode = None,
+    maintenance_margin = None,
+    liquidation_fee = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1494,6 +1569,9 @@ fn from_orders(
     py: Python<'_>,
     close: &Bound<'_, PyAny>,
     size: Option<&Bound<'_, PyAny>>,
+    open: Option<&Bound<'_, PyAny>>,
+    high: Option<&Bound<'_, PyAny>>,
+    low: Option<&Bound<'_, PyAny>>,
     size_type: &str,
     price: Option<&Bound<'_, PyAny>>,
     direction: &str,
@@ -1526,6 +1604,9 @@ fn from_orders(
     debt_rate: Option<&Bound<'_, PyAny>>,
     borrow_rate: Option<&Bound<'_, PyAny>>,
     mark_price: Option<&Bound<'_, PyAny>>,
+    margin_mode: Option<&Bound<'_, PyAny>>,
+    maintenance_margin: Option<&Bound<'_, PyAny>>,
+    liquidation_fee: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1553,6 +1634,9 @@ fn from_orders(
     let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
     let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
     let dividends_b = borrow_opt_f64(cash_dividends, "cash_dividends")?;
+    let open_b = borrow_opt_f64(open, "open")?;
+    let high_b = borrow_opt_f64(high, "high")?;
+    let low_b = borrow_opt_f64(low, "low")?;
     let h = Holding::borrow(
         funding_rate,
         long_financing_rate,
@@ -1561,6 +1645,7 @@ fn from_orders(
         borrow_rate,
         mark_price,
     )?;
+    let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let p = Shared::borrow(
         size,
         price,
@@ -1585,6 +1670,7 @@ fn from_orders(
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
     let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
     let account_types = account_types(account_type, n_cols)?;
+    let margin_modes = margin_modes(margin_mode, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     let trades_type = parse::trades_type(trades).map_err(bad)?;
 
@@ -1640,6 +1726,9 @@ fn from_orders(
         groups: groups.clone(),
         call_seq,
         close: close_view,
+        open: market("open", &open_b, d.open)?,
+        high: market("high", &high_b, d.high)?,
+        low: market("low", &low_b, d.low)?,
         init_cash: FlexArray::per_column(&account_cash, n_cols).map_err(to_py_err)?,
         val_price: flex_or_f64(&val_price_b, n_rows, n_cols, per_col, d.val_price)?,
         direction: FlexArray::Scalar(dir),
@@ -1678,6 +1767,23 @@ fn from_orders(
         debt_rate: debt,
         borrow_rate: borrow,
         mark_price: mark,
+        margin_mode: margin_modes.as_ref().map_or(Ok(d.margin_mode), |modes| {
+            FlexArray::per_column(modes, n_cols).map_err(to_py_err)
+        })?,
+        maintenance_margin: flex_or_f64(
+            &lq.maintenance_margin,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.maintenance_margin,
+        )?,
+        liquidation_fee: flex_or_f64(
+            &lq.liquidation_fee,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.liquidation_fee,
+        )?,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,

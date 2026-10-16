@@ -535,7 +535,8 @@ of line where they would otherwise sit on the hot path.
 | negative cash | invalid state | a long sold below its debt leaves the account owing; the account can sell, and its buys are rejected (`NoCashLeverage` if the order is leveraged, else `NoCashLong`) |
 
 Interest on what a long borrowed and a short's borrow fee are holding charges
-of the loop (§8.6). Not yet: maintenance margin and liquidation (plan C2).
+of the loop (§8.6). Maintenance margin and liquidation apply to margin
+columns only (§8.7); a leveraged cash column is not margin-called yet.
 `CallSeq::Auto` sorts by `approx_order_value`, which does not account for
 leverage.
 
@@ -575,8 +576,8 @@ differently, and `margin_trade` (`kernel.rs`, cold, out of line) fills it:
   its margin anyway.
 - **Negative cash.** Fees come out of cash and a loss can exceed it, so cash may
   go below zero, as in a leveraged account; the account can still close and
-  its openings are rejected. Margin calls and liquidation are not modelled
-  yet (plan C2).
+  its openings are rejected, unless a maintenance margin liquidates it
+  first (§8.7).
 - **Validation.** `param_violation` adds two checks for margin orders:
   `initial_margin` is `NaN` or finite and > 0, and set when the basis is `Unit`.
   `ValidatedOrder` marks a margin order `in_levered_account`.
@@ -584,7 +585,14 @@ differently, and `margin_trade` (`kernel.rs`, cold, out of line) fills it:
 Settlement is the loop's (§8.4), and it is not a cash flow: it moves money
 between the position and the cash without changing the equity, so it leaves
 no record. The analysis rebuilds the same equity from the fills alone (§10.2).
-Isolated margin, maintenance margin and liquidation are plan C2.
+
+`margin_mode` (`Cross`, the default, or `Isolated`, per column for the run)
+says whose margin a position draws on. A cross column is settled as above.
+An isolated column is never settled into the account's cash: its `debt` stays
+the cost basis at entry, its profit or loss stays with the position until it
+closes, and so the account's free cash excludes it, profit and loss alike.
+The kernel trades both the same way. Maintenance margin and liquidation are
+§8.7.
 
 ---
 
@@ -671,6 +679,62 @@ callback.
 - `NaN` or zero is no charge and leaves no record; an infinite rate is an error. The defaults are scalar zeros, detected once per run.
 - Each charge is a `CashRecords` row with the amount applied, so the analysis counts it in cash, free cash, value and returns with nothing new (§10.2). `crates/phasor-analysis/tests/holding.rs` checks that the rebuilt equity is, bar by bar, the value the loop sized against less the bar's fees plus the bar's charges, with leverage, margin columns and shared accounts.
 
+
+### 8.7 Maintenance margin and liquidation
+
+An exchange closes a margin position once the account can no longer carry it
+(`crates/phasor-sim/src/liquidation.rs`). Not in the reference, nor in PRO.
+Every bar, once its prices are resolved and its cross columns settled and
+before anything is valued or ordered, each account with a margin column and a
+`maintenance_margin` is tested on the positions it carried in; a position is
+tested from the bar after it opened, as a stop is.
+
+- **The path.** Each held column moves from its *start*, the bar's open, to
+  its *check* price: `mark_price` where given, else the bar's adverse extreme
+  (the low for a long, the high for a short; missing OHLC falls back to the
+  close). Moved together by `α ∈ [0, 1]`, the equity `E(α) = cash + Σ
+  (position × p(α) − owed)` and the requirement `M(α) = Σ maintenance_margin ×
+  |position| × p(α)` (or `× |position|` per unit, in `margin_basis`) are
+  linear. If `E(1) ≥ M(1)` nothing happens; otherwise the account is
+  liquidated at `α = g(0) / (g(0) − g(1))` with `g = E − M`, or at the open
+  when `g(0) ≤ 0` — a gap. With one position this is the textbook liquidation
+  price.
+- **Cross**: the test is the account's. Cash columns count in the equity and
+  are never closed; every cross column that carries a maintenance margin is
+  closed together, in layout order, each at its own point of the path.
+  Without a mark price each leg of a hedge is tested at its own extreme,
+  which no single instant reaches, so a hedged account wants a mark price.
+- **Isolated**: the test is the column's alone, `E(α) = locked_cash +
+  position × p(α) − owed`, and the account's test leaves its margin and
+  position out.
+- **Stops** (`from_signals`): a stop that fired on the bar was hit on the way,
+  so its column is tested at the less adverse of its check price and the
+  stop's level: a stop inside the liquidation price saves the position, one
+  beyond it does not. A liquidated column's pending order is dropped and its
+  stops cleared, since it was sized against a position that is gone; in
+  `from_orders` the bar's orders still execute, being requests for the bar.
+- **The fill** goes through the kernel as `TargetAmount(0)` at the
+  liquidation price, no slippage, `liquidation_fee × notional` as its fees,
+  flagged `liquidation` in the order records and the logs.
+- **Write-off.** An isolated column whose closing returns less than nothing,
+  or a cross account left with no cross or cash position and less cash than
+  its isolated positions' margin, has lost more than it had: the shortfall is booked back as a positive
+  `CashRecords(kind = Liquidation)`, as an exchange's insurance fund absorbs
+  it. The equity stops at zero and the return at −100%.
+- **Validation.** `maintenance_margin` is `NaN`/0 (none), or finite, ≥ 0 and
+  below 1 under `Notional`; `liquidation_fee` is finite and ≥ 0. Errors name
+  the row and column.
+- **Cost.** `any_levered` already sends margin runs to the `LEV` copy; the
+  test is an out-of-line call behind a flag fixed per group, so a margin run
+  without a maintenance margin does not pay for it, and a run with no margin
+  column has no code for it at all.
+
+`crates/phasor-sim/tests/liquidation.rs` works the cases by hand (the exact
+price, a gap and its write-off, a short at the high, a stop inside and beyond
+the level, a cross account closing together, an isolated column alone and its
+capped loss, a hedge at extremes and at a mark, threads);
+`crates/phasor-analysis/tests/liquidation.rs` checks that the rebuilt equity
+is the loop's on every bar of a run that liquidates and writes off.
 ---
 
 ## 9. Records: phasor-records
@@ -681,12 +745,12 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 
 | Record | Fields | Row = |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill and `margin` (the column's account type), in leveraged or margin runs only (empty otherwise) | one fill |
-| `LogRecords` | 44: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode`, `req_account_type`, `req_initial_margin`, `req_margin_basis` | one order considered |
+| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill, `margin` and `isolated` (the column's account type and margin mode) and `liquidation`, in leveraged or margin runs only (empty otherwise; `push_balances` takes them as one `Balances`) | one fill |
+| `LogRecords` | 45: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode`, `req_account_type`, `req_initial_margin`, `req_margin_basis`, `liquidation` | one order considered, or one liquidation |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | phasor-signals ranges |
-| `CashRecords` | `col, idx, amount, kind`; `kind` is `Deposit`, `Earning`, `Dividend` (§8.5), `Funding`, `Financing`, `Interest` or `BorrowFee` (§8.6) | one cash flow that was not a fill |
+| `CashRecords` | `col, idx, amount, kind`; `kind` is `Deposit`, `Earning`, `Dividend` (§8.5), `Funding`, `Financing`, `Interest`, `BorrowFee` (§8.6) or `Liquidation` (§8.7) | one cash flow that was not a fill |
 
 `CashRecords` travel inside `OrderRecords` as its `cash` field, so sinks
 (`RecordSink::push_cash`), merges, sorting and the `Portfolio` constructors
@@ -755,7 +819,7 @@ groups), `from_orders` / `from_signals` (run the simulation).
 - A deposit is not a return: `returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`, the first bar measured from `init_cash + deposit[0]`. Without deposits the chain is unchanged, bit for bit.
 - With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
 - Leverage: a fill's cash flow is its full price, so `cash()` is own cash less what longs borrowed and can go below zero, while `value()` stays equity. `free_cash` cannot be rebuilt from fills alone once a short's collateral depends on λ, so in a leveraged run `free_cash_flow` reads each fill's recorded `debt + locked_cash` as the short's reserve (a leveraged long reserves nothing). `gross_exposure` of a 2× long is therefore 2.
-- Margin columns: their fills are charged their full price too, so `value = cash + position × close` is the equity the per-bar settlements add up to, and `value()` needs nothing new. `free_cash_flow` reads a margin fill's `locked_cash` as its reserve, on either side, and `Portfolio::free_cash` adds each margin column's `position × close` back into its account, which the account never paid: free cash is then equity less the margin posted, the simulation's own figure. `gross_exposure` counts the whole contract over that.
+- Margin columns: their fills are charged their full price too, so `value = cash + position × close` is the equity the per-bar settlements add up to, and `value()` needs nothing new. `free_cash_flow` reads a margin fill's `locked_cash` as its reserve, on either side, and `Portfolio::free_cash` adds each margin column's `position × close` back into its account, which the account never paid: free cash is then equity less the margin posted, the simulation's own figure. `gross_exposure` counts the whole contract over that. An isolated column's profit is not free, so for it `free_cash` adds back its signed cost basis, the `debt` its last fill recorded, instead of `position × close`. A liquidation is a fill and a write-off a cash record, so neither needs anything new.
 
 ### 10.3 Metrics
 
@@ -1157,6 +1221,8 @@ appears only in the optional `test` extra.
 | rejection | an unfillable order, returned as a status, not an error (§3.5) |
 | margin column / settlement | a column that posts initial margin instead of paying in full / moving its profit into cash each bar (§7.8) |
 | holding charge | funding, financing, interest or a borrow fee charged at a bar's close on the position held (§8.6) |
+| liquidation / write-off | the exchange closing a margin position the account can no longer carry / booking back the loss it cannot pay (§8.7) |
+| cross / isolated | a margin column that draws on the account's equity / only on its own margin (§7.8, §8.7) |
 | factor | a named expression producing a time × symbol matrix (§5) |
 | node / slot | a deduplicated graph operation / its reusable scratch series (§5.3) |
 | `column_map` | logical column → source price column (§3.3) |
@@ -1172,7 +1238,7 @@ appears only in the optional `test` extra.
 | expressions | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | signals, sweeps, indicators | `crates/phasor/src/sweep.rs`, `crates/phasor-signals/src`, `crates/phasor-indicators/src`, `crates/phasor-py/python/phasor/strategy.py` | §6 |
 | execution kernel | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
-| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding}.rs` | §8 |
+| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding,liquidation}.rs` | §8 |
 | records | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | analysis | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
 | Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` (`rates.py`: per-bar rates) | §12 |

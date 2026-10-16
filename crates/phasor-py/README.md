@@ -145,7 +145,8 @@ free cash for its margin and fees, and is refused (`NoCashLong` /
 - `pf.orders()` gains `debt` (the cost basis), `locked_cash` (the margin) and
   `margin` per fill, and the logs gain `req_account_type`,
   `req_initial_margin` and `req_margin_basis`.
-- There is no maintenance margin or liquidation yet.
+- `maintenance_margin` liquidates: see below. `margin_mode="isolated"` keeps a
+  position on its own margin, not settled into the account's cash.
 
 ```python
 # Spot long, perpetual short on 10% margin, one account: at 120 one gains
@@ -155,6 +156,36 @@ size = np.array([[5.0, -5.0], [np.nan, np.nan]])
 pf = phasor.from_orders(close, size=size, init_cash=1_000.0, cash_sharing=True,
                         account_type=["cash", "margin"],
                         initial_margin=np.array([np.nan, 0.1]))
+```
+
+## Liquidation
+
+`maintenance_margin` (in `margin_basis`, like `initial_margin`) makes an
+account liquidate when its equity falls below the maintenance margin of its
+margin positions. Every bar, before its orders, each held column moves from the
+bar's `open` to its adverse extreme (`low` for a long, `high` for a short), or to
+`mark_price` when one is given, and the account is closed where it first
+breaches, or at the open when the bar gaps through. The fill pays
+`liquidation_fee` of its notional and is flagged in `pf.orders()["liquidation"]`
+and in the logs. Without `high` and `low` the test uses the close.
+
+- `margin_mode="cross"` (the default): the account's equity carries every cross
+  position, cash columns count as collateral and are never closed, and the
+  cross positions close together. A hedge tested at each leg's own extreme
+  is liquidated more easily than at any one instant, so give it a mark price.
+- `margin_mode="isolated"`: the position is not settled into the account's
+  cash, is tested on its own margin and can lose no more than it posted.
+- A loss the account cannot pay is written off, as an exchange's insurance fund
+  takes it: `pf.cash_flows("liquidation")`.
+- In `from_signals` a stop that fires on the bar before the liquidation price
+  closes the position first; a liquidated column's pending signal is dropped.
+
+```python
+# A 10x perpetual long on OHLC bars, liquidated at a twentieth of the notional.
+pf = phasor.from_orders(close, size=size, open=open_, high=high, low=low,
+                        account_type="margin", leverage=10.0,
+                        maintenance_margin=0.05, liquidation_fee=0.005)
+pf.orders()["liquidation"].sum()
 ```
 
 ## Holding charges

@@ -20,10 +20,10 @@
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
 use phasor_exec::{
-    AccountType, Direction, LeverageMode, MarginBasis, Order, OrderStatus, ProcessOrderState,
-    SizeType, ValidatedOrder, execute_validated,
+    AccountType, Direction, LeverageMode, MarginBasis, MarginMode, Order, OrderStatus,
+    ProcessOrderState, SizeType, ValidatedOrder, execute_validated,
 };
-use phasor_records::{Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
+use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
 use crate::groups::{CallSeq, Groups, approx_order_value};
 
@@ -42,6 +42,14 @@ pub struct FromOrders<'a> {
     pub init_cash: FlexArray<'a, f64>,
     /// Closing prices. Used to resolve infinite order and valuation prices.
     pub close: FlexArray<'a, f64>,
+    /// Bar opens, highs and lows: the path a liquidation test follows
+    /// through the bar. Read only when a column carries a maintenance
+    /// margin; `NaN`, the default, falls back to the close.
+    pub open: FlexArray<'a, f64>,
+    /// Bar highs, where a short is tested for liquidation.
+    pub high: FlexArray<'a, f64>,
+    /// Bar lows, where a long is tested for liquidation.
+    pub low: FlexArray<'a, f64>,
 
     /// Requested size.
     pub size: FlexArray<'a, f64>,
@@ -141,9 +149,21 @@ pub struct FromOrders<'a> {
     /// The fee per bar for the shares a cash column's short borrowed:
     /// `|position| × price × rate` at the bar's close.
     pub borrow_rate: FlexArray<'a, f64>,
-    /// The price the holding charges are computed at. `NaN`, the default,
-    /// is the bar's close.
+    /// The price the holding charges are computed at, and liquidation is
+    /// tested at. `NaN`, the default, is the bar's close for the charges and
+    /// its adverse extreme for the test.
     pub mark_price: FlexArray<'a, f64>,
+    /// A margin column's maintenance margin, in `margin_basis`: a fraction
+    /// of the notional below 1, or cash per unit of size. `NaN` or zero, the
+    /// default, carries none, and the column is never liquidated. See
+    /// [`crate::liquidation`].
+    pub maintenance_margin: FlexArray<'a, f64>,
+    /// What a liquidation fill pays, as a fraction of its notional, in place
+    /// of the column's fees.
+    pub liquidation_fee: FlexArray<'a, f64>,
+    /// Whether a margin column draws on the account's margin or only its
+    /// own. Per column: one that changes down a column is an error.
+    pub margin_mode: FlexArray<'a, MarginMode>,
 
     /// Carry the last non-`NaN` valuation price forward.
     pub ffill_val_price: bool,
@@ -220,6 +240,19 @@ impl FromOrders<'_> {
         }
     }
 
+    /// The inputs of the liquidation test.
+    fn liquidation(&self) -> crate::liquidation::Inputs<'_, '_> {
+        crate::liquidation::Inputs {
+            maintenance_margin: &self.maintenance_margin,
+            liquidation_fee: &self.liquidation_fee,
+            mark_price: &self.mark_price,
+            open: &self.open,
+            high: &self.high,
+            low: &self.low,
+            close: &self.close,
+        }
+    }
+
     /// Whether the run's accounts may go below zero cash: whether any column
     /// borrows or trades on margin, or any holding charge is on, which is
     /// owed whatever the balance. Decided once for the run, because the
@@ -291,6 +324,9 @@ impl Default for FromOrders<'_> {
             n_cols: 0,
             init_cash: FlexArray::Scalar(100.0),
             close: FlexArray::Scalar(f64::NAN),
+            open: FlexArray::Scalar(f64::NAN),
+            high: FlexArray::Scalar(f64::NAN),
+            low: FlexArray::Scalar(f64::NAN),
             size: FlexArray::Scalar(f64::INFINITY),
             price: FlexArray::Scalar(f64::INFINITY),
             size_type: FlexArray::Scalar(SizeType::Amount),
@@ -323,6 +359,9 @@ impl Default for FromOrders<'_> {
             debt_rate: FlexArray::Scalar(0.0),
             borrow_rate: FlexArray::Scalar(0.0),
             mark_price: FlexArray::Scalar(f64::NAN),
+            maintenance_margin: FlexArray::Scalar(0.0),
+            liquidation_fee: FlexArray::Scalar(0.0),
+            margin_mode: FlexArray::Scalar(MarginMode::Cross),
             ffill_val_price: true,
             update_value: false,
             groups: Groups::ungrouped(0),
@@ -510,6 +549,17 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    // Which are isolated: settled only when they close, and tested alone.
+    let isolated = if LEV {
+        crate::isolated_columns(&args.margin_mode, args.n_rows, cols.clone(), &margin)?
+    } else {
+        Vec::new()
+    };
+    // Only an account with a margin column and a maintenance margin can be
+    // liquidated; scratch for the test, reused across bars.
+    let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
+    let mut on_path = Vec::new();
+    let mut to_close = Vec::new();
     let at_open = FLOWS
         && (!crate::cash::is_off(&args.cash_deposits)
             || !crate::cash::is_off(&args.cash_dividends));
@@ -566,7 +616,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             if !val_price.is_nan() || !args.ffill_val_price {
                 state[k].last_val_price = val_price;
             }
-            if LEV && margin[k] {
+            if LEV && margin[k] && !isolated[k] {
                 let st = &mut state[k];
                 crate::margin::settle(
                     st.position,
@@ -576,6 +626,25 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     &mut free_cash,
                 );
             }
+        }
+
+        // --- liquidation, on the bar's path, before anything is valued -----
+        if liquidates {
+            liquidate(
+                args,
+                group,
+                i,
+                &orders,
+                &margin,
+                &isolated,
+                &mut state,
+                &mut cash,
+                &mut free_cash,
+                &mut on_path,
+                &mut to_close,
+                sink,
+                fills,
+            )?;
         }
 
         // --- the group's value, and the order to execute in ---------------
@@ -712,7 +781,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 let side = result.side.expect("a filled order always carries a side");
                 sink.push_order(i, col, result.size, result.price, result.fees, side);
                 if LEV {
-                    sink.push_balances(exec_state.debt, exec_state.locked_cash, margin[k]);
+                    sink.push_balances(Balances {
+                        debt: exec_state.debt,
+                        locked_cash: exec_state.locked_cash,
+                        margin: margin[k],
+                        isolated: isolated[k],
+                        liquidation: false,
+                    });
                 }
                 // The record's own index, so a log joins back to the fill it
                 // produced. Counted rather than read off the sink, because a
@@ -743,6 +818,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     new_value,
                     result,
                     order_id,
+                    liquidation: false,
                 });
             }
 
@@ -801,6 +877,123 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     }
 
     Ok(())
+}
+
+/// Tests the group for liquidation on bar `row` and closes what fails, after
+/// the bar's prices are resolved and its cross columns settled.
+///
+/// Out of line, and behind a flag fixed for the group: only an account with
+/// a margin column and a maintenance margin reaches it. The bar's own orders
+/// still execute afterwards, against what is left: an order is a request
+/// for the bar, and a liquidation does not cancel it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the group, its bar, its state and the scratch the test reuses"
+)]
+#[inline(never)]
+fn liquidate<S: RecordSink + LogSink>(
+    args: &FromOrders<'_>,
+    group: usize,
+    row: usize,
+    orders: &[ValidatedOrder],
+    margin: &[bool],
+    isolated: &[bool],
+    state: &mut [ColumnState],
+    cash: &mut f64,
+    free_cash: &mut f64,
+    on_path: &mut Vec<crate::liquidation::Held>,
+    to_close: &mut Vec<(usize, f64)>,
+    sink: &mut S,
+    fills: &mut i64,
+) -> Result<()> {
+    let cols = args.groups.range(group);
+    let inputs = args.liquidation();
+    crate::liquidation::test(
+        &inputs,
+        row,
+        cols.clone(),
+        |k| crate::liquidation::Column {
+            position: state[k].position,
+            owed: state[k].owed(margin[k]),
+            locked_cash: state[k].locked_cash,
+            margin: margin[k],
+            isolated: isolated[k],
+            basis: args.margin_basis.get(row, cols.start + k),
+            val_price: state[k].last_val_price,
+            stop: f64::NAN,
+        },
+        *cash,
+        on_path,
+        to_close,
+    )?;
+    let mut cross = false;
+    for &(k, price) in to_close.iter() {
+        let value = group_value(*cash, state, margin);
+        let st = state[k];
+        let before = ProcessOrderState {
+            cash: *cash,
+            position: st.position,
+            debt: st.debt,
+            locked_cash: st.locked_cash,
+            free_cash: *free_cash,
+            val_price: st.last_val_price,
+            value,
+            oidx: 0,
+            lidx: 0,
+        };
+        let at = crate::liquidation::At {
+            group,
+            row,
+            col: cols.start + k,
+            template: orders[k].order(),
+            isolated: isolated[k],
+        };
+        let after = crate::liquidation::fill(&inputs, &at, price, &before, sink, fills)?;
+        let returned = after.free_cash - *free_cash;
+        *cash = after.cash;
+        *free_cash = after.free_cash;
+        state[k].position = after.position;
+        state[k].debt = after.debt;
+        state[k].locked_cash = after.locked_cash;
+        if isolated[k] {
+            // An isolated position loses at most its margin.
+            crate::liquidation::write_off(returned, row, at.col, cash, free_cash, sink);
+        } else {
+            cross = true;
+        }
+    }
+    if cross {
+        crate::liquidation::write_off_account(
+            *cash,
+            state
+                .iter()
+                .zip(isolated)
+                .map(|(st, &iso)| (st.position, st.locked_cash, iso)),
+            row,
+            cols.start,
+            cash,
+            free_cash,
+            sink,
+        );
+    }
+    Ok(())
+}
+
+/// What a group is worth at its columns' valuation prices: the value an
+/// order is sized against, as the loop computes it for a shared group.
+fn group_value(cash: f64, state: &[ColumnState], margin: &[bool]) -> f64 {
+    let mut value = cash;
+    for (k, st) in state.iter().enumerate() {
+        if margin[k] {
+            value += crate::margin::unsettled(st.position, st.debt, st.last_val_price);
+            continue;
+        }
+        if st.position != 0.0 {
+            value += st.position * st.last_val_price;
+        }
+        value -= st.long_debt();
+    }
+    value
 }
 
 /// Rejects a grouping that does not cover the shape.

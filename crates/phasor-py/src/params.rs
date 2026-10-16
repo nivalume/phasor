@@ -125,6 +125,33 @@ impl<'py> Shared<'py> {
     }
 }
 
+/// The borrowed liquidation parameters, which both entry points share: per
+/// column, per bar or a matrix, like the other execution parameters.
+#[derive(Debug)]
+pub struct Liquidation<'py> {
+    /// A margin column's maintenance margin, in `margin_basis`.
+    pub maintenance_margin: Option<Borrowed<'py>>,
+    /// What a liquidation fill pays, as a fraction of its notional.
+    pub liquidation_fee: Option<Borrowed<'py>>,
+}
+
+impl<'py> Liquidation<'py> {
+    /// Reads both, keeping each borrow alive in the returned value.
+    ///
+    /// # Errors
+    ///
+    /// A Python `TypeError` naming the parameter that cannot be read.
+    pub fn borrow(
+        maintenance_margin: Option<&Bound<'py, PyAny>>,
+        liquidation_fee: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        Ok(Self {
+            maintenance_margin: borrow_opt_f64(maintenance_margin, "maintenance_margin")?,
+            liquidation_fee: borrow_opt_f64(liquidation_fee, "liquidation_fee")?,
+        })
+    }
+}
+
 /// The borrowed inputs of the holding charges, which both entry points share.
 ///
 /// Every rate but `debt_rate` belongs to an instrument — a perpetual's funding

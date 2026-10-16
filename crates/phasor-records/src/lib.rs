@@ -68,18 +68,35 @@ pub trait RecordSink {
     /// after any cap, not the amount asked for.
     fn push_cash(&mut self, row: usize, col: usize, amount: f64, kind: CashFlowKind);
 
-    /// Records the balances the last fill left its column with: its debt and
-    /// the own cash its position ties up, and whether the column is a margin
-    /// column, which reads both differently.
+    /// Records the balances the last fill left its column with; see
+    /// [`Balances`].
     ///
     /// Called right after [`push_order`](Self::push_order), and only by a run
     /// that may borrow or trade on margin. Without either, both follow from
     /// the fills — a long owes nothing, a short reserves its proceeds twice —
     /// so such a run does not pay for them. A sink that keeps no balances
     /// ignores the call.
-    fn push_balances(&mut self, debt: f64, locked_cash: f64, margin: bool) {
-        let _ = (debt, locked_cash, margin);
+    fn push_balances(&mut self, balances: Balances) {
+        let _ = balances;
     }
+}
+
+/// What a fill left its column with, beyond the fill itself, in a run that
+/// may borrow or trade on margin.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Balances {
+    /// What the column owes: a long's borrowing, a short's proceeds, or a
+    /// margin column's cost basis.
+    pub debt: f64,
+    /// The own cash the position ties up, or the margin it posted.
+    pub locked_cash: f64,
+    /// Whether the column is a margin column, which reads both differently.
+    pub margin: bool,
+    /// Whether it is an isolated margin column, whose profit is not settled
+    /// into the account's cash.
+    pub isolated: bool,
+    /// Whether the fill was a liquidation rather than an order.
+    pub liquidation: bool,
 }
 
 /// A sink a parallel simulation can allocate per thread and merge afterwards.
@@ -173,6 +190,13 @@ pub struct OrderRecords {
     /// position's cost basis and `locked_cash` its initial margin, on either
     /// side. Empty exactly when `debt` is.
     pub margin: Vec<bool>,
+    /// Whether the fill's column is an isolated margin column, whose profit
+    /// stays with the position rather than settling into the account's cash.
+    /// Empty exactly when `debt` is.
+    pub isolated: Vec<bool>,
+    /// Whether the fill was a liquidation: the exchange closing a position
+    /// the account could no longer carry. Empty exactly when `debt` is.
+    pub liquidation: Vec<bool>,
     /// Cash that moved without a fill: deposits, earnings.
     ///
     /// Carried here rather than beside the fills so that everything which
@@ -197,6 +221,8 @@ impl OrderRecords {
             debt: Vec::new(),
             locked_cash: Vec::new(),
             margin: Vec::new(),
+            isolated: Vec::new(),
+            liquidation: Vec::new(),
             cash: CashRecords::new(),
         }
     }
@@ -214,6 +240,8 @@ impl OrderRecords {
             debt: Vec::new(),
             locked_cash: Vec::new(),
             margin: Vec::new(),
+            isolated: Vec::new(),
+            liquidation: Vec::new(),
             cash: CashRecords::new(),
         }
     }
@@ -250,6 +278,8 @@ impl OrderRecords {
         self.debt.extend_from_slice(&other.debt);
         self.locked_cash.extend_from_slice(&other.locked_cash);
         self.margin.extend_from_slice(&other.margin);
+        self.isolated.extend_from_slice(&other.isolated);
+        self.liquidation.extend_from_slice(&other.liquidation);
         debug_assert!(self.debt.is_empty() || self.debt.len() == self.len());
         self.cash.extend(&other.cash);
     }
@@ -278,7 +308,7 @@ impl OrderRecords {
         }
         reorder!(col, idx, size, price, fees, side);
         if !self.debt.is_empty() {
-            reorder!(debt, locked_cash, margin);
+            reorder!(debt, locked_cash, margin, isolated, liquidation);
         }
     }
 
@@ -310,6 +340,8 @@ impl OrderRecords {
             debt: Vec::new(),
             locked_cash: Vec::new(),
             margin: Vec::new(),
+            isolated: Vec::new(),
+            liquidation: Vec::new(),
             cash: CashRecords::new(),
         };
         // Cash flows are a handful per bar at most; one serial pass is enough.
@@ -320,6 +352,8 @@ impl OrderRecords {
             out.debt.extend_from_slice(&part.debt);
             out.locked_cash.extend_from_slice(&part.locked_cash);
             out.margin.extend_from_slice(&part.margin);
+            out.isolated.extend_from_slice(&part.isolated);
+            out.liquidation.extend_from_slice(&part.liquidation);
         }
         debug_assert!(out.debt.is_empty() || out.debt.len() == total);
         std::thread::scope(|scope| {
@@ -380,10 +414,12 @@ impl RecordSink for OrderRecords {
         self.cash.push(row, col, amount, kind);
     }
 
-    fn push_balances(&mut self, debt: f64, locked_cash: f64, margin: bool) {
-        self.debt.push(debt);
-        self.locked_cash.push(locked_cash);
-        self.margin.push(margin);
+    fn push_balances(&mut self, balances: Balances) {
+        self.debt.push(balances.debt);
+        self.locked_cash.push(balances.locked_cash);
+        self.margin.push(balances.margin);
+        self.isolated.push(balances.isolated);
+        self.liquidation.push(balances.liquidation);
     }
 }
 
@@ -430,14 +466,26 @@ mod tests {
     fn balances_move_with_their_fills() {
         let mut r = OrderRecords::new();
         r.push_order(5, 1, 1.0, 1.0, 0.0, OrderSide::Buy);
-        r.push_balances(10.0, 20.0, false);
+        r.push_balances(Balances {
+            debt: 10.0,
+            locked_cash: 20.0,
+            ..Balances::default()
+        });
         r.push_order(2, 0, 1.0, 1.0, 0.0, OrderSide::Buy);
-        r.push_balances(30.0, 40.0, true);
+        r.push_balances(Balances {
+            debt: 30.0,
+            locked_cash: 40.0,
+            margin: true,
+            isolated: true,
+            liquidation: true,
+        });
         r.sort_by_column();
         assert_eq!(r.col, [0, 1]);
         assert_eq!(r.debt, [30.0, 10.0]);
         assert_eq!(r.locked_cash, [40.0, 20.0]);
         assert_eq!(r.margin, [true, false]);
+        assert_eq!(r.isolated, [true, false]);
+        assert_eq!(r.liquidation, [true, false]);
 
         // A run without leverage keeps none, and sorting leaves it so.
         let mut plain = OrderRecords::new();
@@ -451,7 +499,13 @@ mod tests {
             let mut part = OrderRecords::with_capacity(n);
             for k in 0..n {
                 part.push_order(k, col, 1.0, 1.0, 0.0, OrderSide::Buy);
-                part.push_balances(k as f64, -(k as f64), k % 2 == 1);
+                part.push_balances(Balances {
+                    debt: k as f64,
+                    locked_cash: -(k as f64),
+                    margin: k % 2 == 1,
+                    isolated: k % 3 == 1,
+                    liquidation: k % 2 == 0,
+                });
             }
             part
         };
@@ -462,6 +516,9 @@ mod tests {
             assert_eq!(merged.locked_cash[n + 1], -1.0);
             assert_eq!(merged.margin.len(), merged.len());
             assert!(merged.margin[n + 1] && !merged.margin[n]);
+            assert_eq!(merged.isolated.len(), merged.len());
+            assert!(merged.isolated[n + 1] && !merged.isolated[n]);
+            assert!(merged.liquidation[n] && !merged.liquidation[n + 1]);
         }
     }
 

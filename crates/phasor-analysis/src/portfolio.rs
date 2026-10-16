@@ -582,16 +582,24 @@ impl<'a> Portfolio<'a> {
     /// A margin column's fills are charged their whole price, so its cash
     /// alone is its equity less the position's value, which the account never
     /// paid. Nothing to do on a run without margin columns.
+    ///
+    /// An isolated column's profit is not settled into the account's cash, so
+    /// it is not free: what is added back is its cost basis, the signed `debt`
+    /// its last fill left, which leaves the margin it posted reserved and its
+    /// unrealized profit or loss out.
     fn add_margin_positions(&self, free: &mut Matrix) {
         if !self.orders.margin.contains(&true) {
             return;
         }
         let mut margin = vec![false; self.n_cols];
+        let mut isolated = vec![false; self.n_cols];
         for (r, &on) in self.orders.margin.iter().enumerate() {
-            margin[self.orders.col[r] as usize] |= on;
+            let col = self.orders.col[r] as usize;
+            margin[col] |= on;
+            isolated[col] |= self.orders.isolated.get(r) == Some(&true);
         }
         let assets = self.assets();
-        for col in (0..self.n_cols).filter(|&col| margin[col]) {
+        for col in (0..self.n_cols).filter(|&col| margin[col] && !isolated[col]) {
             let group = self.groups.of_column(col);
             for row in 0..self.n_rows {
                 let position = assets.get(row, col);
@@ -600,6 +608,49 @@ impl<'a> Portfolio<'a> {
                     *cell = add(*cell, position * self.close.get(row, col));
                 }
             }
+        }
+        if isolated.contains(&true) {
+            self.add_isolated_bases(free, &isolated);
+        }
+    }
+
+    /// Adds each isolated column's signed cost basis to its account in `free`,
+    /// carried from each fill to the next.
+    fn add_isolated_bases(&self, free: &mut Matrix, isolated: &[bool]) {
+        let orders = &self.orders;
+        let assets = self.assets();
+        let mut r = 0;
+        while r < orders.len() {
+            let col = orders.col[r] as usize;
+            let end = (r..orders.len())
+                .find(|&k| orders.col[k] as usize != col)
+                .unwrap_or(orders.len());
+            if isolated[col] {
+                let group = self.groups.of_column(col);
+                for k in r..end {
+                    let from = orders.idx[k] as usize;
+                    let to = if k + 1 < end {
+                        orders.idx[k + 1] as usize
+                    } else {
+                        self.n_rows
+                    };
+                    for row in from..to {
+                        let position = assets.get(row, col);
+                        let owed = if position > 0.0 {
+                            orders.debt[k]
+                        } else if position < 0.0 {
+                            -orders.debt[k]
+                        } else {
+                            0.0
+                        };
+                        if owed != 0.0 {
+                            let cell = &mut free.column_mut(group)[row];
+                            *cell = add(*cell, owed);
+                        }
+                    }
+                }
+            }
+            r = end;
         }
     }
 

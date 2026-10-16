@@ -85,6 +85,24 @@ pub enum MarginBasis {
     Unit = 1,
 }
 
+/// Which margin a margin column's position may draw on.
+///
+/// Set per column, for the whole run, like [`AccountType`]; a cash column
+/// ignores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(i8)]
+pub enum MarginMode {
+    /// The account's: the position's profit settles into the account's cash
+    /// every bar, and the account is liquidated as a whole when its equity
+    /// falls below the maintenance margin of its cross positions.
+    #[default]
+    Cross = 0,
+    /// Its own: the position is not settled into the account's cash, is
+    /// liquidated alone when its margin plus its profit falls below its
+    /// maintenance margin, and can lose at most the margin it posted.
+    Isolated = 1,
+}
+
 /// Which side an order executed on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -384,6 +402,11 @@ pub enum CashFlowKind {
     /// The fee for borrowing the shares a cash column's short sold, at the
     /// bar's close: the short's value at the mark price times the rate.
     BorrowFee = 6,
+    /// A loss a liquidation left that the account cannot pay, written off as
+    /// an exchange's insurance fund takes it: positive, and booked when an
+    /// isolated column's margin or a cross account with nothing left open
+    /// would otherwise end below zero.
+    Liquidation = 7,
 }
 
 #[cfg(test)]
@@ -406,6 +429,8 @@ mod tests {
         assert_eq!(CashFlowKind::Financing as i8, 4);
         assert_eq!(CashFlowKind::Interest as i8, 5);
         assert_eq!(CashFlowKind::BorrowFee as i8, 6);
+        assert_eq!(CashFlowKind::Liquidation as i8, 7);
+        assert_eq!(MarginMode::Isolated as i8, 1);
         assert_eq!(AccountType::Margin as i8, 1);
         assert_eq!(MarginBasis::Unit as i8, 1);
     }

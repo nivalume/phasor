@@ -10,8 +10,8 @@
 //! tested without a Python interpreter; the caller wraps the message.
 
 use phasor_model::{
-    AccountType, AccumulationMode, CashFlowKind, Direction, LeverageMode, MarginBasis, SizeType,
-    StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
+    AccountType, AccumulationMode, CashFlowKind, Direction, LeverageMode, MarginBasis, MarginMode,
+    SizeType, StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -100,9 +100,25 @@ pub fn cash_flow_kind(name: &str) -> Result<CashFlowKind, String> {
         "financing" => Ok(CashFlowKind::Financing),
         "interest" => Ok(CashFlowKind::Interest),
         "borrowfee" => Ok(CashFlowKind::BorrowFee),
+        "liquidation" => Ok(CashFlowKind::Liquidation),
         other => Err(format!(
-            "kind must be deposit, earning, dividend, funding, financing, interest or \
-             borrowfee; got {other:?}"
+            "kind must be deposit, earning, dividend, funding, financing, interest, borrowfee \
+             or liquidation; got {other:?}"
+        )),
+    }
+}
+
+/// Which margin a margin column draws on.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn margin_mode(name: &str) -> Result<MarginMode, String> {
+    match name {
+        "cross" => Ok(MarginMode::Cross),
+        "isolated" => Ok(MarginMode::Isolated),
+        other => Err(format!(
+            "margin_mode must be 'cross' or 'isolated'; got {other:?}"
         )),
     }
 }
@@ -264,7 +280,18 @@ mod tests {
             cash_flow_kind("borrowfee").unwrap(),
             CashFlowKind::BorrowFee
         );
+        assert_eq!(
+            cash_flow_kind("liquidation").unwrap(),
+            CashFlowKind::Liquidation
+        );
         assert!(cash_flow_kind("Funding").is_err());
+    }
+
+    #[test]
+    fn every_margin_mode_maps_to_its_own_variant() {
+        assert_eq!(margin_mode("cross").unwrap(), MarginMode::Cross);
+        assert_eq!(margin_mode("isolated").unwrap(), MarginMode::Isolated);
+        assert!(margin_mode("Isolated").is_err());
     }
 
     #[test]

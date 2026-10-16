@@ -438,7 +438,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 | 做空 | 冻结卖出所得 + 市值 | 冻结卖出所得 + `市值 / λ`（λ = 2 就是 Reg T 的 150%）；`lock_cash` 或按百分比下单时，数量上限是 `(free_cash − fixed_fees) / (price × (1/λ + fees))` |
 | 现金为负 | 非法状态 | 多头卖出所得不够还债时账户欠款；账户还能卖出，买单被拒（订单带杠杆为 `NoCashLeverage`，否则 `NoCashLong`） |
 
-多头借款的利息和空头的借券费是循环收的持仓费（§8.6）。还没有做：维持保证金和强平（计划 C2）。`CallSeq::Auto` 按 `approx_order_value` 排序，它没有考虑杠杆。
+多头借款的利息和空头的借券费是循环收的持仓费（§8.6）。维持保证金和强平只适用于保证金列（§8.7），带杠杆的现金列还没有追保。`CallSeq::Auto` 按 `approx_order_value` 排序，它没有考虑杠杆。
 
 ### 7.8 保证金账户
 
@@ -455,10 +455,12 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 - **押多少。** `initial_margin` 是每开一单位押的保证金，单位由 `margin_basis` 定：`Notional`（默认）是成交价名义价值的比例，`NaN`（默认）表示 `1 / leverage`，所以只设 `leverage = 10` 就是 10 倍永续；`Unit` 是每单位数量的固定现金，即期货交易所按手公布的保证金，必须给出。保证金在成交时确定，之后改参数只影响之后的成交。两个参数都可以逐根 K 线变化。
 - **能开多少。** 平仓总是允许。开仓上限是 `(free_cash + freed − fixed_fees) / (每单位保证金 + price × fees)`，`freed` 是平掉整个反向持仓会实现的盈亏和释放的保证金，所以反手可以用上它；`cash_limit` 限制这笔预算，`percent` 取"可平 + 可开"的比例。没有可用现金时开仓被拒（`NoCashLong` / `NoCashShort`）；`LongOnly`、`ShortOnly` 对另一边只能平仓（`NoOpenPosition`）。`leverage_mode` 和 `lock_cash` 不起作用：不借钱，而且每个持仓本来就冻结保证金。
-- **负现金。** 手续费从现金付，亏损也可能超过现金，所以现金可以小于 0，和带杠杆的账户一样；账户仍能平仓，开仓被拒。追保和强平还没有做（计划 C2）。
+- **负现金。** 手续费从现金付，亏损也可能超过现金，所以现金可以小于 0，和带杠杆的账户一样；账户仍能平仓，开仓被拒；设了维持保证金时会先被强平（§8.7）。
 - **校验。** `param_violation` 对保证金订单多查两项：`initial_margin` 是 `NaN` 或有限且 > 0，`Unit` 时必须给出。`ValidatedOrder` 把保证金订单标为 `in_levered_account`。
 
-结算由循环做（§8.4），它不是现金流：只在持仓和现金之间挪钱，不改变权益，所以不留记录。分析层只用成交就能重建同样的权益（§10.2）。逐仓、维持保证金和强平是计划 C2。
+结算由循环做（§8.4），它不是现金流：只在持仓和现金之间挪钱，不改变权益，所以不留记录。分析层只用成交就能重建同样的权益（§10.2）。
+
+`margin_mode`（`Cross`，默认；或 `Isolated`，按列设置、整次运行不变）决定持仓用谁的保证金。全仓列按上面的方式结算。逐仓列从不把盈亏结算进账户现金：`debt` 一直是开仓时的成本，盈亏留在持仓里直到平仓，所以账户的可用现金不含它的盈亏，盈利和亏损都不含。内核对两者的处理相同。维持保证金和强平见 §8.7。
 
 ---
 
@@ -534,6 +536,21 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - `NaN` 或 0 表示不收，不留记录；无穷大的费率报错。默认值是标量 0，每次运行只判断一次。
 - 每笔持仓费都是一条 `CashRecords`，存实际入账的金额，所以分析层不用改就会把它算进现金、可用现金、净值和收益（§10.2）。`crates/phasor-analysis/tests/holding.rs` 逐根检查：重建出来的权益等于循环定下单量时用的净值，减去当根手续费，加上当根持仓费；覆盖杠杆、保证金列和共享账户。
 
+
+### 8.7 维持保证金和强平
+
+账户撑不住保证金持仓时，交易所会把它平掉（`crates/phasor-sim/src/liquidation.rs`）。参考实现没有，PRO 也没有。每根 K 线在价格确定、全仓列结算之后，在任何估值和下单之前，对每个有保证金列且设了 `maintenance_margin` 的账户，按它带进这根 K 线的持仓做一次检查；新开的仓从下一根 K 线开始检查，和止损一样。
+
+- **路径。** 每个有持仓的列从*起点*（这根 K 线的开盘价）走到*检查价*：给了 `mark_price` 就用它，否则用这根 K 线的不利极值（多头取最低价，空头取最高价；缺 OHLC 时用收盘价）。各列按同一个比例 `α ∈ [0, 1]` 一起走，权益 `E(α) = cash + Σ (position × p(α) − owed)` 和维持保证金 `M(α) = Σ maintenance_margin × |position| × p(α)`（按单位时是 `× |position|`，由 `margin_basis` 定）都是 `α` 的线性函数。`E(1) ≥ M(1)` 时什么也不发生；否则在 `α = g(0) / (g(0) − g(1))`（`g = E − M`）处强平，`g(0) ≤ 0` 时在开盘价强平，即跳空。只有一个持仓时，这就是通常说的强平价。
+- **全仓**：检查整个账户。现金列计入权益，但从不被平；带维持保证金的全仓列一起平掉，按布局顺序，各自在路径上自己的那一点成交。没有标记价格时，对冲的两条腿各按自己的极值检查，而这两个极值不会在同一时刻出现，所以对冲账户应该给标记价格。
+- **逐仓**：只检查这一列，`E(α) = locked_cash + position × p(α) − owed`；账户的检查不计它的保证金和持仓。
+- **止损**（`from_signals`）：当根 K 线触发的止损是在走向极值的路上碰到的，所以这一列按检查价和止损价二者中较有利的那个检查：止损在强平价之内，止损先成交；止损在强平价之外，救不了。被强平的列当根待执行的订单作废、止损清空，因为订单是按已经不存在的持仓算的；`from_orders` 里当根订单照常执行，因为每个元素就是这根 K 线的一笔请求。
+- **成交**：经内核以 `TargetAmount(0)` 在强平价成交，不加滑点，手续费为 `liquidation_fee × 名义价值`，成交记录和日志里标为 `liquidation`。
+- **穿仓核销。** 逐仓列平仓后拿回的钱小于 0，或全仓账户平仓后没有全仓列和现金列的持仓、现金又少于逐仓持仓押着的保证金，说明亏损超过了账户能付的：差额按现金减逐仓保证金算，逐仓的保证金仍归逐仓持仓。差额作为一条正数的 `CashRecords(kind = Liquidation)` 记回去，就像交易所的风险保障基金承担了它。权益停在 0，收益率为 −100%。
+- **校验。** `maintenance_margin` 为 `NaN` 或 0（不设），或者有限、≥ 0，`Notional` 时小于 1；`liquidation_fee` 有限且 ≥ 0。报错写明行和列。
+- **开销。** 保证金运行本来就由 `any_levered` 送进 `LEV` 那份实例；检查是不内联的函数调用，由每个账户组固定的标志控制，所以没设维持保证金的保证金运行不为它付代价，没有保证金列的运行里根本没有这段代码。
+
+`crates/phasor-sim/tests/liquidation.rs` 手算各种情形（精确的强平价、跳空和穿仓核销、空头按最高价、止损在强平价之内和之外、全仓账户一起平、逐仓列单独平以及亏损封顶、对冲按极值和按标记价格、线程数）；`crates/phasor-analysis/tests/liquidation.rs` 在有强平和穿仓核销的运行上逐根检查重建出的权益等于循环里的权益。
 ---
 
 ## 9. 记录 phasor-records
@@ -544,12 +561,12 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 | 记录 | 字段 | 一行代表 |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side`；成交后的 `debt, locked_cash` 和 `margin`（这列的账户类型），只在带杠杆或有保证金列的运行里有（否则为空） | 一笔成交 |
-| `LogRecords` | 44 个：执行前状态、`req_*`、`new_*`、`res_*`、`order_id`；参考实现的 37 个，加上 `locked_cash`、`new_locked_cash`、`req_leverage`、`req_leverage_mode`、`req_account_type`、`req_initial_margin`、`req_margin_basis` | 一笔被考虑的订单 |
+| `OrderRecords` | `col, idx, size, price, fees, side`；成交后的 `debt, locked_cash`，`margin` 和 `isolated`（这列的账户类型和保证金模式），以及 `liquidation`，只在带杠杆或有保证金列的运行里有（否则为空；`push_balances` 用一个 `Balances` 传入） | 一笔成交 |
+| `LogRecords` | 45 个：执行前状态、`req_*`、`new_*`、`res_*`、`order_id`；参考实现的 37 个，加上 `locked_cash`、`new_locked_cash`、`req_leverage`、`req_leverage_mode`、`req_account_type`、`req_initial_margin`、`req_margin_basis`、`liquidation` | 一笔被考虑的订单，或一次强平 |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | 推导得出（§9.5） |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | 推导得出（§9.6） |
 | `RangeRecords` | start / end / status | phasor-signals 的区间 |
-| `CashRecords` | `col, idx, amount, kind`；`kind` 是 `Deposit`、`Earning`、`Dividend`（§8.5），或 `Funding`、`Financing`、`Interest`、`BorrowFee`（§8.6） | 一笔不是成交的现金流 |
+| `CashRecords` | `col, idx, amount, kind`；`kind` 是 `Deposit`、`Earning`、`Dividend`（§8.5），或 `Funding`、`Financing`、`Interest`、`BorrowFee`（§8.6），或 `Liquidation`（§8.7） | 一笔不是成交的现金流 |
 
 `CashRecords` 作为 `OrderRecords` 的 `cash` 字段存放，所以 sink（`RecordSink::push_cash`）、合并、排序和 `Portfolio` 的构造函数不用新增接口就会带上它；`len()` 和 `ids()` 只数成交。
 
@@ -601,7 +618,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 - 入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`，第一根 K 线从 `init_cash + deposit[0]` 算起。没有入金时重建链不变，逐位一致。
 - 有入金时，账户总收益改为把每根 K 线的收益连乘，不再用 `end / init − 1`；回撤在 `init_cash × Π(1 + r)` 上计算，不在净值曲线上算，所以出金不算回撤。
 - 杠杆：成交的现金流按全价计，所以 `cash()` 是自有现金减去多头借款，可以小于 0，而 `value()` 仍是权益。空头的保证金随 λ 变化后，`free_cash` 无法只从成交重建，所以带杠杆的运行里 `free_cash_flow` 读取每笔成交记下的 `debt + locked_cash` 作为空头的占用（带杠杆的多头不占用）。因此 2 倍多头的 `gross_exposure` 是 2。
-- 保证金列：成交同样按全价计现金流，所以 `value = cash + position × close` 就是逐根结算累加出来的权益，`value()` 不用改。`free_cash_flow` 把保证金列成交的 `locked_cash` 当作占用，多空都一样；`Portfolio::free_cash` 再把每个保证金列的 `position × close` 加回它的账户，因为账户从没付过这笔钱：可用现金就是权益减已押保证金，和模拟里的数一致。`gross_exposure` 以此为分母，分子按整张合约的市值计。
+- 保证金列：成交同样按全价计现金流，所以 `value = cash + position × close` 就是逐根结算累加出来的权益，`value()` 不用改。`free_cash_flow` 把保证金列成交的 `locked_cash` 当作占用，多空都一样；`Portfolio::free_cash` 再把每个保证金列的 `position × close` 加回它的账户，因为账户从没付过这笔钱：可用现金就是权益减已押保证金，和模拟里的数一致。`gross_exposure` 以此为分母，分子按整张合约的市值计。逐仓列的盈亏不是可用现金，所以 `free_cash` 对它加回的是带符号的成本，即它最后一笔成交记下的 `debt`，而不是 `position × close`。强平是一笔成交，穿仓核销是一条现金记录，都不用改。
 
 ### 10.3 指标
 
@@ -943,6 +960,8 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 | 拒单 | 无法成交的订单，以状态返回而不是错误（§3.5） |
 | 保证金列 / 结算 | 只押初始保证金、不付全款的列 / 每根 K 线把它的盈亏挪进现金（§7.8） |
 | 持仓费 | K 线收盘按持仓收付的资金费、隔夜融资、借款利息或借券费（§8.6） |
+| 强平 / 穿仓核销 | 交易所平掉账户撑不住的保证金持仓 / 把账户付不起的亏损记回去（§8.7） |
+| 全仓 / 逐仓 | 用账户权益 / 只用自己保证金的保证金列（§7.8、§8.7） |
 | 因子 | 产生"时间 × 标的"矩阵的具名表达式（§5） |
 | 节点 / 槽位 | 图中去重后的运算 / 可复用的暂存序列（§5.3） |
 | `column_map` | 逻辑列 → 源价格列（§3.3） |
@@ -958,7 +977,7 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 | 表达式 | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | 信号、扫描、指标 | `crates/phasor/src/sweep.rs`、`crates/phasor-signals/src`、`crates/phasor-indicators/src`、`crates/phasor-py/python/phasor/strategy.py` | §6 |
 | 撮合内核 | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
-| 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding}.rs` | §8 |
+| 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding,liquidation}.rs` | §8 |
 | 记录 | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | 分析 | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
 | Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/`（`rates.py`：每根 K 线的费率） | §12 |

@@ -40,13 +40,14 @@
 //! portfolio there is a single unit of work, which is inherent — a shared cash
 //! balance is a sequential dependency across the whole group.
 
-use phasor_model::AccountType;
+use phasor_model::{AccountType, MarginMode};
 
 mod cash;
 pub mod from_orders;
 pub mod from_signals;
 pub mod groups;
 mod holding;
+mod liquidation;
 mod margin;
 mod random;
 pub mod signals;
@@ -135,6 +136,31 @@ pub(crate) fn margin_columns(
         Ok(first == AccountType::Margin)
     })
     .collect()
+}
+
+/// Which of the columns `cols` are isolated margin columns, given which are
+/// margin columns at all: a cash column's `margin_mode` means nothing.
+///
+/// A property of the column for the whole run, like its account type.
+pub(crate) fn isolated_columns(
+    margin_mode: &phasor_core::flex::FlexArray<'_, MarginMode>,
+    n_rows: usize,
+    cols: std::ops::Range<usize>,
+    margin: &[bool],
+) -> phasor_core::error::Result<Vec<bool>> {
+    cols.enumerate()
+        .map(|(k, col)| {
+            let first = margin_mode.get(0, col);
+            if margin_mode.varies_by_row() && (1..n_rows).any(|i| margin_mode.get(i, col) != first)
+            {
+                return Err(phasor_core::error::Error::Invariant(format!(
+                    "margin_mode changes down column {col}; a margin column is cross or \
+                     isolated for the whole run"
+                )));
+            }
+            Ok(margin[k] && first == MarginMode::Isolated)
+        })
+        .collect()
 }
 
 /// The smallest fill the reference accepts by default.

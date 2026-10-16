@@ -283,6 +283,18 @@ def _account_type(value):
     return names
 
 
+def _margin_mode(value):
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        names = list(value)
+    except TypeError:
+        names = None
+    if names is None or not all(isinstance(name, str) for name in names):
+        raise TypeError("margin_mode must be 'cross', 'isolated', or one of them per column")
+    return names
+
+
 def _column_map(value):
     if value is None:
         return None
@@ -341,6 +353,9 @@ def from_signals(
     debt_rate=None,
     borrow_rate=None,
     mark_price=None,
+    margin_mode=None,
+    maintenance_margin=None,
+    liquidation_fee=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -363,7 +378,8 @@ def from_signals(
         Logical run column -> source market column. Close and OHLC stay (T, S);
         signals and trading parameters use (T, len(column_map)).
     open, high, low
-        The rest of the bar. Only needed for stops, and **required** for them:
+        The rest of the bar. Needed for stops and for an intrabar liquidation
+        test, and **required** for stops:
         a stop level is tested against the bar's range, so without ``high`` and
         ``low`` no stop can fire and the run would silently report a stopless
         strategy. Passing ``sl_stop`` or ``tp_stop`` without them is an error
@@ -390,7 +406,7 @@ def from_signals(
     log
         ``True`` to record why every order ended the way it did, or a
         ``(n_bars, n_cols)`` mask to log one column or one row. Off by default:
-        a log row is 45 fields against an order record's 7, written for every
+        a log row is 46 fields against an order record's 7, written for every
         order *considered* rather than every one filled. Read them back with
         ``pf.logs()``, ``pf.log_reasons()`` and ``pf.reason_counts(col)``.
     raise_reject
@@ -514,6 +530,27 @@ def from_signals(
         financing but no interest or borrow fee. ``pf.cash_flows("funding")``,
         ``"financing"``, ``"interest"`` and ``"borrowfee"`` give what each
         cost per bar and column; all are part of the return.
+    margin_mode, maintenance_margin, liquidation_fee
+        Liquidation of margin columns. ``maintenance_margin`` (in
+        ``margin_basis``: a fraction of the notional below 1, or cash per unit;
+        ``None`` or 0 carries none and never liquidates) is tested on every bar
+        before its orders, along a path from the bar's open to its adverse
+        extreme — the low for a long, the high for a short — or to
+        ``mark_price`` where one is given. An account whose equity falls
+        below the maintenance margin is closed where its path first crosses
+        it, or at the open when it gaps through, paying ``liquidation_fee`` of
+        the notional instead of its fees. ``margin_mode`` is ``"cross"`` (the
+        default: the account's equity carries every cross position and they
+        close together; cash columns count as collateral and are never closed)
+        or ``"isolated"`` (the position is not settled into the account's
+        cash, is tested on its own margin alone and can lose no more than it
+        posted), a string for every column or one per column. A loss a flat
+        cross account or an isolated position cannot pay is written off, as an
+        exchange's insurance fund takes it: ``pf.cash_flows("liquidation")``.
+        Fills that were liquidations are flagged in ``pf.orders()`` and
+        ``pf.logs()`` (``liquidation``). Without ``high`` and ``low`` the test
+        uses the close. Each leg of a hedge reaches its own extreme, so a
+        hedged account wants a mark price, if only the close.
 
     Returns
     -------
@@ -568,6 +605,9 @@ def from_signals(
         debt_rate=_param(debt_rate, "debt_rate"),
         borrow_rate=_market(borrow_rate, "borrow_rate"),
         mark_price=_market(mark_price, "mark_price"),
+        margin_mode=_margin_mode(margin_mode),
+        maintenance_margin=_param(maintenance_margin, "maintenance_margin"),
+        liquidation_fee=_param(liquidation_fee, "liquidation_fee"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,
@@ -586,6 +626,9 @@ def from_orders(
     close,
     size=None,
     *,
+    open=None,
+    high=None,
+    low=None,
     size_type="amount",
     price=None,
     direction="both",
@@ -618,6 +661,9 @@ def from_orders(
     debt_rate=None,
     borrow_rate=None,
     mark_price=None,
+    margin_mode=None,
+    maintenance_margin=None,
+    liquidation_fee=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -648,6 +694,10 @@ def from_orders(
     close
         ``(n_bars, n_cols)``, or 1-D for a single column. Sets the shape, and
         resolves the ``inf`` sentinel in ``price`` and ``val_price``.
+    open, high, low
+        The rest of the bar, shaped like ``close``. Only read by the
+        liquidation test, which follows a path from the open to the bar's
+        adverse extreme; without them it tests the close.
     size
         What to order on each bar. A number, one value per column, or a full
         matrix. Default ``inf`` — as much as the cash allows, which with the
@@ -763,6 +813,27 @@ def from_orders(
         financing but no interest or borrow fee. ``pf.cash_flows("funding")``,
         ``"financing"``, ``"interest"`` and ``"borrowfee"`` give what each
         cost per bar and column; all are part of the return.
+    margin_mode, maintenance_margin, liquidation_fee
+        Liquidation of margin columns. ``maintenance_margin`` (in
+        ``margin_basis``: a fraction of the notional below 1, or cash per unit;
+        ``None`` or 0 carries none and never liquidates) is tested on every bar
+        before its orders, along a path from the bar's open to its adverse
+        extreme — the low for a long, the high for a short — or to
+        ``mark_price`` where one is given. An account whose equity falls
+        below the maintenance margin is closed where its path first crosses
+        it, or at the open when it gaps through, paying ``liquidation_fee`` of
+        the notional instead of its fees. ``margin_mode`` is ``"cross"`` (the
+        default: the account's equity carries every cross position and they
+        close together; cash columns count as collateral and are never closed)
+        or ``"isolated"`` (the position is not settled into the account's
+        cash, is tested on its own margin alone and can lose no more than it
+        posted), a string for every column or one per column. A loss a flat
+        cross account or an isolated position cannot pay is written off, as an
+        exchange's insurance fund takes it: ``pf.cash_flows("liquidation")``.
+        Fills that were liquidations are flagged in ``pf.orders()`` and
+        ``pf.logs()`` (``liquidation``). Without ``high`` and ``low`` the test
+        uses the close. Each leg of a hedge reaches its own extreme, so a
+        hedged account wants a mark price, if only the close.
 
     Returns
     -------
@@ -772,6 +843,9 @@ def from_orders(
     return _phasor.from_orders(
         _matrix(close, "close"),
         size=_param(size, "size"),
+        open=None if open is None else _matrix(open, "open"),
+        high=None if high is None else _matrix(high, "high"),
+        low=None if low is None else _matrix(low, "low"),
         size_type=size_type,
         price=_param(price, "price"),
         direction=direction,
@@ -804,6 +878,9 @@ def from_orders(
         debt_rate=_param(debt_rate, "debt_rate"),
         borrow_rate=_market(borrow_rate, "borrow_rate"),
         mark_price=_market(mark_price, "mark_price"),
+        margin_mode=_margin_mode(margin_mode),
+        maintenance_margin=_param(maintenance_margin, "maintenance_margin"),
+        liquidation_fee=_param(liquidation_fee, "liquidation_fee"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,
