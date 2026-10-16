@@ -626,11 +626,18 @@ fn margin_trade(
     };
 
     let buying = size > 0.0;
-    let adj_price = if buying {
-        price * (1.0 + order.slippage)
+    let adj_price = if price > 0.0 {
+        if buying {
+            price * (1.0 + order.slippage)
+        } else {
+            price * (1.0 - order.slippage)
+        }
     } else {
-        price * (1.0 - order.slippage)
+        against(price, buying, order.slippage)
     };
+    // Fees and margin are on the price's size, which for a price above 0 is
+    // the price itself, bit for bit.
+    let size_price = adj_price.abs();
     let held = state.position.abs();
     // The part of the position this order runs against.
     let closable = if state.position != 0.0 && (state.position > 0.0) != buying {
@@ -672,7 +679,7 @@ fn margin_trade(
             } else {
                 state.debt - proceeds
             };
-            pnl + state.locked_cash - proceeds * order.fees
+            pnl + state.locked_cash - closable * size_price * order.fees
         } else {
             0.0
         };
@@ -681,7 +688,7 @@ fn margin_trade(
             -order.fixed_fees,
         );
         if budget > 0.0 {
-            budget / (unit_margin(order, adj_price) + adj_price * order.fees)
+            budget / (unit_margin(order, size_price) + size_price * order.fees)
         } else if closable == 0.0 {
             return reject(StatusInfo::CantCoverFees);
         } else {
@@ -728,7 +735,7 @@ fn margin_trade(
     let new_position = add(state.position, if buying { fill } else { -fill });
     let closed = fill.min(closable);
     let opened = fill - closed;
-    let fees_paid = fill * adj_price * order.fees + order.fixed_fees;
+    let fees_paid = fill * size_price * order.fees + order.fixed_fees;
 
     // Closing realizes the closed part's profit and releases its margin. A
     // close that leaves nothing of the old position takes all of both, so no
@@ -758,7 +765,7 @@ fn margin_trade(
         (0.0, 0.0, state.debt, state.locked_cash)
     };
     // Opening adds its cost basis and posts its margin.
-    let posted = opened * unit_margin(order, adj_price);
+    let posted = opened * unit_margin(order, size_price);
 
     Ok((
         ExecuteOrderState {
@@ -770,6 +777,123 @@ fn margin_trade(
                 state.free_cash,
                 (realized + released) - (fees_paid + posted),
             ),
+        },
+        OrderResult::filled(
+            fill,
+            adj_price,
+            fees_paid,
+            if buying {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            },
+        ),
+    ))
+}
+
+/// A price of 0 or below moved against a trade by `slippage`: up for a buy,
+/// down for a sell, by a fraction of its size.
+fn against(price: f64, buying: bool, slippage: f64) -> f64 {
+    if buying {
+        price + price.abs() * slippage
+    } else {
+        price - price.abs() * slippage
+    }
+}
+
+/// A cash column's trade at a price of 0 or below (`allow_negative_price`):
+/// a buy, or a sell of what the column holds, sized in units.
+///
+/// A buy at a price below 0 is paid to take the position; a sell pays to be
+/// rid of it. Either is refused for want of cash when the cash and fees it
+/// takes exceed the free cash, as a buy above 0 is. Shorting, leverage and a
+/// size in percent need a price above 0.
+#[cold]
+#[inline(never)]
+fn signed_price_trade(
+    state: ExecuteOrderState,
+    size: f64,
+    price: f64,
+    order: &Order,
+    percent: f64,
+) -> Result<Leg> {
+    let reject = |info| Ok((state, OrderResult::not_filled(OrderStatus::Rejected, info)));
+    if !percent.is_nan() || !size.is_finite() {
+        return Err(Error::Invariant(
+            "a price of 0 or below needs a size in units, not in percent or infinite".into(),
+        ));
+    }
+    if order.leverage > 1.0 {
+        return Err(Error::Invariant(
+            "a price of 0 or below in a cash column needs leverage 1".into(),
+        ));
+    }
+    if size == 0.0 {
+        return Ok((
+            state,
+            OrderResult::not_filled(OrderStatus::Ignored, StatusInfo::SizeZero),
+        ));
+    }
+    let buying = size > 0.0;
+    let shorts = if buying {
+        state.position < 0.0
+    } else {
+        // A long-only sell of more than is held sells what is held.
+        order.direction != Direction::LongOnly && is_less(state.position, size.abs())
+    };
+    if shorts {
+        return Err(Error::Invariant(
+            "a cash column cannot short, or cover a short, at a price of 0 or below".into(),
+        ));
+    }
+    if order.direction == Direction::ShortOnly || (!buying && state.position <= 0.0) {
+        return reject(StatusInfo::NoOpenPosition);
+    }
+    let mut fill = size.abs();
+    if !buying {
+        fill = fill.min(state.position);
+    }
+    if fill > order.max_size {
+        if !order.allow_partial {
+            return reject(StatusInfo::MaxSizeExceeded);
+        }
+        fill = order.max_size;
+    }
+    if !order.size_granularity.is_nan() {
+        fill = floor_to(fill, order.size_granularity);
+    }
+    if is_close(fill, 0.0) {
+        return Ok((
+            state,
+            OrderResult::not_filled(OrderStatus::Ignored, StatusInfo::SizeZero),
+        ));
+    }
+    if is_less(fill, order.min_size) {
+        return reject(StatusInfo::MinSizeNotReached);
+    }
+    let adj_price = against(price, buying, order.slippage);
+    let fees_paid = fill * adj_price.abs() * order.fees + order.fixed_fees;
+    // What the trade takes out of the cash: a buy's cost, a sell's negative
+    // proceeds, and the fees.
+    let outflow = if buying {
+        fill * adj_price
+    } else {
+        -fill * adj_price
+    } + fees_paid;
+    if outflow > 0.0 && !is_close_or_less(outflow, state.free_cash.min(order.cash_limit)) {
+        return reject(if buying {
+            StatusInfo::NoCashLong
+        } else {
+            StatusInfo::CantCoverFees
+        });
+    }
+    Ok((
+        ExecuteOrderState {
+            cash: add(state.cash, -outflow),
+            position: add(state.position, if buying { fill } else { -fill }),
+            debt: state.debt,
+            locked_cash: state.locked_cash,
+            free_cash: add(state.free_cash, -outflow),
         },
         OrderResult::filled(
             fill,
@@ -816,13 +940,15 @@ fn validate_bar(
     // classification of the float, about 17 instructions on aarch64, and
     // this runs on every bar.
     if !(state.debt + state.locked_cash).is_finite() || state.debt.min(state.locked_cash) < 0.0 {
-        balance_violation(state)?;
+        balance_violation(state, order)?;
     }
     if state.free_cash.is_nan() {
         return bail("free_cash cannot be NaN");
     }
 
-    if !order.price.is_finite() || order.price <= 0.0 {
+    if (!order.price.is_finite() || order.price <= 0.0)
+        && !(order.allow_negative_price && order.price.is_finite())
+    {
         return bail("order.price must be finite and greater than 0");
     }
     if order.direction == Direction::LongOnly && position < 0.0 {
@@ -839,8 +965,10 @@ fn validate_bar(
 /// more than the largest float, which this lets through.
 #[cold]
 #[inline(never)]
-fn balance_violation(state: &ExecuteOrderState) -> Result<()> {
-    if !state.debt.is_finite() || state.debt < 0.0 {
+fn balance_violation(state: &ExecuteOrderState, order: &Order) -> Result<()> {
+    // A margin position opened below 0 has a cost basis below 0.
+    let signed_basis = order.allow_negative_price && order.account_type == AccountType::Margin;
+    if !state.debt.is_finite() || (state.debt < 0.0 && !signed_basis) {
         return Err(Error::Invariant(
             "debt must be finite and 0 or greater".into(),
         ));
@@ -1215,6 +1343,9 @@ pub fn execute_validated(
 
     if order.account_type == AccountType::Margin {
         return margin_trade(exec_state, order_size, order.price, order, percent);
+    }
+    if order.price <= 0.0 {
+        return signed_price_trade(exec_state, order_size, order.price, order, percent);
     }
     // Note zero and NaN both take the sell branch, as in the reference.
     if order_size > 0.0 {
@@ -1941,5 +2072,107 @@ mod tests {
         assert_eq!(sign(f64::NAN), 0.0);
         // Which matters because this is what it feeds:
         assert!((sign(0.0) * f64::INFINITY).is_nan());
+    }
+
+    #[test]
+    fn a_price_below_zero_is_a_price_only_when_allowed() {
+        let start = flat();
+        let buy = Order {
+            size: 1.0,
+            price: -20.0,
+            fees: 0.01,
+            allow_negative_price: true,
+            ..Default::default()
+        };
+        // Paid 20 to take it, less a fee on the price's size.
+        let (state, result) = execute_order(&start, &buy, None).unwrap();
+        assert_eq!(
+            (state.cash, state.free_cash, state.position),
+            (119.8, 119.8, 1.0)
+        );
+        assert_eq!((result.price, result.fees), (-20.0, 0.2));
+        // Slippage is against the trade: a buy pays more, here less received.
+        let slipped = Order {
+            slippage: 0.1,
+            fees: 0.0,
+            ..buy
+        };
+        let (_, result) = execute_order(&start, &slipped, None).unwrap();
+        assert_eq!(result.price, -18.0);
+        assert!(
+            execute_order(
+                &start,
+                &Order {
+                    allow_negative_price: false,
+                    ..buy
+                },
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            execute_order(
+                &start,
+                &Order {
+                    size_type: SizeType::Percent,
+                    ..buy
+                },
+                None
+            )
+            .is_err()
+        );
+        // A cash column cannot short below zero.
+        assert!(execute_order(&start, &Order { size: -1.0, ..buy }, None).is_err());
+        // A sell of what is held, at a price below 0, pays to be rid of it.
+        let held = ProcessOrderState {
+            position: 1.0,
+            ..start
+        };
+        let sell = Order {
+            size: -1.0,
+            fees: 0.0,
+            ..buy
+        };
+        let (state, _) = execute_order(&held, &sell, None).unwrap();
+        assert_eq!((state.cash, state.position), (80.0, 0.0));
+    }
+
+    #[test]
+    fn a_margin_position_below_zero_has_a_cost_basis_below_zero() {
+        let start = flat();
+        let short = Order {
+            size: -2.0,
+            price: -10.0,
+            slippage: 0.1,
+            account_type: AccountType::Margin,
+            initial_margin: 0.1,
+            allow_negative_price: true,
+            ..Default::default()
+        };
+        // Sold at -11: margin on its size, 2 × 11 × 0.1.
+        let (state, result) = execute_order(&start, &short, None).unwrap();
+        assert_eq!(result.price, -11.0);
+        assert_eq!((state.position, state.debt), (-2.0, -22.0));
+        assert!((state.locked_cash - 2.2).abs() < 1e-12);
+        assert!((state.free_cash - 97.8).abs() < 1e-12);
+        // Bought back at -15: 4 a contract made on the short.
+        let after = ProcessOrderState {
+            cash: state.cash,
+            position: state.position,
+            debt: state.debt,
+            locked_cash: state.locked_cash,
+            free_cash: state.free_cash,
+            ..start
+        };
+        let cover = Order {
+            size: 2.0,
+            price: -15.0,
+            slippage: 0.0,
+            ..short
+        };
+        let (state, _) = execute_order(&after, &cover, None).unwrap();
+        assert_eq!(state.position, 0.0);
+        assert!((state.cash - 108.0).abs() < 1e-9);
+        assert!((state.free_cash - 108.0).abs() < 1e-9);
     }
 }

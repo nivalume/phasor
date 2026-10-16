@@ -609,7 +609,8 @@ impl PyPortfolio {
     /// column, zero where nothing of that kind moved.
     ///
     /// `kind` is `deposit`, `earning`, `dividend`, `funding`, `financing`,
-    /// `interest`, `borrowfee` or `liquidation`. Per column even in a shared account, so a
+    /// `interest`, `borrowfee`, `liquidation` or `initialposition`. Per column even in a
+    /// shared account, so a
     /// pair's funding stays with the perpetual that paid or received it.
     ///
     /// # Errors
@@ -1116,6 +1117,9 @@ fn deposits_view<'a>(
     initial_margin = None,
     margin_basis = "notional",
     multiplier = None,
+    init_position = None,
+    init_price = None,
+    allow_negative_price = false,
     price_type = None,
     from_ago = None,
     bid_price = None,
@@ -1211,6 +1215,9 @@ fn from_signals(
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
+    init_position: Option<&Bound<'_, PyAny>>,
+    init_price: Option<&Bound<'_, PyAny>>,
+    allow_negative_price: bool,
     price_type: Option<&str>,
     from_ago: Option<&Bound<'_, PyAny>>,
     bid_price: Option<&Bound<'_, PyAny>>,
@@ -1321,6 +1328,8 @@ fn from_signals(
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
+    let init_position_b = borrow_opt_f64(init_position, "init_position")?;
+    let init_price_b = borrow_opt_f64(init_price, "init_price")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
     let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
     let from_ago_b = from_ago
@@ -1556,6 +1565,21 @@ fn from_signals(
             OneDim::PerColumn,
             d.multiplier,
         )?,
+        init_position: flex_or_f64(
+            &init_position_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.init_position,
+        )?,
+        init_price: flex_or_f64(
+            &init_price_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.init_price,
+        )?,
+        allow_negative_price,
         price_type,
         from_ago: match &from_ago_b {
             Some(v) => array::flex_count(v, n_rows, n_cols)?,
@@ -1743,6 +1767,9 @@ fn from_signals(
     initial_margin = None,
     margin_basis = "notional",
     multiplier = None,
+    init_position = None,
+    init_price = None,
+    allow_negative_price = false,
     price_type = None,
     from_ago = None,
     bid_price = None,
@@ -1808,6 +1835,9 @@ fn from_orders(
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
+    init_position: Option<&Bound<'_, PyAny>>,
+    init_price: Option<&Bound<'_, PyAny>>,
+    allow_negative_price: bool,
     price_type: Option<&str>,
     from_ago: Option<&Bound<'_, PyAny>>,
     bid_price: Option<&Bound<'_, PyAny>>,
@@ -1874,6 +1904,8 @@ fn from_orders(
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
+    let init_position_b = borrow_opt_f64(init_position, "init_position")?;
+    let init_price_b = borrow_opt_f64(init_price, "init_price")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
     let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
     let from_ago_b = from_ago
@@ -2006,6 +2038,21 @@ fn from_orders(
             OneDim::PerColumn,
             d.multiplier,
         )?,
+        init_position: flex_or_f64(
+            &init_position_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.init_position,
+        )?,
+        init_price: flex_or_f64(
+            &init_price_b,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.init_price,
+        )?,
+        allow_negative_price,
         price_type,
         from_ago: match &from_ago_b {
             Some(v) => array::flex_count(v, n_rows, n_cols)?,

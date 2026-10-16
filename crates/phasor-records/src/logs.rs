@@ -601,6 +601,7 @@ mod tests {
             allow_partial: true,
             raise_reject: false,
             log: true,
+            allow_negative_price: false,
         }
     }
 

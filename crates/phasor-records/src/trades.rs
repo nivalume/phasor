@@ -95,7 +95,8 @@ fn trade_stats(
         val_diff = -val_diff;
     }
     let pnl = val_diff - entry_fees - exit_fees;
-    (pnl, pnl / entry_val)
+    // The entry's size: a price below 0 still makes a return of a cost.
+    (pnl, pnl / entry_val.abs())
 }
 
 impl TradeRecords {
@@ -301,9 +302,12 @@ fn check_order(orders: &OrderRecords, i: usize) -> Result<()> {
             "found an order record with size 0 or less".into(),
         ));
     }
-    if orders.price[i] <= 0.0 {
+    let price = orders.price[i];
+    if !price.is_finite() || (price <= 0.0 && !orders.allow_negative_price) {
         return Err(Error::Invariant(
-            "found an order record with price 0 or less".into(),
+            "found an order record with a price that is not finite, or 0 or less in a run \
+             without allow_negative_price"
+                .into(),
         ));
     }
     Ok(())
@@ -376,7 +380,8 @@ fn flush_entry_trades(
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] if the records violate the ordering contract
-/// or contain a non-positive size or price.
+/// or contain a size that is not above 0, or a price that is not finite (or
+/// is 0 or less without `allow_negative_price`).
 pub fn entry_trades(
     orders: &OrderRecords,
     close: &FlexArray<'_, f64>,
@@ -957,11 +962,18 @@ mod tests {
     }
 
     #[test]
-    fn a_non_positive_price_is_rejected() {
+    fn a_price_that_is_not_finite_is_rejected_and_one_below_zero_is_a_price() {
         let mut o = OrderRecords::new();
-        o.push_order(0, 0, 1.0, 0.0, 0.0, OrderSide::Buy);
+        o.push_order(0, 0, 1.0, f64::NAN, 0.0, OrderSide::Buy);
         assert!(exit_trades(&o, &close(), 2, 1).is_err());
         assert!(entry_trades(&o, &close(), 2, 1).is_err());
+        // Bought at -20, sold at 10: 30 made on an entry worth 20.
+        let mut o = OrderRecords::new();
+        o.allow_negative_price = true;
+        o.push_order(0, 0, 1.0, -20.0, 0.0, OrderSide::Buy);
+        o.push_order(1, 0, 1.0, 10.0, 0.0, OrderSide::Sell);
+        let t = exit_trades(&o, &close(), 2, 1).unwrap();
+        assert_eq!((t.pnl[0], t.ret[0]), (30.0, 1.5));
     }
 
     #[test]

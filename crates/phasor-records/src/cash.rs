@@ -94,10 +94,12 @@ impl CashRecords {
         reorder!(col, idx, amount, kind);
     }
 
-    /// Whether the flow at `i` is a deposit or withdrawal.
+    /// Whether the flow at `i` is capital brought in or taken out rather
+    /// than earned: a deposit or withdrawal, or an initial position's cost.
     #[must_use]
     pub fn is_deposit(&self, i: usize) -> bool {
         self.kind[i] == CashFlowKind::Deposit as i8
+            || self.kind[i] == CashFlowKind::InitialPosition as i8
     }
 }
 

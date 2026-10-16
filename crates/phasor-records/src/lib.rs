@@ -136,6 +136,9 @@ pub trait SinkBuffer: RecordSink + logs::LogSink + Send + Sized {
     /// merging is the sink's business rather than the loop's. Takes the
     /// buffers by value so a single one is returned as it is.
     fn merge(parts: Vec<Self>) -> Self;
+
+    /// The fills, to mark what the run allowed.
+    fn records_mut(&mut self) -> &mut OrderRecords;
 }
 
 impl SinkBuffer for OrderRecords {
@@ -148,6 +151,10 @@ impl SinkBuffer for OrderRecords {
             return parts.pop().expect("one part");
         }
         Self::concat(&parts)
+    }
+
+    fn records_mut(&mut self) -> &mut OrderRecords {
+        self
     }
 }
 
@@ -170,6 +177,10 @@ impl SinkBuffer for logs::Journal {
             return parts.pop().expect("one part");
         }
         Self::concat(&parts)
+    }
+
+    fn records_mut(&mut self) -> &mut OrderRecords {
+        &mut self.orders
     }
 }
 
@@ -225,6 +236,10 @@ pub struct OrderRecords {
     /// for a cash flow. `len`, `ids` and every per-fill accessor count fills
     /// only.
     pub cash: CashRecords,
+    /// Whether the run took prices of 0 or below as prices
+    /// (`allow_negative_price`), which the trade views then accept. Records
+    /// without it hold such a price only by mistake, as in the reference.
+    pub allow_negative_price: bool,
 }
 
 impl OrderRecords {
@@ -245,6 +260,7 @@ impl OrderRecords {
             liquidation: Vec::new(),
             multiplier: Vec::new(),
             cash: CashRecords::new(),
+            allow_negative_price: false,
         }
     }
 
@@ -265,6 +281,7 @@ impl OrderRecords {
             liquidation: Vec::new(),
             multiplier: Vec::new(),
             cash: CashRecords::new(),
+            allow_negative_price: false,
         }
     }
 
@@ -312,6 +329,7 @@ impl OrderRecords {
         self.multiplier.extend_from_slice(&other.multiplier);
         debug_assert!(self.debt.is_empty() || self.debt.len() == self.len());
         self.cash.extend(&other.cash);
+        self.allow_negative_price |= other.allow_negative_price;
     }
 
     /// Puts the records into column-major order: by column, then by row.
@@ -374,6 +392,7 @@ impl OrderRecords {
             liquidation: Vec::new(),
             multiplier: Vec::new(),
             cash: CashRecords::new(),
+            allow_negative_price: parts.iter().any(|p| p.allow_negative_price),
         };
         // Cash flows are a handful per bar at most; one serial pass is enough.
         // Balances exist only in a leveraged run, which is rare enough that

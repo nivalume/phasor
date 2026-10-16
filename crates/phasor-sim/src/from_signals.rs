@@ -80,6 +80,14 @@ pub struct FromSignals<'a> {
     pub n_cols: usize,
     /// Starting cash; a shared group uses its first column's value once.
     pub init_cash: FlexArray<'a, f64>,
+    /// Units held before the first bar, per column (negative: short); 0 is
+    /// none. See [`crate::initial`].
+    pub init_position: FlexArray<'a, f64>,
+    /// What the initial position was opened at; `NaN` is the first close.
+    pub init_price: FlexArray<'a, f64>,
+    /// Whether prices of 0 or below are prices, as a futures contract's can
+    /// be: see [`phasor_exec::Order::allow_negative_price`]. Off by default.
+    pub allow_negative_price: bool,
 
     /// Bar opens. Used for stop gaps and for the `-inf` price sentinel.
     pub open: FlexArray<'a, f64>,
@@ -333,6 +341,9 @@ impl Default for FromSignals<'_> {
             n_rows: 0,
             n_cols: 0,
             init_cash: FlexArray::Scalar(100.0),
+            init_position: FlexArray::Scalar(0.0),
+            init_price: FlexArray::Scalar(f64::NAN),
+            allow_negative_price: false,
             open: FlexArray::Scalar(f64::NAN),
             high: FlexArray::Scalar(f64::NAN),
             low: FlexArray::Scalar(f64::NAN),
@@ -754,6 +765,7 @@ fn build_order(
         allow_partial: args.allow_partial.get(i, col),
         raise_reject: args.raise_reject.get(i, col),
         log: args.log.get(i, col),
+        allow_negative_price: args.allow_negative_price,
     });
     if levered {
         order.in_levered_account()
@@ -1534,6 +1546,26 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    if crate::initial::any(&args.init_position, cols.clone()) {
+        let inputs = crate::initial::Columns {
+            orders: &orders,
+            margin: &margin,
+            isolated: &isolated,
+            mult: &mult,
+        };
+        crate::initial::open(
+            &args.init_position,
+            &args.init_price,
+            &args.close,
+            cols.clone(),
+            &inputs,
+            &mut states,
+            &mut cash,
+            &mut free_cash,
+            sink,
+            fills,
+        )?;
+    }
     // Whether any of the group's columns uses anything beyond the
     // reference's pipeline (see `prepare_order`); without, no bar has code
     // for it.
@@ -2144,6 +2176,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromSignals<'_>) -> Result<S> {
     for group in 0..groups.len() {
         simulate_group(args, &groups, group, levered, &mut sink, &mut fills)?;
     }
+    sink.records_mut().allow_negative_price = args.allow_negative_price;
     Ok(sink)
 }
 
@@ -2249,7 +2282,9 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
     for result in results {
         parts.push(result?);
     }
-    Ok(S::merge(parts))
+    let mut merged = S::merge(parts);
+    merged.records_mut().allow_negative_price = args.allow_negative_price;
+    Ok(merged)
 }
 
 #[cfg(test)]

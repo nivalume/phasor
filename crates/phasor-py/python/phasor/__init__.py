@@ -43,6 +43,8 @@ from . import (
     _timing,
     data,
     events,
+    futures,
+    fx,
     labels,
     rates,
     resolution,
@@ -63,6 +65,8 @@ __all__ = [
     "alpha360",
     "data",
     "events",
+    "futures",
+    "fx",
     "labels",
     "rates",
     "resolution",
@@ -301,6 +305,60 @@ class _TimeArgs:
         return m
 
 
+_CASH_FREE_SIZES = {"amount", "value", "targetamount", "targetvalue"}
+
+
+def _cash_needed(pf: Any) -> np.ndarray:
+    """Each account's most cash out of pocket over the run, from its records:
+    the lowest its cash ever went below where it started, or 0."""
+    n_rows, n_cols = pf.n_rows, pf.n_cols
+    flow = np.zeros((n_rows, n_cols))
+    o = pf.orders()
+    mult = o.get("multiplier", 1.0)
+    sign = np.where(o["side"] == 0, -1.0, 1.0)
+    np.add.at(flow, (o["idx"], o["col"]), sign * o["size"] * o["price"] * mult - o["fees"])
+    c = pf.cash_records()
+    np.add.at(flow, (c["idx"], c["col"]), c["amount"])
+    lens = list(pf.group_lens()) if pf.cash_sharing else [1] * n_cols
+    starts = np.concatenate([[0], np.cumsum(lens)[:-1]]).astype(np.intp)
+    accounts = np.add.reduceat(flow, starts, axis=1)
+    lowest = np.minimum.accumulate(np.cumsum(accounts, axis=0), axis=0)[-1] if n_rows else 0.0
+    return np.maximum(-lowest, 0.0)
+
+
+def _auto_cash(run: Any, args: dict) -> Any:
+    """``init_cash="auto"``/``"autoalign"``: see the entry points' docs."""
+    mode = args["init_cash"]
+    if mode not in ("auto", "autoalign"):
+        raise ValueError(f"init_cash must be a number, an array, 'auto' or 'autoalign'; got {mode!r}")
+    size_types = args.get("size_type", "amount")
+    names = [size_types] if isinstance(size_types, str) else list(size_types)
+    if not set(names) <= _CASH_FREE_SIZES:
+        raise ValueError(
+            f"init_cash={mode!r} needs sizes that do not depend on the cash "
+            f"({', '.join(sorted(_CASH_FREE_SIZES))}); got size_type={size_types!r}"
+        )
+    leverage = args.get("leverage")
+    if leverage is not None and np.any(np.asarray(leverage, dtype=np.float64) != 1.0):
+        raise ValueError(f"init_cash={mode!r} needs cash accounts without leverage")
+    account_type = args.get("account_type")
+    if account_type is not None and set(np.atleast_1d(account_type).tolist()) != {"cash"}:
+        raise ValueError(f"init_cash={mode!r} needs cash accounts without leverage")
+    unlimited = run(**dict(args, init_cash=np.inf))
+    need = _cash_needed(unlimited)
+    if mode == "autoalign":
+        need = np.full_like(need, need.max() if need.size else 0.0)
+    pf = run(**dict(args, init_cash=need if need.size > 1 else float(need[0])))
+    a, b = unlimited.orders(), pf.orders()
+    same = all(np.array_equal(a[key], b[key]) for key in ("col", "idx", "size", "price", "side"))
+    if not same:
+        raise ValueError(
+            f"init_cash={mode!r}: with the cash it needed the run fills differently from one "
+            "with unlimited cash (a short's collateral, or a cap on cash, binds); pass init_cash"
+        )
+    return pf
+
+
 def _call_seq(value: Any) -> Any:
     """``"default"``, ``"auto"``, or an explicit order: a ``(n_rows,
     n_cols)`` integer array whose row holds, for each group, the order its
@@ -375,8 +433,9 @@ def _column_map(value):
     return a.tolist()
 
 
-def _multiplier(value: Any, column_map: Any) -> Any:
-    """A contract multiplier: a number, or one value per column of ``close``.
+def _multiplier(value: Any, column_map: Any, name: str = "multiplier") -> Any:
+    """A per-column input (a contract multiplier, an initial position): a
+    number, or one value per column of ``close``.
 
     With a ``column_map`` the values are per source column and are mapped
     here, as the engine wants one per simulated column.
@@ -387,7 +446,7 @@ def _multiplier(value: Any, column_map: Any) -> Any:
     if array.ndim == 0:
         return float(array)
     if array.ndim != 1:
-        raise ValueError("multiplier must be a number or one value per column")
+        raise ValueError(f"{name} must be a number or one value per column")
     if column_map is not None:
         array = array[np.asarray(column_map, dtype=np.intp)]
     return np.ascontiguousarray(array)
@@ -474,6 +533,9 @@ def from_signals(
     high=None,
     low=None,
     init_cash=None,
+    init_position=None,
+    init_price=None,
+    allow_negative_price=False,
     size=None,
     size_type="amount",
     price=None,
@@ -743,6 +805,32 @@ def from_signals(
         Share capital across adjacent columns. None groups all columns when
         sharing is enabled; explicit positive lengths must sum to n_cols.
         Shared init_cash is a scalar or one value per group.
+    init_position, init_price
+        Units held before the first bar, a number or one per column of
+        ``close`` (negative: short), and the price they were opened at (NaN:
+        the first close). The position is recorded as a fill on the first
+        bar at that price with no fees, so it is part of the trades. A cash
+        column paid for it before the run: an ``"initialposition"`` cash
+        record of its cost balances the fill, the cash stays ``init_cash``,
+        and the account starts worth ``init_cash`` plus the position, which
+        returns count as capital brought in. A margin column holds it as an
+        open trade, its margin out of free cash. No stop is armed for it.
+    init_cash="auto", init_cash="autoalign"
+        The cash the strategy needed: the run is made with unlimited cash,
+        and each account (``"autoalign"``: every account) is then given the
+        most it was ever out of pocket, net of deposits, and the run made
+        again. Only for sizes that do not depend on the cash — ``amount``,
+        ``value``, ``targetamount``, ``targetvalue`` — and cash accounts
+        without leverage; an error if the second run fills differently.
+    allow_negative_price
+        Treats a price of 0 or below as a price, as a futures contract's can
+        be (WTI in April 2020), rather than refusing it. Such orders must be
+        sized in units (``amount``, ``targetamount``). A cash column may buy
+        and sell what it holds; a margin column trades either side. Fees,
+        slippage and margin are taken on the price's size, slippage always
+        against the trade, and a trade's return is its profit over the size
+        of its entry value. Percent stop distances, holding charges and
+        liquidation assume prices above 0.
     call_seq
         "default" uses column order; "auto" stably sorts approximate order
         values, selling before buying. Neither mode allocates equal weights.
@@ -876,6 +964,8 @@ def from_signals(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    if isinstance(init_cash, str):
+        return _auto_cash(from_signals, dict(locals()))
     price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
     if stop_exit_type is not None:
         if upon_stop_exit is not None:
@@ -906,6 +996,9 @@ def from_signals(
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
         multiplier=_multiplier(multiplier, column_map),
+        init_position=_multiplier(init_position, column_map, "init_position"),
+        init_price=_multiplier(init_price, column_map, "init_price"),
+        allow_negative_price=bool(allow_negative_price),
         price_type=price_type,
         from_ago=from_ago,
         bid_price=_market(bid_price, "bid_price"),
@@ -985,6 +1078,9 @@ def from_orders(
     price=None,
     direction="both",
     init_cash=None,
+    init_position=None,
+    init_price=None,
+    allow_negative_price=False,
     fees=None,
     fixed_fees=None,
     slippage=None,
@@ -1106,6 +1202,32 @@ def from_orders(
         Share capital across adjacent columns. None groups all columns when
         sharing is enabled; explicit positive lengths must sum to n_cols.
         Shared init_cash is a scalar or one value per group.
+    init_position, init_price
+        Units held before the first bar, a number or one per column of
+        ``close`` (negative: short), and the price they were opened at (NaN:
+        the first close). The position is recorded as a fill on the first
+        bar at that price with no fees, so it is part of the trades. A cash
+        column paid for it before the run: an ``"initialposition"`` cash
+        record of its cost balances the fill, the cash stays ``init_cash``,
+        and the account starts worth ``init_cash`` plus the position, which
+        returns count as capital brought in. A margin column holds it as an
+        open trade, its margin out of free cash. No stop is armed for it.
+    init_cash="auto", init_cash="autoalign"
+        The cash the strategy needed: the run is made with unlimited cash,
+        and each account (``"autoalign"``: every account) is then given the
+        most it was ever out of pocket, net of deposits, and the run made
+        again. Only for sizes that do not depend on the cash — ``amount``,
+        ``value``, ``targetamount``, ``targetvalue`` — and cash accounts
+        without leverage; an error if the second run fills differently.
+    allow_negative_price
+        Treats a price of 0 or below as a price, as a futures contract's can
+        be (WTI in April 2020), rather than refusing it. Such orders must be
+        sized in units (``amount``, ``targetamount``). A cash column may buy
+        and sell what it holds; a margin column trades either side. Fees,
+        slippage and margin are taken on the price's size, slippage always
+        against the trade, and a trade's return is its profit over the size
+        of its entry value. Percent stop distances, holding charges and
+        liquidation assume prices above 0.
     call_seq
         "default" uses column order; "auto" stably sorts approximate order
         values, selling before buying. Neither mode allocates equal weights.
@@ -1235,6 +1357,8 @@ def from_orders(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    if isinstance(init_cash, str):
+        return _auto_cash(from_orders, dict(locals()))
     price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
     return _phasor.from_orders(
         _matrix(close, "close"),
@@ -1258,6 +1382,9 @@ def from_orders(
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
         multiplier=_multiplier(multiplier, column_map),
+        init_position=_multiplier(init_position, column_map, "init_position"),
+        init_price=_multiplier(init_price, column_map, "init_price"),
+        allow_negative_price=bool(allow_negative_price),
         price_type=price_type,
         from_ago=from_ago,
         bid_price=_market(bid_price, "bid_price"),

@@ -108,9 +108,10 @@ pub fn cash_flow_kind(name: &str) -> Result<CashFlowKind, String> {
         "interest" => Ok(CashFlowKind::Interest),
         "borrowfee" => Ok(CashFlowKind::BorrowFee),
         "liquidation" => Ok(CashFlowKind::Liquidation),
+        "initialposition" => Ok(CashFlowKind::InitialPosition),
         other => Err(format!(
-            "kind must be deposit, earning, dividend, funding, financing, interest, borrowfee \
-             or liquidation; got {other:?}"
+            "kind must be deposit, earning, dividend, funding, financing, interest, borrowfee, \
+             liquidation or initialposition; got {other:?}"
         )),
     }
 }
@@ -486,6 +487,10 @@ mod tests {
         assert_eq!(
             cash_flow_kind("liquidation").unwrap(),
             CashFlowKind::Liquidation
+        );
+        assert_eq!(
+            cash_flow_kind("initialposition").unwrap(),
+            CashFlowKind::InitialPosition
         );
         assert!(cash_flow_kind("Funding").is_err());
     }

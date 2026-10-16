@@ -511,6 +511,11 @@ pub enum CashFlowKind {
     /// isolated column's margin or a cross account with nothing left open
     /// would otherwise end below zero.
     Liquidation = 7,
+    /// The cost of a cash column's `init_position` at its `init_price`, on
+    /// the first bar: it balances the fill that opens the position, so the
+    /// cash stays `init_cash`. Like a deposit it is capital brought in, not
+    /// a return.
+    InitialPosition = 8,
 }
 
 #[cfg(test)]
@@ -536,6 +541,7 @@ mod tests {
         assert_eq!(CashFlowKind::Interest as i8, 5);
         assert_eq!(CashFlowKind::BorrowFee as i8, 6);
         assert_eq!(CashFlowKind::Liquidation as i8, 7);
+        assert_eq!(CashFlowKind::InitialPosition as i8, 8);
         assert_eq!(MarginMode::Isolated as i8, 1);
         assert_eq!(AccountType::Margin as i8, 1);
         assert_eq!(MarginBasis::Unit as i8, 1);

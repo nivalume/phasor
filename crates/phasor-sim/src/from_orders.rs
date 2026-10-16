@@ -42,6 +42,14 @@ pub struct FromOrders<'a> {
     pub n_cols: usize,
     /// Starting cash, per column.
     pub init_cash: FlexArray<'a, f64>,
+    /// Units held before the first bar, per column (negative: short); 0 is
+    /// none. See [`crate::initial`].
+    pub init_position: FlexArray<'a, f64>,
+    /// What the initial position was opened at; `NaN` is the first close.
+    pub init_price: FlexArray<'a, f64>,
+    /// Whether prices of 0 or below are prices, as a futures contract's can
+    /// be: see [`phasor_exec::Order::allow_negative_price`]. Off by default.
+    pub allow_negative_price: bool,
     /// Closing prices. Used to resolve infinite order and valuation prices.
     pub close: FlexArray<'a, f64>,
     /// Bar opens, highs and lows: the path a liquidation test follows
@@ -337,6 +345,7 @@ fn build_order(args: &FromOrders<'_>, i: usize, col: usize, levered: bool) -> Va
         allow_partial: args.allow_partial.get(i, col),
         raise_reject: args.raise_reject.get(i, col),
         log: args.log.get(i, col),
+        allow_negative_price: args.allow_negative_price,
     });
     if levered {
         order.in_levered_account()
@@ -368,6 +377,9 @@ impl Default for FromOrders<'_> {
             n_rows: 0,
             n_cols: 0,
             init_cash: FlexArray::Scalar(100.0),
+            init_position: FlexArray::Scalar(0.0),
+            init_price: FlexArray::Scalar(f64::NAN),
+            allow_negative_price: false,
             close: FlexArray::Scalar(f64::NAN),
             open: FlexArray::Scalar(f64::NAN),
             high: FlexArray::Scalar(f64::NAN),
@@ -575,6 +587,26 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    if crate::initial::any(&args.init_position, cols.clone()) {
+        let inputs = crate::initial::Columns {
+            orders: &orders,
+            margin: &margin,
+            isolated: &isolated,
+            mult: &mult,
+        };
+        crate::initial::open(
+            &args.init_position,
+            &args.init_price,
+            &args.close,
+            cols.clone(),
+            &inputs,
+            &mut state,
+            &mut cash,
+            &mut free_cash,
+            sink,
+            fills,
+        )?;
+    }
     // Only an account with a margin column and a maintenance margin can be
     // liquidated; scratch for the test, reused across bars.
     let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
@@ -1193,6 +1225,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
     for group in 0..args.groups.len() {
         simulate_group(args, group, levered, &mut sink, &mut fills)?;
     }
+    sink.records_mut().allow_negative_price = args.allow_negative_price;
     Ok(sink)
 }
 
@@ -1326,7 +1359,9 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     for result in results {
         parts.push(result?);
     }
-    Ok(S::merge(parts))
+    let mut merged = S::merge(parts);
+    merged.records_mut().allow_negative_price = args.allow_negative_price;
+    Ok(merged)
 }
 
 #[cfg(test)]

@@ -164,6 +164,13 @@ pub struct Order {
     pub raise_reject: bool,
     /// Whether to emit a log record.
     pub log: bool,
+    /// Whether a price of 0 or below is a price rather than a bad input.
+    ///
+    /// Such an order must be sized in units. A cash column may buy, and sell
+    /// what it holds; a margin column trades either side. Fees, slippage
+    /// and margin are taken on the price's size, slippage always against
+    /// the trade. Off, the default, as in the reference.
+    pub allow_negative_price: bool,
 }
 
 impl Default for Order {
@@ -190,6 +197,7 @@ impl Default for Order {
             allow_partial: true,
             raise_reject: false,
             log: false,
+            allow_negative_price: false,
         }
     }
 }

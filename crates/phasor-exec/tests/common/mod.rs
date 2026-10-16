@@ -174,6 +174,7 @@ impl Row<'_> {
             allow_partial: self.bool("allow_partial"),
             raise_reject: false,
             log: false,
+            allow_negative_price: false,
         }
     }
 }
