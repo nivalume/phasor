@@ -16,10 +16,12 @@
 //! # What is exposed, and what is not
 //!
 //! Both vectorized loops — `from_signals` and `from_orders` — the portfolio they
-//! return, its metrics, its statistics table, and its order, trade and log
-//! records as NumPy arrays. Factor expressions, Alpha158, and Alpha360 are
-//! exposed through the Python shell over this module's compiled
-//! [`expr::PyFactorSet`].
+//! return, its metrics, its statistics table, its exposures and trade
+//! excursions, and its order, trade and log records as NumPy arrays. Factor
+//! expressions, Alpha158, and Alpha360 are exposed through the Python shell
+//! over this module's compiled [`expr::PyFactorSet`]. Event studies,
+//! overfitting statistics, labels, random signals and synthetic prices are in
+//! [`research`].
 //!
 //! Not exposed yet: the rolling metrics, drawdown
 //! records, and the indicator sweep. Each is a small addition on this
@@ -49,10 +51,11 @@ pub mod data;
 pub mod expr;
 pub mod params;
 pub mod parse;
+pub mod research;
 
 use std::sync::OnceLock;
 
-use numpy::{IntoPyArray, PyArray1};
+use numpy::{IntoPyArray, PyArray1, PyArray2};
 use phasor_analysis::stats::{Select, Value};
 use phasor_analysis::{Cache, Portfolio as CorePortfolio, Scoring};
 use phasor_core::flex::FlexArray;
@@ -66,8 +69,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyDictMethods};
 
 use array::{
-    Borrowed, OneDim, borrow_bool, borrow_f64, borrow_opt_f64, columns_of, flex_bool, flex_or_bool,
-    flex_or_f64, to_py_err,
+    Borrowed, OneDim, borrow_bool, borrow_f64, borrow_opt_f64, columns_of, columns_out, flex_bool,
+    flex_or_bool, flex_or_f64, to_py_err,
 };
 use expr::PyFactorSet;
 use params::Shared;
@@ -412,6 +415,113 @@ impl PyPortfolio {
         self.column_of(py, col, |pf, c| pf.assets().column(c).to_vec())
     }
 
+    /// Each symbol column's signed position value over its account's total
+    /// value, `(n_rows, n_cols)`.
+    ///
+    /// The weight a column actually carries, drift between rebalances
+    /// included. Shorts are negative; NaN where the account is worth nothing.
+    ///
+    /// The exposure methods return every column at once, unlike
+    /// [`Self::value`]: they are computed whole and not cached, so one column
+    /// per call would redo the whole matrix per column.
+    fn allocations<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let m = py.detach(|| self.core().map(|pf| pf.allocations()))?;
+        matrix_out(py, m)
+    }
+
+    /// Long position value over total value, `(n_rows, n_groups)`.
+    ///
+    /// Divided by the account's value, as a weight is quoted. A hedged book
+    /// can be fully long and fully short at once; netting would hide both.
+    fn long_exposure<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let m = py.detach(|| self.core().map(|pf| pf.long_exposure()))?;
+        matrix_out(py, m)
+    }
+
+    /// Absolute short position value over total value, `(n_rows, n_groups)`.
+    fn short_exposure<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let m = py.detach(|| self.core().map(|pf| pf.short_exposure()))?;
+        matrix_out(py, m)
+    }
+
+    /// Long minus short exposure, `(n_rows, n_groups)`: the directional bet.
+    fn net_exposure<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let m = py.detach(|| self.core().map(|pf| pf.net_exposure()))?;
+        matrix_out(py, m)
+    }
+
+    /// Long plus short exposure, `(n_rows, n_groups)`: how much is at work.
+    ///
+    /// Over total value. The engine's `gross_exposure` divides by free cash
+    /// plus the position instead; the two agree only on a long-only run.
+    fn gross_long_short<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let m = py.detach(|| self.core().map(|pf| pf.gross_long_short()))?;
+        matrix_out(py, m)
+    }
+
+    /// Fraction of bars each symbol column holds a non-zero position.
+    fn position_coverage<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        Ok(py
+            .detach(|| self.core().map(|pf| pf.position_coverage()))?
+            .into_pyarray(py))
+    }
+
+    /// Maximum adverse and favorable excursion of each trade, as a dict of
+    /// arrays aligned row for row with [`Self::trades`].
+    ///
+    /// `mae` and `mfe` are price distances per unit (MAE never positive, MFE
+    /// never negative); `mae_ret` and `mfe_ret` divide them by the entry price.
+    /// The window runs from the entry bar to the exit bar inclusive, and the
+    /// entry bar's whole range counts.
+    ///
+    /// A portfolio keeps only its closes, so pass the bars' `high` and `low`,
+    /// shaped like `close` was. Without them both sides are measured on
+    /// closes, which can only understate them.
+    #[pyo3(signature = (high = None, low = None))]
+    fn excursions<'py>(
+        &self,
+        py: Python<'py>,
+        high: Option<&Bound<'py, PyAny>>,
+        low: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let high = self.bar_field(high, "high")?;
+        let low = self.bar_field(low, "low")?;
+        let ex = py.detach(|| -> PyResult<_> {
+            let (high, low) = (self.bar_view(&high)?, self.bar_view(&low)?);
+            self.core()?.excursions(&high, &low).map_err(to_py_err)
+        })?;
+        let out = PyDict::new(py);
+        out.set_item("mae", ex.mae.into_pyarray(py))?;
+        out.set_item("mfe", ex.mfe.into_pyarray(py))?;
+        out.set_item("mae_ret", ex.mae_ret.into_pyarray(py))?;
+        out.set_item("mfe_ret", ex.mfe_ret.into_pyarray(py))?;
+        Ok(out)
+    }
+
+    /// Edge ratio per account: mean MFE over mean MAE of its trades, both as
+    /// returns.
+    ///
+    /// Above one, trades went further in their favor than against them on
+    /// average — an entry edge measured before the exit rule has a say. NaN
+    /// for an account with no trades, or whose trades never went against
+    /// their entry. `high` and `low` as for [`Self::excursions`].
+    #[pyo3(signature = (high = None, low = None))]
+    fn edge_ratio<'py>(
+        &self,
+        py: Python<'py>,
+        high: Option<&Bound<'py, PyAny>>,
+        low: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let high = self.bar_field(high, "high")?;
+        let low = self.bar_field(low, "low")?;
+        Ok(py
+            .detach(|| -> PyResult<_> {
+                let (high, low) = (self.bar_view(&high)?, self.bar_view(&low)?);
+                self.core()?.edge_ratio(&high, &low).map_err(to_py_err)
+            })?
+            .into_pyarray(py))
+    }
+
     /// The fills, as a dict of NumPy arrays.
     ///
     /// Struct-of-arrays, as the record layer stores them, so a caller can build
@@ -644,6 +754,71 @@ impl PyPortfolio {
             .detach(|| self.core().map(|pf| pick(&pf, col)))?
             .into_pyarray(py))
     }
+
+    /// A bar field passed to an analysis method, copied column-major, or
+    /// `None` when not given.
+    ///
+    /// Shaped like the run's source `close`: `(n_rows, source columns)`, or
+    /// 1-D for a single source column. Copied rather than borrowed, and in
+    /// either memory order: the copy reads by index, so a C-ordered array
+    /// comes out right rather than transposed. The no-copy rule in [`array`]
+    /// is for simulation inputs, read on every bar of every run; this is read
+    /// once, after the run.
+    fn bar_field(
+        &self,
+        value: Option<&Bound<'_, PyAny>>,
+        name: &str,
+    ) -> PyResult<Option<Vec<f64>>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let expected = (self.n_rows, self.source_cols);
+        if let Ok(a) = value.extract::<numpy::PyReadonlyArray2<'_, f64>>() {
+            let view = a.as_array();
+            if view.dim() != expected {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} is {:?}; close was {expected:?}",
+                    view.dim()
+                )));
+            }
+            return Ok(Some(view.t().iter().copied().collect()));
+        }
+        if let Ok(a) = value.extract::<numpy::PyReadonlyArray1<'_, f64>>() {
+            let view = a.as_array();
+            if expected.1 != 1 || view.len() != expected.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} has {} values; a 1-D {name} needs a single-column run of {} bars",
+                    view.len(),
+                    expected.0
+                )));
+            }
+            return Ok(Some(view.to_vec()));
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{name} must be a float64 array shaped like close"
+        )))
+    }
+
+    /// The engine's view of a [`Self::bar_field`]: through `column_map` like
+    /// `close`, or NaN everywhere — read as "use the close" — when absent.
+    fn bar_view<'a>(&'a self, field: &'a Option<Vec<f64>>) -> PyResult<FlexArray<'a, f64>> {
+        match field {
+            Some(data) => market_array(
+                data,
+                self.n_rows,
+                self.source_cols,
+                self.column_map.as_deref(),
+            ),
+            None => Ok(FlexArray::Scalar(f64::NAN)),
+        }
+    }
+}
+
+/// A matrix as an `(n_rows, n_cols)` NumPy array over the same column-major
+/// buffer: an F-ordered view, not a copy.
+fn matrix_out(py: Python<'_>, m: Matrix) -> PyResult<Bound<'_, PyArray2<f64>>> {
+    let (rows, cols) = (m.n_rows(), m.n_cols());
+    columns_out(py, m.into_vec(), rows, cols)
 }
 
 /// Resolves group capital once, expanding only for the simulator's per-column API.
@@ -760,6 +935,10 @@ fn deposits_view<'a>(
     sl_stop = None,
     sl_trail = None,
     tp_stop = None,
+    stop_entry_price = None,
+    stop_exit_price = None,
+    upon_stop_exit = None,
+    upon_stop_update = None,
     val_price = None,
     cash_deposits = None,
     cash_dividends = None,
@@ -810,6 +989,10 @@ fn from_signals(
     sl_stop: Option<&Bound<'_, PyAny>>,
     sl_trail: Option<&Bound<'_, PyAny>>,
     tp_stop: Option<&Bound<'_, PyAny>>,
+    stop_entry_price: Option<&str>,
+    stop_exit_price: Option<&str>,
+    upon_stop_exit: Option<&str>,
+    upon_stop_update: Option<&str>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
@@ -901,6 +1084,28 @@ fn from_signals(
     // so the two cannot drift. See `array::borrow_opt_f64`.
     let d = FromSignals::default();
     let per_col = OneDim::PerColumn;
+    // The stop modes take their defaults the same way: `None` from Python is
+    // the engine's own choice, not a second copy of it spelled here.
+    let stop_entry_price = stop_entry_price
+        .map(parse::stop_entry_price)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.stop_entry_price, FlexArray::Scalar);
+    let stop_exit_price = stop_exit_price
+        .map(parse::stop_exit_price)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.stop_exit_price, FlexArray::Scalar);
+    let upon_stop_exit = upon_stop_exit
+        .map(parse::upon_stop_exit)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.upon_stop_exit, FlexArray::Scalar);
+    let upon_stop_update = upon_stop_update
+        .map(parse::upon_stop_update)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.upon_stop_update, FlexArray::Scalar);
     let (groups, account_cash) = account_inputs(
         cash_sharing,
         group_lens,
@@ -965,6 +1170,10 @@ fn from_signals(
         sl_stop: flex_or_f64(&sl_stop_b, n_rows, n_cols, per_col, d.sl_stop)?,
         sl_trail: flex_or_bool(&sl_trail_b, n_rows, n_cols, d.sl_trail)?,
         tp_stop: flex_or_f64(&tp_stop_b, n_rows, n_cols, per_col, d.tp_stop)?,
+        stop_entry_price,
+        stop_exit_price,
+        upon_stop_exit,
+        upon_stop_update,
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,
@@ -1320,6 +1529,7 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expr::alpha158, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha360, m)?)?;
     m.add_function(wrap_pyfunction!(expr::crossed_above, m)?)?;
+    research::register(m)?;
     m.add(
         "__doc__",
         "Rust engine for phasor. Use the `phasor` package, not this.",

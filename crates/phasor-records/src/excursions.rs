@@ -133,12 +133,57 @@ pub fn excursions(
 /// there are no trades or no trade ever moved against its entry.
 #[must_use]
 pub fn edge_ratio(ex: &Excursions) -> f64 {
-    let n = ex.mfe_ret.len();
+    ratio_of_means(ex.mfe_ret.iter().copied(), ex.mae_ret.iter().copied())
+}
+
+/// [`edge_ratio`] per column: column `c` is scored over the trades whose
+/// `cols` entry is `c`, in their order, so it equals [`edge_ratio`] over that
+/// subset bit for bit. A column with no trades is NaN.
+///
+/// `cols` is the trades' own column, [`TradeRecords::col`], aligned with `ex`.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] if `cols` and `ex` differ in length or a
+/// column lies outside `0..n_cols`.
+pub fn edge_ratio_by_column(ex: &Excursions, cols: &[i64], n_cols: usize) -> Result<Vec<f64>> {
+    if cols.len() != ex.mfe_ret.len() || cols.len() != ex.mae_ret.len() {
+        return Err(Error::Invariant(format!(
+            "{} trade columns for {} excursions",
+            cols.len(),
+            ex.mfe_ret.len()
+        )));
+    }
+    let mut trades_of = vec![Vec::new(); n_cols];
+    for (i, &col) in cols.iter().enumerate() {
+        let c = usize::try_from(col)
+            .ok()
+            .filter(|&c| c < n_cols)
+            .ok_or_else(|| {
+                Error::Invariant(format!("trade {i} is in column {col}, outside 0..{n_cols}"))
+            })?;
+        trades_of[c].push(i);
+    }
+    Ok(trades_of
+        .iter()
+        .map(|trades| {
+            ratio_of_means(
+                trades.iter().map(|&i| ex.mfe_ret[i]),
+                trades.iter().map(|&i| ex.mae_ret[i]),
+            )
+        })
+        .collect())
+}
+
+/// Mean MFE over mean absolute MAE, the reduction both edge ratios share.
+fn ratio_of_means(mfe_ret: impl Iterator<Item = f64>, mae_ret: impl Iterator<Item = f64>) -> f64 {
+    let mut n = 0_usize;
+    let sum_mfe: f64 = mfe_ret.inspect(|_| n += 1).sum();
     if n == 0 {
         return f64::NAN;
     }
-    let mean_mfe = ex.mfe_ret.iter().sum::<f64>() / n as f64;
-    let mean_mae = ex.mae_ret.iter().map(|v| v.abs()).sum::<f64>() / n as f64;
+    let mean_mfe = sum_mfe / n as f64;
+    let mean_mae = mae_ret.map(f64::abs).sum::<f64>() / n as f64;
     if mean_mae <= 0.0 {
         return f64::NAN;
     }
@@ -371,5 +416,41 @@ mod tests {
             mfe_ret: vec![0.1],
         };
         assert!(edge_ratio(&ex).is_nan());
+    }
+
+    #[test]
+    fn edge_ratio_by_column_scores_each_columns_own_trades() {
+        // Columns interleaved on purpose: grouping must not assume sorted input.
+        let ex = Excursions {
+            mae: vec![],
+            mfe: vec![],
+            mae_ret: vec![-0.25, -0.1, -0.75, 0.0],
+            mfe_ret: vec![0.5, 0.3, 1.5, 0.2],
+        };
+        let cols = [0, 2, 0, 2];
+        let by_col = edge_ratio_by_column(&ex, &cols, 3).unwrap();
+        let column_zero = Excursions {
+            mae: vec![],
+            mfe: vec![],
+            mae_ret: vec![-0.25, -0.75],
+            mfe_ret: vec![0.5, 1.5],
+        };
+        assert_eq!(by_col[0], edge_ratio(&column_zero));
+        assert!(by_col[1].is_nan(), "no trades");
+        // Means 0.25 and 0.05.
+        assert!((by_col[2] - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn edge_ratio_by_column_rejects_a_column_outside_the_run() {
+        let ex = Excursions {
+            mae: vec![],
+            mfe: vec![],
+            mae_ret: vec![-0.1],
+            mfe_ret: vec![0.1],
+        };
+        assert!(edge_ratio_by_column(&ex, &[1], 1).is_err());
+        assert!(edge_ratio_by_column(&ex, &[-1], 1).is_err());
+        assert!(edge_ratio_by_column(&ex, &[0, 0], 1).is_err());
     }
 }

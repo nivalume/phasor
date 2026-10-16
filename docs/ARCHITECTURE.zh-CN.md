@@ -637,7 +637,9 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 - 持有记录（共享组时只排序一次）、源宽度的收盘价、列映射、分组、评分设置，以及一个 `phasor_analysis::Cache`：每个方法借用的 Rust `Portfolio`（`Portfolio::from_borrowed`）读写它，一次调用算出的净值曲线下次直接用；`clear_cache()` 释放。
 - 记录以 NumPy 数组组成的 dict 返回（`orders()`、`trades()`、`logs()`、`reason_counts(col)`）。
 - **GIL**：因子求值、数据加载、`from_signals` / `from_orders` 和所有 `Portfolio` 推导都释放（`py.detach`）；只有 NumPy 转换持有。
-- 未公开：滚动指标、回撤记录、技术指标、phasor-signals、`CallSeq::Explicit`、Polars。
+- 敞口和越界也是方法：`allocations()`、`long_exposure()`、`short_exposure()`、`net_exposure()`、`gross_long_short()` 返回整张 F 序矩阵，形状 `(T, C)` 或 `(T, 组数)`。它们不缓存，按列取会对每列重算整张矩阵。`position_coverage()` 每列一个值。组合只存收盘价，所以 `excursions(high, low)` 和 `edge_ratio(high, low)` 每次由调用方传入高低价；不传就只用收盘价，结果只会偏小。
+- 研究函数放在组合旁边，不挂在组合上（`src/research.rs`）：`phasor.events`（事件前后路径）、`phasor.robust`（PSR、DSR、PBO）、`phasor.labels`、`phasor.signals`（带种子的随机信号）和 `phasor.synthetic`。每个函数只调一次引擎；一维输入返回一维。标签和事件路径读取未来数据，不能喂给模拟。
+- 未公开：滚动指标、回撤记录、技术指标、phasor-signals 的清洗与区间、`CallSeq::Explicit`、Polars。
 
 ---
 

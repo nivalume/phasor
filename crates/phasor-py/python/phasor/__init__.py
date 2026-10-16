@@ -38,7 +38,7 @@ from typing import Any
 
 import numpy as np
 
-from . import _phasor, data, validation
+from . import _phasor, data, events, labels, robust, signals, synthetic, validation
 from ._phasor import InstrumentId, BarType
 from ._phasor import Portfolio
 
@@ -49,6 +49,11 @@ __all__ = [
     "alpha158",
     "alpha360",
     "data",
+    "events",
+    "labels",
+    "robust",
+    "signals",
+    "synthetic",
     "validation",
     "InstrumentId",
     "BarType",
@@ -304,6 +309,10 @@ def from_signals(
     sl_stop=None,
     sl_trail=None,
     tp_stop=None,
+    stop_entry_price=None,
+    stop_exit_price=None,
+    upon_stop_exit=None,
+    upon_stop_update=None,
     val_price=None,
     cash_deposits=None,
     cash_dividends=None,
@@ -363,6 +372,29 @@ def from_signals(
     raise_reject
         Turn a rejected order into an exception instead of a recorded refusal.
         Useful under ``log=True`` to stop at the first one.
+    sl_stop, sl_trail, tp_stop
+        Stop-loss and take-profit distances as fractions of the stop's anchor
+        price (NaN disables one), and whether the stop-loss trails the best
+        price reached. Need ``high`` and ``low``.
+    stop_entry_price
+        The anchor a stop is measured from when its position opens or is
+        re-armed: ``close`` (the default), ``fillprice`` (the fill, slippage
+        included), ``price`` (the requested order price) or ``valprice``.
+    stop_exit_price
+        What a triggered stop fills at: ``stoplimit`` (the default — the stop
+        level, no slippage), ``stopmarket`` (the stop level plus slippage),
+        ``price`` (the ``price`` parameter) or ``close``.
+    upon_stop_exit
+        What a triggered stop does: ``close`` (the default), ``reverse`` (close
+        and open the opposite side — opening it needs ``direction="both"``),
+        or ``closereduce``/``reversereduce``, which leave ``accumulate`` in
+        force instead of switching it off for that order.
+    upon_stop_update
+        When a position is added to, whether the new ``sl_stop``/``tp_stop``
+        re-anchors the live stop at the new price: ``override`` (the default;
+        a NaN keeps the old stop), ``overridenan`` (a NaN clears it) or
+        ``keep``. Averaging down with the original stop and averaging down
+        with a moved one are different strategies.
     cash_sharing, group_lens
         Share capital across adjacent columns. None groups all columns when
         sharing is enabled; explicit positive lengths must sum to n_cols.
@@ -436,6 +468,10 @@ def from_signals(
         sl_stop=_param(sl_stop, "sl_stop"),
         sl_trail=_flag(sl_trail, "sl_trail"),
         tp_stop=_param(tp_stop, "tp_stop"),
+        stop_entry_price=stop_entry_price,
+        stop_exit_price=stop_exit_price,
+        upon_stop_exit=upon_stop_exit,
+        upon_stop_update=upon_stop_update,
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),

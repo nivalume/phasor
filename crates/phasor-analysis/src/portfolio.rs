@@ -39,7 +39,7 @@ use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
 use phasor_core::matrix::Matrix;
 use phasor_model::TradesType;
-use phasor_records::{DrawdownRecords, OrderRecords, TradeRecords, find_drawdowns};
+use phasor_records::{DrawdownRecords, Excursions, OrderRecords, TradeRecords, find_drawdowns};
 use phasor_sim::groups::Groups;
 
 use crate::metrics::{self, DAILY};
@@ -818,6 +818,45 @@ impl<'a> Portfolio<'a> {
         })
     }
 
+    /// Maximum adverse and favorable excursion of every trade, in the order of
+    /// [`Self::trades`].
+    ///
+    /// A portfolio keeps only its closes, so the bars' range is passed in:
+    /// `high` and `low` laid out column for column like the close the
+    /// portfolio was built with. `FlexArray::Scalar(f64::NAN)` measures that
+    /// side on closes alone, which can only understate it. The window, the
+    /// fallback to the close and the entry-bar caveat are
+    /// [`phasor_records::excursions`]'s.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::trades`] and [`phasor_records::excursions`].
+    pub fn excursions(
+        &self,
+        high: &FlexArray<'_, f64>,
+        low: &FlexArray<'_, f64>,
+    ) -> Result<Excursions> {
+        phasor_records::excursions(self.trades()?, high, low, &self.close, self.n_rows)
+    }
+
+    /// Edge ratio per account: mean MFE over mean MAE of the account's trades,
+    /// both as returns. See [`phasor_records::edge_ratio`].
+    ///
+    /// Per account, like [`Self::trade_stats`]. NaN for an account without
+    /// trades, or whose trades never moved against their entry.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::excursions`].
+    pub fn edge_ratio(
+        &self,
+        high: &FlexArray<'_, f64>,
+        low: &FlexArray<'_, f64>,
+    ) -> Result<Vec<f64>> {
+        let ex = self.excursions(high, low)?;
+        phasor_records::edge_ratio_by_column(&ex, &self.account_trades()?.col, self.n_groups())
+    }
+
     // --- per-account metrics ------------------------------------------------
 
     /// Applies a reduction to every column's returns.
@@ -1240,6 +1279,31 @@ mod tests {
         assert_eq!(pf.trade_counts().unwrap(), [0, 0]);
         assert_eq!(pf.stats_all(&Select::all()).unwrap().len(), 2);
         assert!(pf.traded_only(&pf.sharpe_ratio()).unwrap()[0].is_nan());
+    }
+
+    #[test]
+    fn excursions_follow_the_trades_and_the_range_passed_in() {
+        let close = two_columns();
+        let cash = FlexArray::scalar(1000.0);
+        let pf = portfolio(&close, &cash);
+        let high: Vec<f64> = close.iter().map(|c| c + 1.0).collect();
+        let low: Vec<f64> = close.iter().map(|c| c - 1.0).collect();
+        let high = FlexArray::full(&high, 5, 2).unwrap();
+        let low = FlexArray::full(&low, 5, 2).unwrap();
+
+        // The round trip in column 0 holds bars 0..=2 from 10: high 13, low 9.
+        let ex = pf.excursions(&high, &low).unwrap();
+        assert_eq!(ex.mfe, [3.0]);
+        assert_eq!(ex.mae, [-1.0]);
+        let edge = pf.edge_ratio(&high, &low).unwrap();
+        assert!((edge[0] - 3.0).abs() < 1e-12);
+        assert!(edge[1].is_nan(), "column 1 never traded");
+
+        // On closes alone the trade never went below its entry.
+        let none = FlexArray::scalar(f64::NAN);
+        let ex = pf.excursions(&none, &none).unwrap();
+        assert_eq!((ex.mfe[0], ex.mae[0]), (2.0, 0.0));
+        assert!(pf.edge_ratio(&none, &none).unwrap()[0].is_nan());
     }
 
     #[test]

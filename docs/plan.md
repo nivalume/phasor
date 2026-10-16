@@ -17,7 +17,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - **验收**：怎样才算做完（只在不显然时写）。
 - 编号：A–M 是功能阶段，P 是维护和技术债。工作量 S 约几天，M 约 1–2 周，L 约 3–5 周，
   XL 超过 5 周，只用来排顺序。
-- 状态以代码为准。最后核对：2026-10-11，分支 `claude/kind-mayer-lp439i`。
+- 状态以代码为准。最后核对：2026-10-16，分支 `claude/fervent-mccarthy-3ij8ep`。
 - 设计细节落地后写进 `docs/ARCHITECTURE.md`（中英两份），本文只记任务。
 
 ---
@@ -26,7 +26,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 | 阶段 | 内容 | 完成 | 部分完成 | 未开始 |
 |---|---|---:|---:|---:|
-| P | 维护与技术债 | 1 | 0 | 2 |
+| P | 维护与技术债 | 2 | 0 | 1 |
 | A | 账户模型地基 | 1 | 1 | 2 |
 | B | 现金流、杠杆、合约 | 5 | 0 | 5 |
 | C | 保证金、强平、资金费（PRO 没有） | 0 | 0 | 5 |
@@ -40,12 +40,11 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **8** | **9** | **62** |
+| **合计** | | **9** | **9** | **61** |
 
 ### 下一步（按优先级）
 
-1. **P2**：新加的分析、信号、数据功能只有 Rust 接口，Python 用户用不到。
-2. **B4 → C1–C4**：杠杆、保证金、强平、资金费。这是资金费套利回测的关键路径，做完才能在 phasor 里准确回测现货多 + 永续空。
+1. **B4 → C1–C4**：杠杆、保证金、强平、资金费。这是资金费套利回测的关键路径，做完才能在 phasor 里准确回测现货多 + 永续空。
 
 ---
 
@@ -86,15 +85,16 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 教训：指令数和时间可以不一致，两个方向都出现了。只改内核时 `from_orders` 指令数回到 +0.2%，时间只少了 0.4–2.7 个百分点，`from_signals` 在四次测量里有两次反而更慢；拆循环则相反。验收看时间，指令数用来发现变化。详见 `benchmarks/README.md` 的 "Instruction counts"。
   - 位置：`crates/phasor-sim/src/{from_orders,from_signals,cash}.rs`，`crates/phasor-exec/src/kernel.rs`，`crates/phasor-core/src/math.rs`，`benchmarks/instructions.py`，`benchmarks/callgrind.Dockerfile`。
 
-- [ ] **P2 新功能接到 Python**（M）
-  - 为什么：这些功能现在只能从 Rust 调用，Python 是主要使用入口。
-  - 要做：
-    - [ ] `Portfolio` 的敞口方法：`allocations`、`long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`、`position_coverage`（B10）。
-    - [ ] MAE/MFE 和 edge ratio（I1），作为 `Portfolio` 方法。
-    - [ ] 事件研究：`forward_paths`、`mean_path`、`median_path`、`hit_rate`（I6）。
-    - [ ] 稳健性：`probabilistic_sharpe`、`deflated_sharpe`、`pbo_cscv`（J3）。
-    - [ ] 标签和随机信号（H6、H7），合成价格（G5）。
-    - [ ] `from_signals` 已有但 Python 不能设的止损参数：`upon_stop_exit`（含 `Reverse`）、`stop_entry_price`（含 `FillPrice`）、`stop_exit_price`、`upon_stop_update`。
+- [x] **P2 新功能接到 Python**（M）
+  - 为什么：这些功能原来只能从 Rust 调用，Python 是主要使用入口。
+  - 做了什么：
+    - [x] `Portfolio` 的敞口方法：`allocations`、`long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short` 一次返回整张 `(n_rows, …)` 矩阵（F 序，不复制），`allocations` 按列、其余按账户；`position_coverage` 每列一个值（B10）。整张返回是因为这些不缓存，按列取会对每列重算一遍全矩阵。
+    - [x] MAE/MFE 和 edge ratio（I1），作为 `Portfolio` 方法：`pf.excursions(high, low)` 返回 `mae`、`mfe`、`mae_ret`、`mfe_ret`，和 `pf.trades()` 逐行对齐；`pf.edge_ratio(high, low)` 每个账户一个值，口径和 `trade_stats` 一样。组合只存收盘价，所以 high/low 由调用方传入（形状同 `close`，C 序 F 序都行，经 `column_map` 映射）；不传就只用收盘价，结果只会偏小。
+    - [x] 事件研究：`phasor.events.forward_paths` 返回 `EventPaths`，`paths` 是 `(事件数, before + after + 1)`，`mean_path()`、`median_path()`、`hit_rate(offset)` 是它的方法（I6）。
+    - [x] 稳健性：`phasor.robust` 的 `probabilistic_sharpe`、`expected_max_sharpe`、`deflated_sharpe`、`pbo_cscv`。一维收益返回一个数，二维每列一个（J3）。
+    - [x] 标签 `phasor.labels`、随机信号 `phasor.signals`（H6、H7），合成价格 `phasor.synthetic`（G5）。一维进一维出，二维进二维出；`shape` 传整数得到一维。
+    - [x] `from_signals` 的止损参数：`upon_stop_exit`（含 `reverse`）、`stop_entry_price`（含 `fillprice`）、`stop_exit_price`、`upon_stop_update`。取值是枚举名的小写连写，`None` 用引擎默认值。
+  - 位置：`crates/phasor-py/src/{lib,research,parse,array}.rs`，`crates/phasor-py/python/phasor/{events,robust,labels,signals,synthetic,_columns}.py`；Rust 侧新增 `Portfolio::excursions`、`Portfolio::edge_ratio`（`crates/phasor-analysis/src/portfolio.rs`）和 `edge_ratio_by_column`（`crates/phasor-records/src/excursions.rs`）。测试 `crates/phasor-py/tests/{test_portfolio_analysis,test_research,test_stop_modes}.py`；`test_bindings.py` 的止损对照用例加了这四个参数（需要 vectorbt）。
 
 - [ ] **P3 合并三份 SplitMix64 随机数实现**（S）
   - 为什么：`phasor-sim/src/random.rs`、`phasor-signals/src/random.rs`、`phasor-generic/src/synthetic.rs` 各有一份。并行开发时各自写的，以后改一处容易漏另外两处。
@@ -191,7 +191,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 - [x] **B10 敞口指标**（S）
   - 为什么：看仓位占比、多空敞口、净敞口，是检查组合风险的基本工具。
-  - 做了什么：`Portfolio` 上的方法。`allocations`（按列）和 `long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`（按账户）的分母是账户总净值，已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变；`position_coverage` 是每列持有非零仓位的 K 线占比。Python 未接，见 P2。
+  - 做了什么：`Portfolio` 上的方法。`allocations`（按列）和 `long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`（按账户）的分母是账户总净值，已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变；`position_coverage` 是每列持有非零仓位的 K 线占比。Python 见 P2。
   - 位置：`crates/phasor-analysis/src/portfolio.rs`，测试 `crates/phasor-analysis/tests/exposure.rs`。
 
 ### C. 保证金、强平、资金费（PRO 没有）
@@ -254,7 +254,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
 - [ ] **D5 止损扩展**（L）
   - 为什么：时间止损、分批止盈、移动止盈都是常用的出场方式。
-  - 现状：止损后反手和按成交价锚定止损已有，名字沿用 vectorbt 1.x：`upon_stop_exit=Reverse/ReverseReduce`（PRO 叫 `stop_exit_type`）、`stop_entry_price=FillPrice`。只在 Rust 里能设，Python 见 P2。
+  - 现状：止损后反手和按成交价锚定止损已有，名字沿用 vectorbt 1.x：`upon_stop_exit=Reverse/ReverseReduce`（PRO 叫 `stop_exit_type`）、`stop_entry_price=FillPrice`。Python 的 `from_signals` 也能设（P2）。
   - 做什么：`tsl_stop`、`tsl_th`、`td_stop`、`dt_stop`、`stop_ladder`、`stop_order_type="limit"` 和 `stop_limit_delta`；可选：PRO 同名的参数别名。
 
 - [ ] **D6 不经模拟生成止损信号**（S）
@@ -354,7 +354,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 做什么：
     - [x] `random_walk`、`gbm`、`ohlc_from_close`，带种子可复现，某一列的结果不随列数变化。
     - [ ] 对已有序列打乱或扰动（`randomize`），J3 的"打乱价格重跑"要用。
-  - 位置：`crates/phasor-generic/src/synthetic.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-generic/src/synthetic.rs`。Python：`phasor.synthetic`（P2）。
 
 ### H. 指标、信号、标签
 
@@ -385,7 +385,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
     - [x] 信号间隔和连续长度：原本就有，`ranges.rs` 的 `partition_ranges`、`between_ranges`、`between_partition_ranges`，加上 `duration`、`mean_closed_duration`（Python 未接，见 H1）。
     - [ ] 一张信号汇总统计表（次数、间隔和长度的均值与分位数）。
     - [ ] 匹配型随机基线：信号数量和分布与原策略相同，只打乱位置。
-  - 位置：`crates/phasor-signals/src/random.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-signals/src/random.rs`。Python：`phasor.signals`（P2）。
 
 - [ ] **H7 机器学习标签**（M，部分完成）
   - 为什么：训练预测模型需要目标值。
@@ -393,7 +393,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
     - [x] `fixed_horizon_returns`、`trend_labels`、`triple_barrier`、`pivot_labels`。这些读取未来数据，只能作训练目标，文档里写明。
     - [ ] 均值类标签（未来一段的均值相对当前）。
     - [ ] 用模型预测值回测，并和简单基线比较的辅助函数。
-  - 位置：`crates/phasor-signals/src/labels.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-signals/src/labels.rs`。Python：`phasor.labels`（P2）。
 
 ### I. 分析
 
@@ -401,9 +401,9 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 为什么：看每笔交易持仓期间最多亏过多少、最多赚过多少，用来调止损止盈、判断出场是否太早。
   - 做什么：
     - [x] `excursions`（每笔交易的 MAE/MFE，价格距离和收益率）、`edge_ratio`。
-    - [ ] 作为 `Portfolio` 方法（现在要自己传 high/low/close）。
+    - [x] 作为 `Portfolio` 方法：`excursions(high, low)`、`edge_ratio(high, low)`（按账户）。组合只存收盘价，high/low 仍由调用方传入，传 `FlexArray::Scalar(NaN)` 就只用收盘价。Python 见 P2。
     - [ ] 多空分开统计，加进统计表。
-  - 位置：`crates/phasor-records/src/excursions.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-records/src/excursions.rs`，`crates/phasor-analysis/src/portfolio.rs`。
 
 - [ ] **I2 回撤记录和滚动指标接到 Python**（S）
   - 为什么：Rust 里有，Python 拿不到。
@@ -421,7 +421,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
 - [x] **I6 事件研究**（M）
   - 为什么：财报、新闻、信号等事件之后价格一般怎么走，是判断事件有没有信息量的直接方法。
-  - 做了什么：`forward_paths`（每个事件前后相对事件当根收盘价的收益路径 `close[t+k]/close[t] − 1`，范围 `−before..=after`；靠近边界的事件保留并用 NaN 补齐）、`mean_path`、`median_path`、`hit_rate`。读取未来数据，只用于分析。Python 未接，见 P2。
+  - 做了什么：`forward_paths`（每个事件前后相对事件当根收盘价的收益路径 `close[t+k]/close[t] − 1`，范围 `−before..=after`；靠近边界的事件保留并用 NaN 补齐）、`mean_path`、`median_path`、`hit_rate`。读取未来数据，只用于分析。Python：`phasor.events`（P2）。
   - 位置：`crates/phasor-analysis/src/events.rs`。
 
 - [ ] **I7 图表**（M）
@@ -453,7 +453,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
     - [ ] 邻近参数比较（最优参数附近是否也好）。
     - [ ] 延迟信号检验：延迟机制已经有（`phasor.strategy` 的 `signal_delay`），缺把 delay=k 和 k+1 的结果并排比较、给出结论的函数。
     - [ ] 在打乱的价格上重跑（依赖 G5 的 `randomize`）。
-  - 位置：`crates/phasor-analysis/src/robust.rs`。Python 未接，见 P2。
+  - 位置：`crates/phasor-analysis/src/robust.rs`。Python：`phasor.robust`（P2）。
 
 - [ ] **J4 组合优化**（M）
   - 为什么：多资产配置的权重怎么定。
@@ -596,7 +596,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `tsl_stop`、`tsl_th` | 无（有 `sl_trail`） | D5 |
 | `td_stop`、`dt_stop` | 无 | D5 |
 | `stop_ladder` | 无 | D5 |
-| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | 部分（反手、按成交价锚定、`stop_exit_price`、`upon_stop_update` 在 Rust 里有，名字沿用 vectorbt 1.x；Python 不能设） | D5、P2 |
+| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | 部分（反手、按成交价锚定、`stop_exit_price`、`upon_stop_update` 已有，名字沿用 vectorbt 1.x） | D5 |
 | `generate_ohlc_stop_exits` | 无 | D6 |
 | 全部仓位类型、`*100` 变体、`valuepercent` | 部分 | B5、D7 |
 | `order_mode=True` | 无 | D7 |
@@ -612,7 +612,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `cash_earnings` | **有** | B2 |
 | `cash_dividends` | **有** | B3 |
 | `init_position`、`init_price`、`init_cash="auto"` | 无 | B8 |
-| 敞口（`allocations`、`gross_exposure`、`net_exposure`、`position_coverage`） | **有**（Rust；Python 未接） | B10、P2 |
+| 敞口（`allocations`、`gross_exposure`、`net_exposure`、`position_coverage`） | **有** | B10 |
 | 订单、日志、交易、持仓记录 | 有 | — |
 | 用细周期数据判断止损、tick、交易时段 | 部分（tick 可以直接跑） | D8、D9 |
 | 增量回测（`pf.update`）、`last_state`、`save`/`load`、`row_stack(chained=True)`、stepper | 无 | F |
@@ -624,13 +624,13 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 指标库：TA-Lib、pandas-ta、ta、SMC、WorldQuant 101 | 无 | H3、H4 |
 | 自定义指标（指标工厂、表达式） | 部分（因子 DSL） | H2 |
 | 流式指标 | 无 | H5 |
-| 信号生成与清洗 | 部分（Rust 有清洗和带种子随机信号，Python 未接） | H1、H6 |
-| ML 标签 | **部分**（四种标签，Rust） | H7 |
+| 信号生成与清洗 | 部分（带种子随机信号 Rust、Python 都有；清洗只在 Rust） | H1、H6 |
+| ML 标签 | **部分**（四种标签） | H7 |
 | 收益与风险指标、基准对比、滚动指标 | 有（滚动指标 Python 未接） | I2 |
 | 回撤分析 | 有（Python 未接记录） | I2 |
-| 交易分析、MAE/MFE、edge ratio | **部分**（MAE/MFE、edge ratio 在 Rust；未接 `Portfolio`） | I1 |
+| 交易分析、MAE/MFE、edge ratio | **部分**（MAE/MFE、edge ratio 是 `Portfolio` 方法；未分多空，未进统计表） | I1 |
 | 形态搜索 | 无 | I5 |
-| 事件研究 | **有**（Rust；Python 未接） | I6 |
+| 事件研究 | **有** | I6 |
 | 组合切片、拼接、重采样 | 无 | I4 |
 | 记录与 mapped array | 有 | — |
 | Plotly 图表 | 无 | I7 |

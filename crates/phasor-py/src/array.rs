@@ -36,7 +36,7 @@
 //! 1-D arrays have no such problem: one row or one column of anything is
 //! contiguous either way.
 
-use numpy::{PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{Element, IntoPyArray, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use phasor_core::flex::FlexArray;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -79,7 +79,9 @@ pub enum OneDim {
 /// Returns a Python `ValueError` if the array is not contiguous, or is
 /// C-ordered — see the module docs for why the second is a refusal rather than
 /// something to transparently fix here.
-pub fn columns_of<'a>(array: &'a PyReadonlyArray2<'a, f64>) -> PyResult<(&'a [f64], usize, usize)> {
+pub fn columns_of<'a, T: Element>(
+    array: &'a PyReadonlyArray2<'a, T>,
+) -> PyResult<(&'a [T], usize, usize)> {
     let view = array.as_array();
     let (n_rows, n_cols) = view.dim();
     // A single column is contiguous in both orders, so the stride test would
@@ -105,6 +107,24 @@ pub fn columns_of<'a>(array: &'a PyReadonlyArray2<'a, f64>) -> PyResult<(&'a [f6
         )
     })?;
     Ok((flat, n_rows, n_cols))
+}
+
+/// A column-major buffer handed back as an `(n_rows, n_cols)` NumPy array.
+///
+/// The buffer moves into NumPy and is viewed F-ordered, so nothing is copied
+/// and nothing is transposed: [`columns_of`] in reverse.
+///
+/// # Errors
+///
+/// A Python `ValueError` if `data` is not `n_rows * n_cols` long.
+pub fn columns_out<T: Element>(
+    py: Python<'_>,
+    data: Vec<T>,
+    n_rows: usize,
+    n_cols: usize,
+) -> PyResult<Bound<'_, PyArray2<T>>> {
+    data.into_pyarray(py)
+        .reshape_with_order([n_rows, n_cols], numpy::npyffi::NPY_ORDER::NPY_FORTRANORDER)
 }
 
 /// Reads whatever Python passed into a float [`FlexArray`].

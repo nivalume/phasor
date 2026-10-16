@@ -73,6 +73,14 @@ STOP_CASES = [
     ("take profit", {"tp_stop": 0.02}),
     ("trailing stop", {"sl_stop": 0.02, "sl_trail": True}),
     ("both stops", {"sl_stop": 0.03, "tp_stop": 0.02}),
+    ("stop at the fill", {"sl_stop": 0.02, "stop_entry_price": "fillprice", "slippage": 0.001}),
+    ("stop market exit", {"sl_stop": 0.02, "stop_exit_price": "stopmarket", "slippage": 0.001}),
+    ("stop exits at the close", {"tp_stop": 0.02, "stop_exit_price": "close"}),
+    ("reversing stop", {"sl_stop": 0.02, "upon_stop_exit": "reverse", "direction": "both"}),
+    (
+        "stop kept on an add",
+        {"sl_stop": 0.02, "size": 1.0, "accumulate": "addonly", "upon_stop_update": "keep"},
+    ),
 ]
 
 

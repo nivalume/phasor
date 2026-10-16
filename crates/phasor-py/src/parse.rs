@@ -9,7 +9,10 @@
 //! These return `Result<_, String>` rather than `PyResult` so they can be
 //! tested without a Python interpreter; the caller wraps the message.
 
-use phasor_model::{AccumulationMode, Direction, SizeType, TradesType};
+use phasor_model::{
+    AccumulationMode, Direction, SizeType, StopEntryPrice, StopExitMode, StopExitPrice,
+    StopUpdateMode, TradesType,
+};
 
 /// Every accepted spelling of a size type, for the error message.
 const SIZE_TYPES: &str = "amount, value, percent, targetamount, targetvalue, targetpercent";
@@ -86,6 +89,74 @@ pub fn trades_type(name: &str) -> Result<TradesType, String> {
     }
 }
 
+/// Which price a stop is measured from when its position opens.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn stop_entry_price(name: &str) -> Result<StopEntryPrice, String> {
+    match name {
+        "valprice" => Ok(StopEntryPrice::ValPrice),
+        "price" => Ok(StopEntryPrice::Price),
+        "fillprice" => Ok(StopEntryPrice::FillPrice),
+        "close" => Ok(StopEntryPrice::Close),
+        other => Err(format!(
+            "stop_entry_price must be 'valprice', 'price', 'fillprice' or 'close'; got {other:?}"
+        )),
+    }
+}
+
+/// Which price a triggered stop fills at.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn stop_exit_price(name: &str) -> Result<StopExitPrice, String> {
+    match name {
+        "stoplimit" => Ok(StopExitPrice::StopLimit),
+        "stopmarket" => Ok(StopExitPrice::StopMarket),
+        "price" => Ok(StopExitPrice::Price),
+        "close" => Ok(StopExitPrice::Close),
+        other => Err(format!(
+            "stop_exit_price must be 'stoplimit', 'stopmarket', 'price' or 'close'; got {other:?}"
+        )),
+    }
+}
+
+/// What a triggered stop does to its position.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn upon_stop_exit(name: &str) -> Result<StopExitMode, String> {
+    match name {
+        "close" => Ok(StopExitMode::Close),
+        "closereduce" => Ok(StopExitMode::CloseReduce),
+        "reverse" => Ok(StopExitMode::Reverse),
+        "reversereduce" => Ok(StopExitMode::ReverseReduce),
+        other => Err(format!(
+            "upon_stop_exit must be 'close', 'closereduce', 'reverse' or 'reversereduce'; \
+             got {other:?}"
+        )),
+    }
+}
+
+/// Whether a new stop value replaces the live one when a position is added to.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn upon_stop_update(name: &str) -> Result<StopUpdateMode, String> {
+    match name {
+        "keep" => Ok(StopUpdateMode::Keep),
+        "override" => Ok(StopUpdateMode::Override),
+        "overridenan" => Ok(StopUpdateMode::OverrideNaN),
+        other => Err(format!(
+            "upon_stop_update must be 'keep', 'override' or 'overridenan'; got {other:?}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +203,61 @@ mod tests {
     }
 
     #[test]
+    fn every_stop_entry_price_maps_to_its_own_variant() {
+        assert_eq!(
+            stop_entry_price("valprice").unwrap(),
+            StopEntryPrice::ValPrice
+        );
+        assert_eq!(stop_entry_price("price").unwrap(), StopEntryPrice::Price);
+        assert_eq!(
+            stop_entry_price("fillprice").unwrap(),
+            StopEntryPrice::FillPrice
+        );
+        assert_eq!(stop_entry_price("close").unwrap(), StopEntryPrice::Close);
+    }
+
+    #[test]
+    fn every_stop_exit_price_maps_to_its_own_variant() {
+        assert_eq!(
+            stop_exit_price("stoplimit").unwrap(),
+            StopExitPrice::StopLimit
+        );
+        assert_eq!(
+            stop_exit_price("stopmarket").unwrap(),
+            StopExitPrice::StopMarket
+        );
+        assert_eq!(stop_exit_price("price").unwrap(), StopExitPrice::Price);
+        assert_eq!(stop_exit_price("close").unwrap(), StopExitPrice::Close);
+    }
+
+    #[test]
+    fn every_stop_exit_mode_maps_to_its_own_variant() {
+        assert_eq!(upon_stop_exit("close").unwrap(), StopExitMode::Close);
+        assert_eq!(
+            upon_stop_exit("closereduce").unwrap(),
+            StopExitMode::CloseReduce
+        );
+        assert_eq!(upon_stop_exit("reverse").unwrap(), StopExitMode::Reverse);
+        assert_eq!(
+            upon_stop_exit("reversereduce").unwrap(),
+            StopExitMode::ReverseReduce
+        );
+    }
+
+    #[test]
+    fn every_stop_update_mode_maps_to_its_own_variant() {
+        assert_eq!(upon_stop_update("keep").unwrap(), StopUpdateMode::Keep);
+        assert_eq!(
+            upon_stop_update("override").unwrap(),
+            StopUpdateMode::Override
+        );
+        assert_eq!(
+            upon_stop_update("overridenan").unwrap(),
+            StopUpdateMode::OverrideNaN
+        );
+    }
+
+    #[test]
     fn an_unknown_name_names_the_alternatives() {
         // The value the caller passed has to appear too: "must be one of ..."
         // without it leaves them hunting for which argument was wrong.
@@ -141,6 +267,22 @@ mod tests {
         assert!(direction("").unwrap_err().contains("longonly"));
         assert!(accumulate("add").unwrap_err().contains("addonly"));
         assert!(trades_type("exits").unwrap_err().contains("'exit'"));
+        assert!(
+            stop_entry_price("fill")
+                .unwrap_err()
+                .contains("'fillprice'")
+        );
+        assert!(
+            stop_exit_price("limit")
+                .unwrap_err()
+                .contains("'stoplimit'")
+        );
+        assert!(upon_stop_exit("flip").unwrap_err().contains("'reverse'"));
+        assert!(
+            upon_stop_update("nan")
+                .unwrap_err()
+                .contains("'overridenan'")
+        );
     }
 
     #[test]

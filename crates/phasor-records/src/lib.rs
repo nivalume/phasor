@@ -37,7 +37,7 @@ mod trades;
 
 pub use cash::CashRecords;
 pub use drawdowns::{DrawdownRecords, DrawdownStatus, find_drawdowns};
-pub use excursions::{Excursions, edge_ratio, excursions};
+pub use excursions::{Excursions, edge_ratio, edge_ratio_by_column, excursions};
 pub use logs::{Journal, LogEntry, LogRecords, LogSink};
 
 pub use mapped::{ColMap, MappedArray};

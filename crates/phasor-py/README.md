@@ -353,6 +353,46 @@ boundary.
 `phasor.data` supplies Binance Spot download, CSV caching and aligned OHLCV arrays
 in Python.
 
+The portfolio also answers how much was at work and how each trade went:
+`pf.allocations()`, `pf.long_exposure()`, `pf.short_exposure()`,
+`pf.net_exposure()` and `pf.gross_long_short()` return whole `(n_bars, …)`
+matrices — per symbol column for allocations, per account for the rest —
+and `pf.position_coverage()` the share of bars each column held a position.
+`pf.excursions(high, low)` gives each trade's MAE and MFE, aligned with
+`pf.trades()`, and `pf.edge_ratio(high, low)` one edge ratio per account. A
+portfolio keeps only its closes, so the bar range is passed in; without it
+both are measured on closes, which can only understate them.
+
+`from_signals` takes the four stop modes beside `sl_stop`/`tp_stop`:
+`stop_entry_price` (`close`, `fillprice`, `price`, `valprice`),
+`stop_exit_price` (`stoplimit`, `stopmarket`, `price`, `close`),
+`upon_stop_exit` (`close`, `reverse`, `closereduce`, `reversereduce`) and
+`upon_stop_update` (`override`, `overridenan`, `keep`). `None` keeps the
+engine's default.
+
+Research tools sit in their own modules, beside the backtest rather than in it:
+
+```python
+from phasor import events, labels, robust, signals, synthetic
+
+close = synthetic.gbm((1000, 20), mu=0.0, seed=1)    # a no-edge control
+entries, exits = signals.random_entries_exits(close.shape, 10, seed=2)
+
+study = events.forward_paths(close, entries, before=5, after=20)
+study.mean_path(), study.hit_rate(20)
+
+y, decided_at = labels.triple_barrier(close, up=0.03, down=0.02, max_hold=20)
+
+r = returns_of_a_sweep                               # (n_bars, n_trials)
+robust.pbo_cscv(r, n_splits=16)
+robust.deflated_sharpe(r[:, best], per_period_sharpes)
+```
+
+`events` and `labels` read the future on purpose and must never feed a
+simulation. `signals` and `synthetic` draw from `(seed, row, col)`, so a seed
+reproduces and a column does not change when others are added. Sharpe ratios
+in `robust` are per period, not annualized.
+
 Not yet: the rolling metrics and drawdown records in Python. Each is
 an addition on this scaffolding rather than a change to it.
 

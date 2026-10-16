@@ -76,7 +76,6 @@ impl FactorSet {
     }
 
     /// Names in output order.
-    #[must_use]
     pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
         self.factors.iter().map(|(name, _)| name.as_str())
     }

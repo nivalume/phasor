@@ -1159,6 +1159,7 @@ dependencies = [
  "phasor-generic",
  "phasor-model",
  "phasor-records",
+ "phasor-signals",
  "phasor-sim",
  "pyo3",
  "pyo3-build-config",

@@ -759,7 +759,9 @@ returns what was applied.
 - Owns records (sorted once for shared groups), close at source width, column map, groups, scoring, and a `phasor_analysis::Cache` that every method's borrowing Rust `Portfolio` reads and fills (`Portfolio::from_borrowed`), so a value curve derived for one call serves the next; `clear_cache()` releases it.
 - Records come back as dicts of NumPy arrays (`orders()`, `trades()`, `logs()`, `reason_counts(col)`).
 - **GIL**: factor evaluation, data loading, `from_signals` / `from_orders` and every `Portfolio` derivation release it (`py.detach`); only the NumPy conversions hold it.
-- Not exposed: rolling metrics, drawdown records, indicators, phasor-signals, `CallSeq::Explicit`, Polars.
+- Exposure and excursions are methods too: `allocations()`, `long_exposure()`, `short_exposure()`, `net_exposure()`, `gross_long_short()` return whole `(T, C)` or `(T, groups)` F-ordered matrices, since they are not cached and one column per call would recompute the matrix per column; `position_coverage()` is one value per column. A portfolio keeps only closes, so `excursions(high, low)` and `edge_ratio(high, low)` take the range per call (closes alone when omitted, which can only understate it).
+- Research functions sit beside the portfolio, not on it (`src/research.rs`): `phasor.events` (forward paths), `phasor.robust` (PSR, DSR, PBO), `phasor.labels`, `phasor.signals` (seeded random signals) and `phasor.synthetic`. One engine call each; a 1-D input comes back 1-D. Labels and forward paths read the future and must not feed a simulation.
+- Not exposed: rolling metrics, drawdown records, indicators, phasor-signals cleaning and ranges, `CallSeq::Explicit`, Polars.
 
 ---
 
