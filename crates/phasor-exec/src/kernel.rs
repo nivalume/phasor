@@ -8,7 +8,7 @@
 
 use phasor_core::error::{Error, Result};
 use phasor_core::math::{add, is_close, is_close_or_less, is_less};
-use phasor_model::{Direction, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, StatusInfo};
 
 use crate::types::{ExecuteOrderState, Order, OrderResult, ProcessOrderState};
 
@@ -50,20 +50,25 @@ fn locked_cash_limit(state: &ExecuteOrderState, adj_price: f64, order: &Order) -
         // locked some of it.
         return state.free_cash;
     }
+    // Closing the short gives back what it ties up: its proceeds and its
+    // collateral. Without leverage the two are equal, and their sum is the
+    // reference's `2 * debt` to the last bit.
+    let reserved = state.debt + state.locked_cash;
     // Covering the short costs this much; what is left over is what a new long
     // may use.
     let cover_req_cash = state.position.abs() * adj_price * (1.0 + order.fees) + order.fixed_fees;
-    let cover_free_cash = add(state.free_cash + 2.0 * state.debt, -cover_req_cash);
+    let cover_free_cash = add(state.free_cash + reserved, -cover_req_cash);
     if cover_free_cash > 0.0 {
         // Enough to close the short and open a long.
-        state.free_cash + 2.0 * state.debt
+        state.free_cash + reserved
     } else if cover_free_cash < 0.0 {
         // Not enough to close the short: solve for the part that can be
-        // covered. The 2 * avg_entry_price term is the reservation released by
-        // shrinking the short.
+        // covered. The two per-unit terms are the reservation released by
+        // shrinking the short: `2 * avg_entry_price` in the reference.
         let avg_entry_price = state.debt / state.position.abs();
+        let avg_locked = state.locked_cash / state.position.abs();
         let max_short_size = (state.free_cash - order.fixed_fees)
-            / (adj_price * (1.0 + order.fees) - 2.0 * avg_entry_price);
+            / (adj_price * (1.0 + order.fees) - (avg_entry_price + avg_locked));
         max_short_size * adj_price * (1.0 + order.fees) + order.fixed_fees
     } else {
         // Exactly enough to close the short.
@@ -103,12 +108,19 @@ fn buy(
         cash_limit = cash_limit.min(percent * cash_limit);
     }
 
+    let levered = order.leverage > 1.0;
     if matches!(order.direction, Direction::LongOnly | Direction::Both) {
-        if cash_limit == 0.0 {
-            return Ok((
-                state,
-                OrderResult::not_filled(OrderStatus::Rejected, StatusInfo::NoCashLong),
-            ));
+        // Below zero only in a leveraged account, where a long sold for less
+        // than its debt left the account owing; the limit is then below zero
+        // too. Without leverage that is an invalid state, which validation
+        // stops first, and this is the reference's `cash_limit == 0`.
+        if cash_limit <= 0.0 {
+            let info = if levered {
+                StatusInfo::NoCashLeverage
+            } else {
+                StatusInfo::NoCashLong
+            };
+            return Ok((state, OrderResult::not_filled(OrderStatus::Rejected, info)));
         }
         if size.is_infinite() && cash_limit.is_infinite() {
             return Err(Error::Invariant(
@@ -154,8 +166,15 @@ fn buy(
     let req_fees = req_cash * order.fees + order.fixed_fees;
     let total_req_cash = req_cash + req_fees;
 
-    let (final_size, fees_paid, final_req_cash) = if is_close_or_less(total_req_cash, cash_limit) {
-        (adj_size, req_fees, total_req_cash)
+    // `final_req_cash` is the own cash the fill spends and `borrowed` the rest
+    // of what it costs, which goes into debt.
+    let (final_size, fees_paid, final_req_cash, borrowed) = if levered {
+        match levered_buy_cost(&state, adj_size, adj_price, cash_limit, order) {
+            Ok(cost) => cost,
+            Err(info) => return Ok((state, OrderResult::not_filled(OrderStatus::Rejected, info))),
+        }
+    } else if is_close_or_less(total_req_cash, cash_limit) {
+        (adj_size, req_fees, total_req_cash, 0.0)
     } else {
         // Not enough cash. Fees are inside the cap, not added on top, so the
         // affordable notional has to be back-solved: at 10% fees and $1 fixed,
@@ -170,14 +189,14 @@ fn buy(
         let max_acq_size = max_req_cash / adj_price;
 
         if order.size_granularity.is_nan() {
-            (max_acq_size, cash_limit - max_req_cash, cash_limit)
+            (max_acq_size, cash_limit - max_req_cash, cash_limit, 0.0)
         } else {
             // Granularity is applied a second time here, after the cash
             // constraint, so lot discipline survives a partial fill.
             let final_size = floor_to(max_acq_size, order.size_granularity);
             let new_req_cash = final_size * adj_price;
             let fees_paid = new_req_cash * order.fees + order.fixed_fees;
-            (final_size, fees_paid, new_req_cash + fees_paid)
+            (final_size, fees_paid, new_req_cash + fees_paid, 0.0)
         }
     };
 
@@ -205,8 +224,19 @@ fn buy(
     let new_cash = add(state.cash, -final_req_cash);
     let new_position = add(state.position, final_size);
 
-    let (new_debt, new_free_cash) = if state.position < 0.0 {
-        // Covering releases the reservation proportionally to the part closed.
+    // The part of the fill that ends up long ties up the own cash paid for it:
+    // its cost less what was borrowed.
+    let long_size = if state.position < 0.0 {
+        new_position.max(0.0)
+    } else {
+        final_size
+    };
+    let own_long = long_size * adj_price - borrowed;
+
+    let (new_debt, new_locked_cash, new_free_cash) = if state.position < 0.0 {
+        // Covering releases the reservation proportionally to the part closed:
+        // the short's proceeds and its collateral, which without leverage are
+        // equal and sum to the reference's `2 * debt_diff`.
         let short_size = if new_position < 0.0 {
             final_size
         } else {
@@ -214,12 +244,18 @@ fn buy(
         };
         let avg_entry_price = state.debt / state.position.abs();
         let debt_diff = short_size * avg_entry_price;
+        let locked_diff = short_size * (state.locked_cash / state.position.abs());
         (
-            add(state.debt, -debt_diff),
-            add(state.free_cash + 2.0 * debt_diff, -final_req_cash),
+            add(state.debt, -debt_diff) + borrowed,
+            add(state.locked_cash, -locked_diff) + own_long,
+            add(state.free_cash + (debt_diff + locked_diff), -final_req_cash),
         )
     } else {
-        (state.debt, add(state.free_cash, -final_req_cash))
+        (
+            state.debt + borrowed,
+            state.locked_cash + own_long,
+            add(state.free_cash, -final_req_cash),
+        )
     };
 
     Ok((
@@ -227,10 +263,81 @@ fn buy(
             cash: new_cash,
             position: new_position,
             debt: new_debt,
+            locked_cash: new_locked_cash,
             free_cash: new_free_cash,
         },
         OrderResult::filled(final_size, adj_price, fees_paid, OrderSide::Buy),
     ))
+}
+
+/// What a leveraged buy fills and what it costs: `(size, fees, own cash
+/// spent, borrowed)`. `Err` is the reason it is rejected.
+///
+/// Own cash pays for any short being bought back at full price, for `1 /
+/// leverage` of what goes long, and for every fee; the rest of the long part
+/// is borrowed. `size` has already been capped and rounded as any buy is, and
+/// `cash_limit` is the own cash the buy may spend.
+///
+/// [`LeverageMode::Eager`] spends exactly that minimum. [`LeverageMode::Lazy`]
+/// spends own cash first, up to `cash_limit`, and borrows only what is left —
+/// which is nothing when the whole cost fits.
+///
+/// Out of line so that [`buy`], which is inlined into the kernel, carries no
+/// copy of it when nothing is leveraged.
+#[inline(never)]
+fn levered_buy_cost(
+    state: &ExecuteOrderState,
+    size: f64,
+    adj_price: f64,
+    cash_limit: f64,
+    order: &Order,
+) -> core::result::Result<(f64, f64, f64, f64), StatusInfo> {
+    let leverage = order.leverage;
+    // How much of a buy closes a short rather than going long.
+    let cover_room = (-state.position).max(0.0);
+    let own_needed = |q: f64| {
+        let cover = q.min(cover_room);
+        let notional = q * adj_price;
+        cover * adj_price
+            + (q - cover) * adj_price / leverage
+            + (notional * order.fees + order.fixed_fees)
+    };
+
+    let mut final_size = size;
+    if !is_close_or_less(own_needed(size), cash_limit) {
+        // Not enough own cash: back-solve the largest size it carries.
+        let cover_cost = cover_room * adj_price * (1.0 + order.fees) + order.fixed_fees;
+        let max_size = if cover_room > 0.0 && cash_limit < cover_cost {
+            // Not even the short can be closed, and closing is never leveraged.
+            add(cash_limit, -order.fixed_fees) / (1.0 + order.fees) / adj_price
+        } else {
+            // The cover at full price, the rest at `1 / leverage`.
+            add(
+                cash_limit,
+                -(order.fixed_fees + cover_room * adj_price * (1.0 - 1.0 / leverage)),
+            ) / (1.0 / leverage + order.fees)
+                / adj_price
+        };
+        if max_size <= 0.0 {
+            return Err(StatusInfo::CantCoverFees);
+        }
+        final_size = if order.size_granularity.is_nan() {
+            max_size
+        } else {
+            floor_to(max_size, order.size_granularity)
+        };
+    }
+
+    let notional = final_size * adj_price;
+    let fees = notional * order.fees + order.fixed_fees;
+    let total = notional + fees;
+    let own_min = own_needed(final_size);
+    let own = match order.leverage_mode {
+        LeverageMode::Eager => own_min,
+        LeverageMode::Lazy if is_close_or_less(total, cash_limit) => total,
+        LeverageMode::Lazy => cash_limit.max(own_min),
+    };
+    Ok((final_size, fees, own, add(total, -own).max(0.0)))
 }
 
 /// The most a `sell` may sell and short when cash is locked or the request is
@@ -247,9 +354,16 @@ fn sell_size_limit(
     order: &Order,
     percent: f64,
 ) -> core::result::Result<(f64, f64), StatusInfo> {
-    // Work out the largest position that can be sold and shorted.
+    // Work out the largest position that can be sold and shorted. Selling a
+    // long frees its proceeds less the debt they repay, which is zero without
+    // leverage.
     let long_size = state.position.max(0.0);
-    let long_cash = long_size * adj_price * (1.0 - order.fees);
+    let long_debt = if state.position > 0.0 {
+        state.debt
+    } else {
+        0.0
+    };
+    let long_cash = long_size * adj_price * (1.0 - order.fees) - long_debt;
     let total_free_cash = add(state.free_cash, long_cash);
 
     let max_size_limit = if total_free_cash <= 0.0 {
@@ -260,8 +374,11 @@ fn sell_size_limit(
         // A position to close, but no free cash to short beyond it.
         long_size
     } else {
-        let max_short_size =
-            add(total_free_cash, -order.fixed_fees) / (adj_price * (1.0 + order.fees));
+        // A short ties up `1 / leverage` of its value besides its proceeds,
+        // and pays its fees from free cash: `1 + fees` per unit of value at
+        // leverage 1, as in the reference.
+        let max_short_size = add(total_free_cash, -order.fixed_fees)
+            / (adj_price * (1.0 / order.leverage + order.fees));
         let limit = add(long_size, max_short_size);
         if limit <= 0.0 {
             return Err(StatusInfo::CantCoverFees);
@@ -282,6 +399,27 @@ fn sell_size_limit(
         // Reached only when size is infinite and a percentage is set.
         (max_size_limit, percent)
     })
+}
+
+/// What a leveraged long being sold repays: `(cash, debt, free_cash)` after
+/// repaying its debt in proportion to the part sold, or all of it when the
+/// sale closes the long.
+///
+/// Out of line because only leveraged runs have a long with debt, as
+/// [`levered_buy_cost`].
+#[cold]
+#[inline(never)]
+fn repay_long(state: &ExecuteOrderState, size: f64, new_position: f64) -> (f64, f64, f64) {
+    let repaid = if new_position > 0.0 {
+        size * (state.debt / state.position)
+    } else {
+        state.debt
+    };
+    (
+        add(state.cash, -repaid),
+        add(state.debt, -repaid),
+        add(state.free_cash, -repaid),
+    )
 }
 
 /// Sells, or opens/extends a short.
@@ -375,10 +513,31 @@ fn sell(
         ));
     }
 
-    let new_cash = state.cash + final_acq_cash;
     let new_position = add(state.position, -size_limit);
 
-    let (new_debt, new_free_cash) = if new_position < 0.0 {
+    // Selling a long frees its share of the own cash it tied up, and repays
+    // its share of what was borrowed for it. Without leverage a long has no
+    // debt, and the other balances it starts from are the state's own.
+    let (cash, debt, locked_cash, free_cash) = if state.position > 0.0 {
+        // Plain arithmetic, not `add`: closing the whole long frees it all,
+        // and a partial sale leaves a share well clear of zero.
+        let locked_cash = if new_position > 0.0 {
+            state.locked_cash - size_limit * (state.locked_cash / state.position)
+        } else {
+            0.0
+        };
+        if state.debt > 0.0 {
+            let (cash, debt, free_cash) = repay_long(&state, size_limit, new_position);
+            (cash, debt, locked_cash, free_cash)
+        } else {
+            (state.cash, state.debt, locked_cash, state.free_cash)
+        }
+    } else {
+        (state.cash, state.debt, state.locked_cash, state.free_cash)
+    };
+
+    let new_cash = cash + final_acq_cash;
+    let (new_debt, new_locked_cash, new_free_cash) = if new_position < 0.0 {
         // Only the part that ends up short creates debt and ties up margin.
         let short_size = if state.position < 0.0 {
             size_limit
@@ -386,14 +545,18 @@ fn sell(
             new_position.abs()
         };
         let short_value = short_size * adj_price;
-        // The doubled short value is the round-trip reservation.
-        let free_cash_diff = add(final_acq_cash, -2.0 * short_value);
+        // The proceeds are reserved, and so is the collateral: the short's
+        // value over the leverage. At leverage 1 the two are the reference's
+        // doubled short value, the round-trip reservation, to the last bit.
+        let collateral = short_value / order.leverage;
+        let free_cash_diff = add(final_acq_cash, -(short_value + collateral));
         (
-            state.debt + short_value,
-            add(state.free_cash, free_cash_diff),
+            debt + short_value,
+            locked_cash + collateral,
+            add(free_cash, free_cash_diff),
         )
     } else {
-        (state.debt, state.free_cash + final_acq_cash)
+        (debt, locked_cash, free_cash + final_acq_cash)
     };
 
     Ok((
@@ -401,6 +564,7 @@ fn sell(
             cash: new_cash,
             position: new_position,
             debt: new_debt,
+            locked_cash: new_locked_cash,
             free_cash: new_free_cash,
         },
         OrderResult::filled(size_limit, adj_price, fees_paid, OrderSide::Sell),
@@ -413,18 +577,33 @@ fn sell(
 /// checks the reference needs are absent here because the type system already
 /// makes them unrepresentable: `size_type` and `direction` are enums, so they
 /// cannot hold an out-of-range discriminant.
-/// The seven checks that read only the bar: state, price and direction.
-fn validate_bar(state: &ExecuteOrderState, order: &Order, position: f64) -> Result<()> {
+///
+/// The eight checks that read only the bar: state, price and direction.
+///
+/// `levered_account` admits cash below zero, which a leveraged account reaches
+/// when a long is sold for less than its debt: the account then owes the
+/// difference, and can sell but not buy until it is paid. Anywhere else a
+/// negative balance is a bad input, as in the reference.
+fn validate_bar(
+    state: &ExecuteOrderState,
+    order: &Order,
+    position: f64,
+    levered_account: bool,
+) -> Result<()> {
     let bail = |msg: &str| Err(Error::Invariant(msg.to_owned()));
 
-    if state.cash.is_nan() || state.cash < 0.0 {
+    if state.cash.is_nan() || (state.cash < 0.0 && !levered_account) {
         return bail("cash cannot be NaN and must be 0 or greater");
     }
     if !position.is_finite() {
         return bail("position must be finite");
     }
-    if !state.debt.is_finite() || state.debt < 0.0 {
-        return bail("debt must be finite and 0 or greater");
+    // Both balances in one test, which lets through nothing the two exact
+    // checks would stop. Written as two, each compiles to an integer
+    // classification of the float, about 17 instructions on aarch64, and
+    // this runs on every bar.
+    if !(state.debt + state.locked_cash).is_finite() || state.debt.min(state.locked_cash) < 0.0 {
+        balance_violation(state)?;
     }
     if state.free_cash.is_nan() {
         return bail("free_cash cannot be NaN");
@@ -442,7 +621,26 @@ fn validate_bar(state: &ExecuteOrderState, order: &Order, position: f64) -> Resu
     Ok(())
 }
 
-/// The seven checks that read only fields a whole column usually shares.
+/// The exact checks behind [`validate_bar`]'s test of `debt` and
+/// `locked_cash`. That test also fails when two finite balances add up to
+/// more than the largest float, which this lets through.
+#[cold]
+#[inline(never)]
+fn balance_violation(state: &ExecuteOrderState) -> Result<()> {
+    if !state.debt.is_finite() || state.debt < 0.0 {
+        return Err(Error::Invariant(
+            "debt must be finite and 0 or greater".into(),
+        ));
+    }
+    if !state.locked_cash.is_finite() || state.locked_cash < 0.0 {
+        return Err(Error::Invariant(
+            "locked_cash must be finite and 0 or greater".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The nine checks that read only fields a whole column usually shares.
 ///
 /// Separated from [`validate_bar`] so a caller with column-constant
 /// parameters can run them once instead of once per bar — see
@@ -473,6 +671,9 @@ fn param_violation(order: &Order) -> Option<&'static str> {
     if order.size_granularity.is_infinite() || order.size_granularity <= 0.0 {
         return Some("order.size_granularity must be NaN, or finite and greater than 0");
     }
+    if !order.leverage.is_finite() || order.leverage < 1.0 {
+        return Some("order.leverage must be finite and 1 or greater");
+    }
     if !order.reject_prob.is_finite() || !(0.0..=1.0).contains(&order.reject_prob) {
         return Some("order.reject_prob must be between 0 and 1");
     }
@@ -484,10 +685,10 @@ fn param_violation(order: &Order) -> Option<&'static str> {
 
 /// An [`Order`] whose column-invariant parameters have already been checked.
 ///
-/// Seven of the fourteen checks [`execute_order`] runs look only at fees,
-/// slippage, size bounds, granularity and rejection probability — fields a
-/// whole column normally shares. A bar that produces no fill still pays for
-/// all seven, and on a realistic strategy most bars produce no fill. Checking
+/// Nine of the seventeen checks [`execute_order`] runs look only at fees,
+/// slippage, size bounds, granularity, leverage, rejection probability and
+/// the cash cap — fields a whole column normally shares. A bar that produces
+/// no fill still pays for all nine, and on a realistic strategy most bars produce no fill. Checking
 /// them once per column instead is worth 12–15% there.
 ///
 /// Build one per column, then call [`set_bar`](Self::set_bar) each bar with
@@ -500,21 +701,39 @@ fn param_violation(order: &Order) -> Option<&'static str> {
 /// column of `NaN` sizes and an invalid fee rate must produce ignored orders,
 /// not an error. Failing eagerly here would change that. The violation is
 /// therefore carried and raised at the exact point the per-bar check would
-/// have raised it — which costs one branch instead of seven.
+/// have raised it — which costs one branch instead of nine.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ValidatedOrder {
     order: Order,
     violation: Option<&'static str>,
+    levered_account: bool,
 }
 
 impl ValidatedOrder {
     /// Checks `order`'s column-invariant parameters.
+    ///
+    /// An order whose `leverage` is above 1 accepts a negative cash balance;
+    /// see [`in_levered_account`](Self::in_levered_account).
     #[must_use]
     pub fn new(order: Order) -> Self {
         Self {
             violation: param_violation(&order),
+            levered_account: order.leverage > 1.0,
             order,
         }
+    }
+
+    /// Accepts a negative cash balance whatever this order's own leverage.
+    ///
+    /// A leveraged long sold for less than its debt leaves the account owing
+    /// the difference, so its cash goes below zero. Every order on that
+    /// account then has to accept the state — an unleveraged one in the same
+    /// group included — and is rejected for want of cash rather than stopping
+    /// the run. A loop marks every order of an account that may borrow.
+    #[must_use]
+    pub const fn in_levered_account(mut self) -> Self {
+        self.levered_account = true;
+        self
     }
 
     /// Overwrites the four fields that vary bar to bar.
@@ -579,7 +798,7 @@ pub fn execute_order(
 /// [`execute_order`], with the parameter checks already done.
 ///
 /// Identical in every observable way — same fills, same rejections, same
-/// error at the same point. It exists only so a column loop can hoist seven
+/// error at the same point. It exists only so a column loop can hoist nine
 /// checks out of itself; see [`ValidatedOrder`].
 ///
 /// # Errors
@@ -594,10 +813,13 @@ pub fn execute_validated(
     // Numerical stability: snap everything that should be zero to zero before
     // any comparison sees it. Residue here keeps closed positions nominally
     // open and makes affordability tests flap.
+    // `locked_cash` is left alone: it is only ever read in proportion to a
+    // position, and the kernel never leaves residue in it.
     let snap = |v: f64| if is_close(v, 0.0) { 0.0 } else { v };
     let cash = snap(state.cash);
     let position = snap(state.position);
     let debt = snap(state.debt);
+    let locked_cash = state.locked_cash;
     let free_cash = snap(state.free_cash);
     let val_price = snap(state.val_price);
     let value = snap(state.value);
@@ -606,6 +828,7 @@ pub fn execute_validated(
         cash,
         position,
         debt,
+        locked_cash,
         free_cash,
     };
 
@@ -627,7 +850,7 @@ pub fn execute_validated(
     // The bar half first, then the parameter half: that is the order the
     // checks ran in when they were one function, and it decides which message
     // an order that violates both reports.
-    validate_bar(&exec_state, order, position)?;
+    validate_bar(&exec_state, order, position, validated.levered_account)?;
     validated.check()?;
 
     if order.reject_prob > 0.0 && reject_draw.is_none() {
@@ -923,6 +1146,245 @@ mod tests {
         assert_eq!(state.cash, 150.0);
         assert_eq!(state.debt, 50.0);
         assert_eq!(state.free_cash, 50.0);
+    }
+
+    /// `start` with the balances an execution left.
+    fn carry(state: ExecuteOrderState, start: ProcessOrderState) -> ProcessOrderState {
+        ProcessOrderState {
+            cash: state.cash,
+            position: state.position,
+            debt: state.debt,
+            locked_cash: state.locked_cash,
+            free_cash: state.free_cash,
+            ..start
+        }
+    }
+
+    fn levered(size: f64, leverage: f64, leverage_mode: LeverageMode) -> Order {
+        Order {
+            size,
+            price: 100.0,
+            leverage,
+            leverage_mode,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_percent_buy_uses_the_whole_leveraged_buying_power() {
+        // $1000 at 3x buys $3000 of stock: 30 shares at $100.
+        let order = Order {
+            size_type: SizeType::Percent,
+            ..levered(1.0, 3.0, LeverageMode::Lazy)
+        };
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.size, 30.0);
+        assert_eq!(state.cash, 0.0);
+        assert_eq!(state.debt, 2000.0);
+        assert_eq!(state.locked_cash, 1000.0);
+        assert_eq!(state.free_cash, 0.0);
+    }
+
+    #[test]
+    fn eager_leverage_borrows_as_much_as_it_can() {
+        // 10 @ 100 at 2x: half paid, half borrowed, though the cash would
+        // cover all of it.
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let order = levered(10.0, 2.0, LeverageMode::Eager);
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.size, 10.0);
+        assert_eq!(state.cash, 500.0);
+        assert_eq!(state.debt, 500.0);
+        assert_eq!(state.locked_cash, 500.0);
+        assert_eq!(state.free_cash, 500.0);
+    }
+
+    #[test]
+    fn lazy_leverage_borrows_only_what_cash_cannot_cover() {
+        let order = levered(10.0, 2.0, LeverageMode::Lazy);
+
+        let (state, _) =
+            execute_order(&ProcessOrderState::flat(1000.0, 100.0), &order, None).unwrap();
+        assert_eq!(state.cash, 0.0);
+        assert_eq!(state.debt, 0.0);
+        assert_eq!(state.locked_cash, 1000.0);
+
+        let (state, _) =
+            execute_order(&ProcessOrderState::flat(600.0, 100.0), &order, None).unwrap();
+        assert_eq!(state.cash, 0.0);
+        assert_eq!(state.debt, 400.0);
+        assert_eq!(state.locked_cash, 600.0);
+    }
+
+    #[test]
+    fn a_leveraged_buy_short_of_cash_fills_what_the_cash_carries() {
+        // $300 at 2x carries $600 of stock.
+        let start = ProcessOrderState::flat(300.0, 100.0);
+        let order = levered(10.0, 2.0, LeverageMode::Lazy);
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.size, 6.0);
+        assert_eq!(state.debt, 300.0);
+        assert_eq!(state.cash, 0.0);
+
+        let strict = Order {
+            allow_partial: false,
+            ..order
+        };
+        let (_, result) = execute_order(&start, &strict, None).unwrap();
+        assert_eq!(result.status_info, Some(StatusInfo::PartialFill));
+    }
+
+    #[test]
+    fn fees_are_paid_from_own_cash() {
+        // 10 @ 100 at 2x with 1% fees: $500 own, $10 fees, $500 borrowed.
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let order = Order {
+            fees: 0.01,
+            ..levered(10.0, 2.0, LeverageMode::Eager)
+        };
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.fees, 10.0);
+        assert_eq!(state.cash, 490.0);
+        assert_eq!(state.debt, 500.0);
+        assert_eq!(state.locked_cash, 500.0);
+    }
+
+    #[test]
+    fn selling_a_leveraged_long_repays_its_debt() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (long, _) =
+            execute_order(&start, &levered(10.0, 2.0, LeverageMode::Eager), None).unwrap();
+        let held = carry(long, start);
+        let sell = |size: f64| Order {
+            price: 120.0,
+            ..levered(size, 2.0, LeverageMode::Eager)
+        };
+
+        // Half: repays half the debt and frees half the own cash.
+        let (state, _) = execute_order(&held, &sell(-5.0), None).unwrap();
+        assert_eq!(state.cash, 850.0);
+        assert_eq!(state.debt, 250.0);
+        assert_eq!(state.locked_cash, 250.0);
+        assert_eq!(state.free_cash, 850.0);
+
+        // All of it: 1200 of proceeds less the 500 owed.
+        let (state, _) = execute_order(&held, &sell(-10.0), None).unwrap();
+        assert_eq!(state.cash, 1200.0);
+        assert_eq!(state.debt, 0.0);
+        assert_eq!(state.locked_cash, 0.0);
+        assert_eq!(state.free_cash, 1200.0);
+    }
+
+    #[test]
+    fn a_long_sold_below_its_debt_leaves_the_account_owing() {
+        // $250 at 4x holds $1000 of stock; at half the price it repays only
+        // 500 of the 750 borrowed.
+        let start = ProcessOrderState::flat(250.0, 100.0);
+        let (long, _) =
+            execute_order(&start, &levered(10.0, 4.0, LeverageMode::Lazy), None).unwrap();
+        assert_eq!(long.debt, 750.0);
+        let held = carry(long, start);
+        let crash = Order {
+            price: 50.0,
+            ..levered(-10.0, 4.0, LeverageMode::Lazy)
+        };
+        let (owing, _) = execute_order(&held, &crash, None).unwrap();
+        assert_eq!(owing.cash, -250.0);
+        assert_eq!(owing.debt, 0.0);
+        let owing = carry(owing, start);
+
+        // A leveraged buy has no own cash to put up.
+        let (_, result) =
+            execute_order(&owing, &levered(1.0, 4.0, LeverageMode::Lazy), None).unwrap();
+        assert_eq!(result.status_info, Some(StatusInfo::NoCashLeverage));
+
+        // An unleveraged one in the same account is rejected, not an error;
+        // outside a leveraged account the balance is invalid.
+        let plain = levered(1.0, 1.0, LeverageMode::Lazy);
+        let in_account = ValidatedOrder::new(plain).in_levered_account();
+        let (_, result) = execute_validated(&owing, &in_account, None).unwrap();
+        assert_eq!(result.status_info, Some(StatusInfo::NoCashLong));
+        assert!(execute_order(&owing, &plain, None).is_err());
+    }
+
+    #[test]
+    fn a_short_ties_up_its_value_over_the_leverage() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let short = Order {
+            fees: 0.01,
+            ..levered(-10.0, 2.0, LeverageMode::Lazy)
+        };
+        let (state, _) = execute_order(&start, &short, None).unwrap();
+        // Proceeds of 1000 less 10 of fees; 1000 reserved as debt and 500 as
+        // collateral, so free cash drops by 500 + 10.
+        assert_eq!(state.cash, 1990.0);
+        assert_eq!(state.debt, 1000.0);
+        assert_eq!(state.locked_cash, 500.0);
+        assert_eq!(state.free_cash, 490.0);
+
+        // Covering at the same price releases both and costs only the fees.
+        let held = carry(state, start);
+        let cover = Order {
+            fees: 0.01,
+            ..levered(10.0, 2.0, LeverageMode::Lazy)
+        };
+        let (state, _) = execute_order(&held, &cover, None).unwrap();
+        assert_eq!(state.position, 0.0);
+        assert_eq!(state.cash, 980.0);
+        assert_eq!(state.debt, 0.0);
+        assert_eq!(state.locked_cash, 0.0);
+        assert_eq!(state.free_cash, 980.0);
+    }
+
+    #[test]
+    fn a_locked_short_is_capped_by_leveraged_collateral() {
+        // $1000 of free cash backs $2000 of short at 2x.
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let order = Order {
+            lock_cash: true,
+            ..levered(-30.0, 2.0, LeverageMode::Lazy)
+        };
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.size, 20.0);
+        assert_eq!(state.free_cash, 0.0);
+    }
+
+    #[test]
+    fn a_buy_through_a_short_covers_at_full_price_and_levers_the_rest() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (short, _) =
+            execute_order(&start, &levered(-5.0, 2.0, LeverageMode::Eager), None).unwrap();
+        let held = carry(short, start);
+        // Cover 5 for 500, then 10 long for 500 own and 500 borrowed: the
+        // same account as an eager 10 long opened from flat.
+        let (state, _) =
+            execute_order(&held, &levered(15.0, 2.0, LeverageMode::Eager), None).unwrap();
+        assert_eq!(state.position, 10.0);
+        assert_eq!(state.cash, 500.0);
+        assert_eq!(state.debt, 500.0);
+        assert_eq!(state.locked_cash, 500.0);
+        assert_eq!(state.free_cash, 500.0);
+    }
+
+    #[test]
+    fn leverage_below_one_or_not_finite_is_an_error() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        for leverage in [0.5, 0.0, -2.0, f64::NAN, f64::INFINITY] {
+            let order = levered(1.0, leverage, LeverageMode::Lazy);
+            let err = execute_order(&start, &order, None).unwrap_err();
+            assert!(format!("{err}").contains("leverage"), "{leverage}");
+        }
+    }
+
+    #[test]
+    fn leverage_one_is_the_unleveraged_kernel_in_either_mode() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        for size in [3.0, 25.0, -4.0, f64::INFINITY] {
+            let plain = execute_order(&start, &levered(size, 1.0, LeverageMode::Lazy), None);
+            let eager = execute_order(&start, &levered(size, 1.0, LeverageMode::Eager), None);
+            assert_eq!(plain.unwrap(), eager.unwrap(), "{size}");
+        }
     }
 
     #[test]

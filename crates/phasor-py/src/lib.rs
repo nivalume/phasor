@@ -526,6 +526,11 @@ impl PyPortfolio {
     ///
     /// Struct-of-arrays, as the record layer stores them, so a caller can build
     /// a DataFrame from it without a transpose.
+    ///
+    /// A run with any column above leverage 1 adds `debt` and `locked_cash`:
+    /// what each fill left the column owing and tying up of its own cash.
+    /// Other runs leave them out rather than return them empty, so every array
+    /// in the dict has one entry per fill.
     fn orders<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let out = PyDict::new(py);
         out.set_item("col", self.orders.col.clone().into_pyarray(py))?;
@@ -535,6 +540,13 @@ impl PyPortfolio {
         out.set_item("fees", self.orders.fees.clone().into_pyarray(py))?;
         let side: Vec<i64> = self.orders.side.iter().map(|s| i64::from(*s)).collect();
         out.set_item("side", side.into_pyarray(py))?;
+        if !self.orders.debt.is_empty() {
+            out.set_item("debt", self.orders.debt.clone().into_pyarray(py))?;
+            out.set_item(
+                "locked_cash",
+                self.orders.locked_cash.clone().into_pyarray(py),
+            )?;
+        }
         Ok(out)
     }
 
@@ -561,7 +573,10 @@ impl PyPortfolio {
         self.logs.len()
     }
 
-    /// The logs, as a dict of NumPy arrays — the 38-field schema.
+    /// The logs, as a dict of NumPy arrays — the reference's 38-field schema
+    /// plus leverage's four: `locked_cash` and `new_locked_cash` on either
+    /// side of the order, `req_leverage` and `req_leverage_mode` in the
+    /// request. `req_leverage_mode` is 0 for lazy and 1 for eager.
     ///
     /// One row per order **considered**, filled or not, which is the difference
     /// from [`Self::orders`] and the whole reason to ask for logs. Without them
@@ -589,6 +604,7 @@ impl PyPortfolio {
         put_i("idx", l.idx.clone())?;
         put_i("req_size_type", l.req_size_type.clone())?;
         put_i("req_direction", l.req_direction.clone())?;
+        put_i("req_leverage_mode", l.req_leverage_mode.clone())?;
         put_i("res_side", l.res_side.clone())?;
         put_i("res_status", l.res_status.clone())?;
         put_i("res_status_info", l.res_status_info.clone())?;
@@ -601,6 +617,7 @@ impl PyPortfolio {
         put_f("cash", l.cash.clone())?;
         put_f("position", l.position.clone())?;
         put_f("debt", l.debt.clone())?;
+        put_f("locked_cash", l.locked_cash.clone())?;
         put_f("free_cash", l.free_cash.clone())?;
         put_f("val_price", l.val_price.clone())?;
         put_f("value", l.value.clone())?;
@@ -612,10 +629,12 @@ impl PyPortfolio {
         put_f("req_min_size", l.req_min_size.clone())?;
         put_f("req_max_size", l.req_max_size.clone())?;
         put_f("req_size_granularity", l.req_size_granularity.clone())?;
+        put_f("req_leverage", l.req_leverage.clone())?;
         put_f("req_reject_prob", l.req_reject_prob.clone())?;
         put_f("new_cash", l.new_cash.clone())?;
         put_f("new_position", l.new_position.clone())?;
         put_f("new_debt", l.new_debt.clone())?;
+        put_f("new_locked_cash", l.new_locked_cash.clone())?;
         put_f("new_free_cash", l.new_free_cash.clone())?;
         put_f("new_val_price", l.new_val_price.clone())?;
         put_f("new_value", l.new_value.clone())?;
@@ -924,6 +943,8 @@ fn deposits_view<'a>(
     min_size = None,
     max_size = None,
     size_granularity = None,
+    leverage = None,
+    leverage_mode = "lazy",
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -978,6 +999,8 @@ fn from_signals(
     min_size: Option<&Bound<'_, PyAny>>,
     max_size: Option<&Bound<'_, PyAny>>,
     size_granularity: Option<&Bound<'_, PyAny>>,
+    leverage: Option<&Bound<'_, PyAny>>,
+    leverage_mode: &str,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1055,6 +1078,7 @@ fn from_signals(
         min_size,
         max_size,
         size_granularity,
+        leverage,
         cash_limit,
         reject_prob,
         lock_cash,
@@ -1065,6 +1089,7 @@ fn from_signals(
 
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
+    let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     if !matches!(
         st,
@@ -1163,6 +1188,8 @@ fn from_signals(
             per_col,
             d.size_granularity,
         )?,
+        leverage: flex_or_f64(&p.leverage, n_rows, n_cols, per_col, d.leverage)?,
+        leverage_mode: FlexArray::Scalar(leverage_mode),
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
@@ -1264,6 +1291,8 @@ fn from_signals(
     min_size = None,
     max_size = None,
     size_granularity = None,
+    leverage = None,
+    leverage_mode = "lazy",
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1305,6 +1334,8 @@ fn from_orders(
     min_size: Option<&Bound<'_, PyAny>>,
     max_size: Option<&Bound<'_, PyAny>>,
     size_granularity: Option<&Bound<'_, PyAny>>,
+    leverage: Option<&Bound<'_, PyAny>>,
+    leverage_mode: &str,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1352,6 +1383,7 @@ fn from_orders(
         min_size,
         max_size,
         size_granularity,
+        leverage,
         cash_limit,
         reject_prob,
         lock_cash,
@@ -1362,6 +1394,7 @@ fn from_orders(
 
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
+    let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     let trades_type = parse::trades_type(trades).map_err(bad)?;
 
@@ -1416,6 +1449,8 @@ fn from_orders(
             per_col,
             d.size_granularity,
         )?,
+        leverage: flex_or_f64(&p.leverage, n_rows, n_cols, per_col, d.leverage)?,
+        leverage_mode: FlexArray::Scalar(leverage_mode),
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,

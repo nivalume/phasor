@@ -92,6 +92,20 @@ pub(crate) fn count_where<T: Copy>(
     }
 }
 
+/// Whether any column of a run may borrow: whether `leverage` exceeds 1
+/// anywhere in it.
+///
+/// Decided once per run, because it decides whether the records keep
+/// balances, and they keep them for every fill or for none. The default, a
+/// scalar 1, is answered without a scan.
+pub(crate) fn any_levered(
+    leverage: &phasor_core::flex::FlexArray<'_, f64>,
+    n_rows: usize,
+    n_cols: usize,
+) -> bool {
+    count_where(leverage, n_rows, 0..n_cols, |l| l > 1.0) > 0
+}
+
 /// The smallest fill the reference accepts by default.
 ///
 /// Not zero, which is what one would write. The reference's own default is

@@ -148,7 +148,9 @@ fn matches_the_reference_stats_table() {
             cash_deposits: FlexArray::scalar(0.0),
             cash_earnings: FlexArray::scalar(0.0),
             cash_dividends: FlexArray::scalar(0.0),
-            // Neither is in the reference.
+            // None of these is in the reference.
+            leverage: FlexArray::scalar(1.0),
+            leverage_mode: FlexArray::scalar(phasor_model::LeverageMode::Lazy),
             cash_limit: FlexArray::scalar(f64::INFINITY),
             reject_prob: FlexArray::scalar(0.0),
             seed: 0,

@@ -207,7 +207,7 @@ columns while only 100 exist (`column_map` in Python).
 
 | Item | Detail |
 |---|---|
-| Execution enums (`enums.rs`) | `#[repr(i8)]`, discriminants pinned by a test (records store integers): `SizeType`, `Direction`, `OrderSide`, `OrderStatus`, `StatusInfo` (14 reasons), `CashFlowKind`, plus signal, stop and record enums with vectorbt semantics |
+| Execution enums (`enums.rs`) | `#[repr(i8)]`, discriminants pinned by a test (records store integers): `SizeType`, `Direction`, `OrderSide`, `OrderStatus`, `StatusInfo` (15 reasons), `LeverageMode`, `CashFlowKind`, plus signal, stop and record enums with vectorbt semantics |
 | Ids (`ids.rs`) | `Symbol`, `Venue` (`Arc<str>`), `InstrumentId` shown as `SYMBOL.VENUE`; not interned yet (§17.4) |
 | `BarType` (`bar.rs`) | `SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE`, parsed with `rsplitn(5, '-')`; the catalog key (§4.1) |
 | Fixed point (`types.rs`) | `Price { raw: i64 }`, `Quantity { raw: u64 }`, 9 decimals, Nautilus shape; for phase 2 (phase 1 is `f64`) |
@@ -445,20 +445,33 @@ executes one order against one account at one bar. Both loops call it, and phase
 
 | Type | Fields |
 |---|---|
-| `ExecuteOrderState` | `cash, position (signed), debt, free_cash` |
+| `ExecuteOrderState` | `cash, position (signed), debt, locked_cash, free_cash` |
 | `ProcessOrderState` | + `val_price, value`, record counters |
-| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
+| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, leverage=1, leverage_mode=Lazy, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
 | `OrderResult` | `size, price, fees, side, status, status_info` |
 
-`debt` = short proceeds at entry price; opening a short moves `free_cash` by
-`proceeds − 2 × short_value` (collateral). It is path-dependent, so it is explicit state.
+`cash` is own cash: borrowed money is never in it. `debt` is what the column
+owes: a short's proceeds at entry price, or what a leveraged long borrowed.
+`locked_cash` is the own cash the position ties up: a long's paid-in share of its
+cost, a short's collateral (`value / leverage` at entry). `free_cash` is own cash
+net of what shorts tie up, so opening a short moves it by
+`proceeds − short_value − short_value / leverage`, the reference's
+`proceeds − 2 × short_value` at leverage 1. All of it is path-dependent, so it is
+explicit state. Without leverage a long has no debt and a short's `locked_cash`
+equals its `debt`, the only state the reference can describe (§7.7).
 
 ### 7.2 Validation
 
 1. Zero-snap state values that are `is_close` to 0.
 2. NaN size / NaN price → `Ignored` (before validation).
-3. `validate_bar`: finite non-negative cash and debt, finite position, price > 0, direction consistent with position.
-4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `reject_prob ∈ [0,1]`, `cash_limit ≥ 0`.
+3. `validate_bar`: cash not NaN and ≥ 0 (below 0 allowed in a leveraged account, §7.7), finite non-negative `debt` and `locked_cash`, finite position, price > 0, direction consistent with position.
+4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `leverage` finite and ≥ 1, `reject_prob ∈ [0,1]`, `cash_limit ≥ 0`.
+
+`locked_cash` is not zero-snapped: it is only read in proportion to a position, and
+the kernel leaves no residue in it. `debt` and `locked_cash` are tested together
+(`(debt + locked_cash).is_finite()` and `debt.min(locked_cash) ≥ 0`), with the
+exact checks in a cold function: on aarch64 each `!x.is_finite() || x < 0` compiles
+to an integer classification of about 17 instructions, and this runs every bar.
 
 Violations are `Err(Invariant)`. `ValidatedOrder` caches step 4 per column and
 swaps only per-bar fields (`set_bar`): +30% sparse / +22% dense in `benchmarks/README.md`.
@@ -476,9 +489,9 @@ take the sell branch, as in the reference.
 |---|---|---|
 | price | `price × (1 + slippage)` | `price × (1 − slippage)` |
 | cap | cash (or `lock_cash` closed form over `free_cash`), × `percent`; `ShortOnly` covers only | `LongOnly` caps at position; shorts bounded by `free_cash` + long proceeds |
-| fees | inside the cash cap; if unaffordable back-solve `(cash_limit − fixed_fees) / (1 + fees)`, then **granularity again** | `CantCoverFees` if proceeds net of fees < 0 |
-| checks | `max_size`, `SizeZero`, `MinSizeNotReached`, `PartialFill` | same + `NoOpenPosition`, `NoCashShort` |
-| debt | covering releases debt, adds `2 × debt_diff` to `free_cash` | a new short adds debt, reserves `2 × short_value` |
+| fees | inside the cash cap; if unaffordable back-solve `(cash_limit − fixed_fees) / (1 + fees)`, then **granularity again**; leveraged: §7.7 | `CantCoverFees` if proceeds net of fees < 0 |
+| checks | `max_size`, `SizeZero`, `MinSizeNotReached`, `PartialFill`, `NoCashLong` / `NoCashLeverage` | same + `NoOpenPosition`, `NoCashShort` |
+| debt | covering releases debt and collateral, adds `debt_diff + locked_diff` to `free_cash` (`2 × debt_diff` at leverage 1); a leveraged long borrows into `debt` | a new short adds debt, reserves `short_value + short_value / leverage`; selling a long repays its share of debt and frees its share of `locked_cash` |
 
 ### 7.5 Why the tolerance matters here
 
@@ -489,9 +502,11 @@ fixtures built with `math.nextafter` now catch it (§14.4).
 
 ### 7.6 Outcomes and rejection reasons
 
-`OrderStatus`: `Filled | Ignored | Rejected`. `StatusInfo` (14): `SizeNaN PriceNaN
+`OrderStatus`: `Filled | Ignored | Rejected`. `StatusInfo` (15): `SizeNaN PriceNaN
 ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition
-MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`.
+MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill
+NoCashLeverage`; the first 14 are the reference's, `NoCashLeverage` (14) is a
+leveraged buy with no own cash to put up.
 `raise_reject` turns a rejection into an error. `reject_prob` takes a
 caller-supplied draw. Both loops compute it from `(seed, row, col)` with
 SplitMix64 (`phasor_core::random::uniform`, `crates/phasor-core/src/random.rs`),
@@ -501,6 +516,26 @@ same orders. The random signals (§6.2) and the synthetic prices draw through
 the same module.
 `cash_limit` (not in the reference, not in the log schema) caps the cash a buy
 may spend, applied before `percent`; sells and shorts are unaffected.
+
+### 7.7 Leverage
+
+`Order::leverage` (≥ 1, default 1) is buying power per unit of own cash; not in the
+reference, which has only leverage 1. At 1 every fill is the reference's to the
+bit, which the parity fixtures check; the leveraged paths are separate code, out
+of line where they would otherwise sit on the hot path.
+
+| | Without leverage | `leverage = λ > 1` |
+|---|---|---|
+| long buy | own cash pays notional + fees | own cash pays `1/λ` of the long part, all of any short being covered, and every fee; the rest is borrowed into `debt` |
+| `leverage_mode` | — | `Lazy` (default): own cash first, up to the cap, borrow the rest (nothing when it all fits). `Eager`: always borrow `1 − 1/λ` |
+| `percent` | of own cash | of own cash, then levered: 100% at 3× buys three times the cash |
+| long sell | proceeds to cash | proceeds repay the long's share of `debt` first; its share of `locked_cash` is freed |
+| short | reserves proceeds + value | reserves proceeds + `value / λ` (λ = 2 is Reg T's 150%); with `lock_cash` or a percentage the size limit is `(free_cash − fixed_fees) / (price × (1/λ + fees))` |
+| negative cash | invalid state | a long sold below its debt leaves the account owing; the account can sell, and its buys are rejected (`NoCashLeverage` if the order is leveraged, else `NoCashLong`) |
+
+Not yet: interest on debt, maintenance margin, liquidation and funding (plan C1–C4).
+`CallSeq::Auto` sorts by `approx_order_value`, which does not account for
+leverage.
 
 ---
 
@@ -544,6 +579,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Logged variants write one row per order *considered*; off by default (a log row is ~5× an order record). A test asserts logging does not change orders.
 - Both loops build each column's `ValidatedOrder` once (a second, slippage-free one for stops resting at their level in `from_signals`) and rebuild per bar only when a parameter varies by row; a bar with no signal and no armed stop skips sizing.
 - Both loops are generic over `SinkBuffer` (§9.3).
+- Leverage: `any_levered` decides once per run whether any column's `leverage` exceeds 1. Each loop has a `const LEV: bool` copy, as `FLOWS` (§8.5), so a run without leverage has no code for it. With it, every order is marked `in_levered_account()` (accepts negative cash), the bar's value subtracts each long's debt, an `update_value` re-mark subtracts the debt a fill added, and each fill records its `debt` and `locked_cash` (§9.1). A column at leverage 1 in a leveraged run fills exactly as in a run without one.
 
 ### 8.5 Cash flows outside fills
 
@@ -572,8 +608,8 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 
 | Record | Fields | Row = |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side` | one fill |
-| `LogRecords` | 37: before-state, `req_*`, `new_*`, `res_*`, `order_id` | one order considered |
+| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill, in leveraged runs only (empty otherwise) | one fill |
+| `LogRecords` | 41: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode` | one order considered |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | phasor-signals ranges |
@@ -645,6 +681,7 @@ groups), `from_orders` / `from_signals` (run the simulation).
 - `cash_flow` and `free_cash_flow` add the `CashRecords` amounts to the fills' flows.
 - A deposit is not a return: `returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`, the first bar measured from `init_cash + deposit[0]`. Without deposits the chain is unchanged, bit for bit.
 - With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
+- Leverage: a fill's cash flow is its full price, so `cash()` is own cash less what longs borrowed and can go below zero, while `value()` stays equity. `free_cash` cannot be rebuilt from fills alone once a short's collateral depends on λ, so in a leveraged run `free_cash_flow` reads each fill's recorded `debt + locked_cash` as the short's reserve (a leveraged long reserves nothing). `gross_exposure` of a 2× long is therefore 2.
 
 ### 10.3 Metrics
 
@@ -747,7 +784,9 @@ mirror the Rust structs: every parameter is scalar, per-column 1-D or `(T, C)`;
 price memory); stops need `high` and `low`. `cash_deposits` and `cash_earnings`
 read a 1-D array as one value per bar; a shared run's `cash_deposits` matrix is
 `(T, n_groups)`, mapped onto columns without copying. `Portfolio.cash_records()`
-returns what was applied.
+returns what was applied. `leverage` takes the same shapes as the other
+parameters, `leverage_mode` is `"lazy" | "eager"` (§7.7); in a leveraged run
+`orders()` adds `debt` and `locked_cash`.
 
 ### 12.4 Other bindings
 

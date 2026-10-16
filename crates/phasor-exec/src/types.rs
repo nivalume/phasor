@@ -1,42 +1,59 @@
 //! State, request and result types for order execution.
 
-use phasor_model::{Direction, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, StatusInfo};
 
 /// Account state that an order execution reads and rewrites.
 ///
-/// `debt` and `free_cash` are the two fields that are easy to get wrong.
+/// `debt`, `locked_cash` and `free_cash` are the fields that are easy to get
+/// wrong.
 ///
-/// - `debt` is the proceeds of open short sales, held at their average entry
-///   price. It is what a short position "owes" back.
-/// - `free_cash` is cash net of the margin those shorts tie up. Opening or
-///   extending a short moves it by `proceeds - 2 * short_value`: once for the
-///   position's own value and once for the round-trip reservation. Closing
-///   unwinds it symmetrically through `debt / |position|`.
+/// - `cash` is the account's own cash. Borrowed money is not in it: a
+///   leveraged buy spends own cash only for the part it does not borrow.
+/// - `debt` is what the column owes. On a short it is the proceeds of the
+///   open short sales, held at their average entry price — what the short
+///   "owes" back. On a leveraged long it is the money borrowed to buy it.
+/// - `locked_cash` is the own cash the position ties up. On a long it is the
+///   own part of what was paid for it, already gone from `cash`. On a short it
+///   is the collateral, `value / leverage` at entry, still in `cash` but not
+///   free.
+/// - `free_cash` is own cash net of what open shorts tie up: their proceeds
+///   and their collateral. Opening or extending a short moves it by
+///   `proceeds - short_value - short_value / leverage`; at leverage 1 that is
+///   the reference's `proceeds - 2 * short_value`, once for the position's own
+///   value and once for the round-trip reservation. Closing unwinds it
+///   through `(debt + locked_cash) / |position|`.
+///
+/// Without leverage a long has no debt and a short's `locked_cash` equals its
+/// `debt`, which is the only state the reference can describe.
 ///
 /// Carrying only `cash` and `position` and deriving the rest does not work —
 /// the reservation is path-dependent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExecuteOrderState {
-    /// Cash on hand.
+    /// Own cash.
     pub cash: f64,
     /// Signed position size; negative is short.
     pub position: f64,
-    /// Proceeds of open shorts, at average entry price.
+    /// What the column owes: short proceeds, or a long's borrowing.
     pub debt: f64,
-    /// Cash net of short margin reservation.
+    /// Own cash the position ties up: a long's own part, a short's collateral.
+    pub locked_cash: f64,
+    /// Own cash net of what open shorts tie up.
     pub free_cash: f64,
 }
 
 /// [`ExecuteOrderState`] plus the bookkeeping the simulation loop maintains.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProcessOrderState {
-    /// Cash on hand.
+    /// Own cash.
     pub cash: f64,
     /// Signed position size.
     pub position: f64,
-    /// Proceeds of open shorts.
+    /// What the column owes: short proceeds, or a long's borrowing.
     pub debt: f64,
-    /// Cash net of short margin reservation.
+    /// Own cash the position ties up.
+    pub locked_cash: f64,
+    /// Own cash net of what open shorts tie up.
     pub free_cash: f64,
     /// Price used to value the position.
     pub val_price: f64,
@@ -56,6 +73,7 @@ impl ProcessOrderState {
             cash,
             position: 0.0,
             debt: 0.0,
+            locked_cash: 0.0,
             free_cash: cash,
             val_price,
             value: cash,
@@ -93,6 +111,16 @@ pub struct Order {
     pub max_size: f64,
     /// Round sizes down to a multiple of this.
     pub size_granularity: f64,
+    /// How many times its own cash a buy may be worth, `1` or more.
+    ///
+    /// A buy needs own cash for `1 / leverage` of its notional plus the fees,
+    /// and borrows the rest into `debt`. A short ties up its proceeds plus
+    /// `1 / leverage` of its value. At `1`, the default, nothing is borrowed
+    /// and the order behaves exactly as in the reference.
+    pub leverage: f64,
+    /// Whether a leveraged buy borrows only what own cash cannot cover, or
+    /// always `1 - 1 / leverage` of it.
+    pub leverage_mode: LeverageMode,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     ///
     /// Applied to the cash available before `percent` takes its share, so
@@ -128,6 +156,8 @@ impl Default for Order {
             min_size: 0.0,
             max_size: f64::INFINITY,
             size_granularity: f64::NAN,
+            leverage: 1.0,
+            leverage_mode: LeverageMode::Lazy,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,

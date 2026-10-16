@@ -137,6 +137,7 @@ fn matches_the_reference_across_chained_orders() {
                     next.cash = got_state.cash;
                     next.position = got_state.position;
                     next.debt = got_state.debt;
+                    next.locked_cash = got_state.locked_cash;
                     next.free_cash = got_state.free_cash;
                     state = Some(next);
                 } else {

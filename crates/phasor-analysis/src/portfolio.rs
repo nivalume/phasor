@@ -538,6 +538,11 @@ impl<'a> Portfolio<'a> {
     }
 
     /// Cash held at the end of each bar.
+    ///
+    /// Every fill is charged its whole price, so under leverage this is own
+    /// cash less what the longs borrowed, and goes negative once more was
+    /// borrowed than is held. That is what keeps [`Self::value`] equal to the
+    /// account's equity without a separate debt series.
     #[must_use]
     pub fn cash(&self) -> &Matrix {
         self.cache.cash.get_or_init(|| {
@@ -549,7 +554,8 @@ impl<'a> Portfolio<'a> {
     /// Cash net of the margin an open short reserves.
     ///
     /// Identical to [`Self::cash`] on a long-only run, and lower wherever
-    /// something is short.
+    /// something is short. A short reserves its proceeds plus `value /
+    /// leverage`: twice its value without leverage.
     ///
     /// # Errors
     ///

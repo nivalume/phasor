@@ -1,7 +1,8 @@
 # phasor 功能扩展计划：对齐 VectorBT PRO
 
 目标：把 VectorBT PRO（下称 PRO）公开文档里列出的功能在 phasor 里全部实现，并补上
-PRO 没有、但加密货币回测需要的保证金、强平和资金费。
+PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融资、借贷利息）。这几项不只用于加密货币，
+期货、外汇、CFD 和股票融资融券也要用。
 
 功能清单来自 2026-10 对 [vectorbt.pro/features](https://vectorbt.pro/features/overview/)
 各页面的整理。PRO 页面没有写明参数名的功能，下文只描述行为。
@@ -27,9 +28,9 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | 阶段 | 内容 | 完成 | 部分完成 | 未开始 |
 |---|---|---:|---:|---:|
 | P | 维护与技术债 | 3 | 0 | 0 |
-| A | 账户模型地基 | 1 | 1 | 2 |
-| B | 现金流、杠杆、合约 | 5 | 0 | 5 |
-| C | 保证金、强平、资金费（PRO 没有） | 0 | 0 | 5 |
+| A | 账户模型地基 | 2 | 1 | 1 |
+| B | 现金流、杠杆、合约 | 6 | 0 | 4 |
+| C | 保证金账户、强平、持仓费（PRO 没有） | 0 | 0 | 5 |
 | D | 订单与止损 | 0 | 0 | 9 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
@@ -40,11 +41,11 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **10** | **9** | **60** |
+| **合计** | | **12** | **9** | **58** |
 
 ### 下一步（按优先级）
 
-1. **B4 → C1–C4**：杠杆、保证金、强平、资金费。这是资金费套利回测的关键路径，做完才能在 phasor 里准确回测现货多 + 永续空。
+1. **C1–C4**：保证金、强平、持仓费（杠杆 B4 已完成）。这是资金费套利、期货和融资融券回测的关键路径，做完才能在 phasor 里准确回测现货多 + 永续空、期货 CTA、带融资利息的股票多空。
 
 ---
 
@@ -112,7 +113,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 为什么：分析层只从记录重建余额。入金、利息、分红、资金费都不是成交，没有记录就进不了现金和净值。
   - 做了什么：
     - `CashRecords { col, idx, amount, kind }`，作为 `OrderRecords.cash` 字段存放。这样 sink、多线程合并、排序、`Portfolio` 构造函数不用改接口就会带上它。
-    - `kind`：`Deposit`、`Earning`、`Dividend`。资金费、利息、强平在对应功能落地时追加。
+    - `kind`：`Deposit`、`Earning`、`Dividend`。持仓费、利息、强平在对应功能落地时追加。
     - 分析层的现金和可用现金都计入这些记录。入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`。有入金时，总收益改为逐根连乘，回撤在扣掉入金后的曲线上计算。
   - 位置：`crates/phasor-records/src/cash.rs`，`crates/phasor-analysis/src/series.rs`，`ARCHITECTURE.md` §8.5、§9.1、§10.2。
 
@@ -124,7 +125,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - [x] 现有止损 `sl_stop`/`tp_stop`：跳空时按开盘价成交，盘中按 high/low 触发，同一根 K 线上止损先于止盈；`price=-inf` 按开盘价成交。这部分原本就有，和 vectorbt 1.1.0 对照过（`from_signals.rs` 的 `stop_price` 和止损检查）。
     - [ ] 限价单和新止损类型（`td_stop`、`stop_ladder` 等）在开盘、盘中阶段的处理（随 D2、D5 做）。
     - [ ] 止损成交和开盘现金流之间的先后顺序写进文档。
-    - [ ] 收盘：资金费、借贷利息入账，强平检查（随 C2–C4 做）。
+    - [ ] 收盘：持仓费、借贷利息入账，强平检查（随 C2–C4 做）。
   - 位置：入账函数在 `crates/phasor-sim/src/cash.rs`；先后顺序由 `crates/phasor-sim/src/from_orders.rs`、`from_signals.rs` 的 K 线循环决定。
 
 - [ ] **A3 显式的模拟状态结构**（S，推迟到 D1）
@@ -133,9 +134,10 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 为什么推迟：现在没有使用方，先定义结构是空转。D1 加挂单时一起做，那时挂单是第一个使用方。
   - 做什么：把两份 `ColumnState` 合并成一个公开、可序列化的结构，新增 `GroupState` 存放现金和可用现金。只重构，不改行为，用现有 fixture 验证。
 
-- [ ] **A4 内核状态加 `locked_cash`**（S，并入 B4）
+- [x] **A4 内核状态加 `locked_cash`**（S，随 B4 完成）
   - 为什么：杠杆需要记录被占用的自有资金。
   - 为什么并入 B4：单独加一个永远为 0 的字段，会改变日志格式却没有用处。
+  - 做了什么：见 B4。多头存被占用的自有资金，空头存保证金；`leverage = 1` 时多头为 0，空头等于 `debt`。
 
 ### B. 现金流、杠杆、合约
 
@@ -154,15 +156,32 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 做了什么：每股金额 × 当根 K 线下单之前的持仓，开盘入账（所以除息日买入拿不到，卖出不丢）；空头支付分红。Python 里和价格同形状，经过 `column_map`。
   - 位置：`crates/phasor-sim/src/cash.rs`。
 
-- [ ] **B4 杠杆 `leverage` / `leverage_mode`**（L）
-  - 为什么：现货杠杆和保证金交易都需要；现在做空要冻结 2 倍市值，资金占用和真实账户差很多。也是 C1 的前提。
-  - 做什么：
-    - [ ] `leverage ≥ 1`，按列设置。`lazy`（默认）：自有现金用完再借；`eager`：每笔都按 `1/leverage` 出自有资金。
-    - [ ] 多头借款计入 `debt`；`locked_cash` 记录被占用的自有资金（A4）；手续费只从自有现金付。
-    - [ ] `percent` 用满带杠杆的购买力，`valuepercent` 按权益的 100%（依赖 B5）。
-    - [ ] 新增 `StatusInfo::NoCashLeverage`，追加在现有 14 个之后。
-    - [ ] 日志格式加 `locked_cash` 列。
-  - 验收：`leverage = 1` 时 `execute_order.tsv`、`order_sequence.tsv` 逐行一致。
+- [x] **B4 杠杆 `leverage` / `leverage_mode`**（L）
+  - 为什么：股票融资融券、外汇和加密货币的现货杠杆都需要；原来做空要冻结 2 倍市值，资金占用和真实账户差很多。也是 C1 的前提。
+  - 做了什么：
+    - [x] `leverage ≥ 1`，按列设置（标量、每列、`(T, C)`）。`lazy`（默认）：自有现金用完再借；`eager`：每笔都按 `1/leverage` 出自有资金。
+    - [x] 多头借款计入 `debt`；`locked_cash` 记录被占用的自有资金（A4）；手续费只从自有现金付。买回空头的部分不加杠杆，按全价付。卖出多头按比例还借款、释放 `locked_cash`。
+    - [x] 做空占用按 `leverage` 换算：占用 = 卖出所得 + 市值 / `leverage`。`debt` 仍是按均价计的卖出所得，`locked_cash` 是市值 / `leverage`。`leverage = 1` 就是原来的 2 倍市值，`leverage = 2` 是美股 Reg T 做空要求的 150%。
+    - [x] `percent` 用满带杠杆的购买力。`valuepercent` 按权益的 100%，随 B5 做。
+    - [x] 新增 `StatusInfo::NoCashLeverage`（14），追加在原有 14 个之后：带杠杆的买入没有自有现金可出时拒单。
+    - [x] 日志加 4 列：`locked_cash`、`new_locked_cash` 和请求的 `leverage`、`leverage_mode`，共 41 列。带杠杆的运行里，成交记录另存每笔成交后的 `debt` 和 `locked_cash`，分析层据此重建可用现金。
+    - 分析层：`value()` 是权益，扣掉多头借款；`cash()` 是自有现金减多头借款，借钱买入时为负。所以 2 倍多头的 `gross_exposure` 是 2。
+    - 模拟循环按"这次运行有没有杠杆"再实例化一份（`const LEV: bool`，和 `FLOWS` 并列），不用杠杆的运行不经过这些代码；只要有一列带杠杆，整次运行的订单都按带杠杆的账户处理，`leverage = 1` 的列结果不变。
+    - Python：`from_orders`、`from_signals` 加 `leverage=None, leverage_mode="lazy"`；带杠杆时 `orders()` 多出 `debt`、`locked_cash` 两列。
+  - 验收：`leverage = 1` 时 `execute_order.tsv`、`order_sequence.tsv` 逐行一致。另外和改动前（d0c23d1）比，10 组模拟（含共享账户、`call_seq="auto"`、`lock_cash`、随机拒单、止损、入金分红）的成交记录、现金记录、日志按位一致，串行和多线程一致。
+  - 性能（功能全关，和 d0c23d1 比，单线程）：
+
+    | | `from_orders` | `from_signals` |
+    |---|---:|---:|
+    | 指令数（几何平均，各 workload 区间） | +1.43%（+0.90% ~ +2.38%） | +1.06%（+0.62% ~ +1.97%） |
+    | 时间（两次交替 8 轮的中位数） | −0.94%、−1.44% | −2.82%、−2.97% |
+
+  - 教训：第一版指令数多了 9.95% 和 3.13%，几乎都在功能全关时也要走的路径上：
+    - aarch64 上 `!x.is_finite() || x < 0.0` 编译成对浮点数的整数分类，约 17 条指令。每根 K 线都校验 `debt` 和 `locked_cash`，改成一次判断两个（`!(a + b).is_finite() || a.min(b) < 0.0`），放过的情况两个精确检查也会放过；报错的精确检查放进冷函数。
+    - 卖出多头时调用不内联的 `add()`，每次约 70 条指令。改成普通算术；有借款时的还款放进冷函数。
+    - 去掉成交后对 `locked_cash` 的归零修正：它只按持仓比例读取，内核不会在里面留残差。
+  - 没做：借款利息、维持保证金、强平、持仓费（C1–C4）；`call_seq="auto"` 估算订单价值时不考虑杠杆。
+  - 位置：`crates/phasor-exec/src/{kernel,types}.rs`，`crates/phasor-model/src/enums.rs`，`crates/phasor-records/src/{lib,logs}.rs`，`crates/phasor-sim/src/{from_orders,from_signals,lib}.rs`，`crates/phasor-analysis/src/{series,portfolio}.rs`，`crates/phasor-py/src/{lib,params,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §7.7。测试 `crates/phasor-sim/tests/leverage.rs`、`crates/phasor-analysis/tests/leverage.rs`、`crates/phasor-py/tests/test_order_controls.py`，内核单元测试在 `kernel.rs`。
 
 - [ ] **B5 `valuepercent` 和 `*100` 仓位类型**（S）
   - 为什么：按权益比例下单、用百分数写参数，都是常见用法。
@@ -195,15 +214,16 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
   - 做了什么：`Portfolio` 上的方法。`allocations`（按列）和 `long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`（按账户）的分母是账户总净值，已有的 `gross_exposure` 分母是可用现金加持仓市值，保持不变；`position_coverage` 是每列持有非零仓位的 K 线占比。Python 见 P2。
   - 位置：`crates/phasor-analysis/src/portfolio.rs`，测试 `crates/phasor-analysis/tests/exposure.rs`。
 
-### C. 保证金、强平、资金费（PRO 没有）
+### C. 保证金账户、强平、持仓费（PRO 没有）
 
-PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支持，因为资金费套利、永续 CTA 这类策略的结果主要取决于这几项。
+PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支持，因为这几类策略的结果主要取决于这几项：永续的资金费套利和 CTA，期货，外汇和 CFD 的隔夜持仓，股票融资融券。名字沿用各市场的叫法，内核里是几种通用的记账动作：押保证金，维持保证金不够时强平，按持仓的名义价值收付持仓费，借钱借券按时间付利息。各市场不同的只是参数。
 
 - [ ] **C1 保证金账户模型**（L）
-  - 为什么：永续合约用保证金，不是现金账户那样冻结 2 倍市值；资金占用错了，收益率和可用资金都错。
+  - 为什么：期货、永续、CFD 只押保证金，不像现金账户那样付全款或冻结 2 倍市值；资金占用错了，收益率和可用资金都错。
   - 做什么：
     - [ ] `account_type = "cash" | "margin"`，默认 `cash`（现状）。
     - [ ] `initial_margin`、`maintenance_margin`，或由 `leverage` 换算。未实现盈亏计入权益。
+    - [ ] 保证金有两种给法：名义价值的比例（永续、外汇、CFD），或每手固定金额（期货，交易所按手公布）。两种都可以随时间变化，因为交易所会调整（待决定事项 11）。
     - [ ] 全仓 `cross` 先做，逐仓 `isolated` 后做。
     - [ ] 现货列和永续列放在同一个账户组：按列设置账户类型、按组共享现金（待决定事项 4）。
 
@@ -211,28 +231,30 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 为什么：杠杆策略的最大风险是爆仓，不模拟强平就看不到。
   - 做什么：
     - [ ] 盘中用不利一侧价格（或 C4 的标记价格）检查维持保证金率。
-    - [ ] 触发后按强平价成交，扣 `liquidation_fee`，成交和日志里标明是强平。
+    - [ ] 触发后按强平价成交，扣 `liquidation_fee`，成交和日志里标明是强平。触发和强制成交是通用的；交易所的强平价公式、券商追保后怎么平仓，都只是参数。
     - [ ] 全仓模式下的强平顺序写清楚。
     - [ ] 穿仓损失记为 `CashRecords(kind=Liquidation)`。
 
-- [ ] **C3 资金费**（M）
-  - 为什么：资金费套利的收益主要就是资金费。现在只能事先算好金额传进 `cash_earnings`，没法按模拟中的实际持仓结算。
+- [ ] **C3 持仓费：资金费、隔夜融资**（M）
+  - 为什么：资金费套利的收益主要就是资金费。外汇隔夜利息、CFD 隔夜融资是同一类现金流：按持仓的名义价值，在结算时点收付。现在只能事先算好金额传进 `cash_earnings`，没法按模拟中的实际持仓结算。
   - 做什么：
-    - [ ] 输入 `funding_rate`（非结算时点为 NaN），可选 `funding_price`。
-    - [ ] 收盘结算 `payment = −position × funding_price × multiplier × rate`，记为 `CashRecords(kind=Funding)`。
+    - [ ] 输入多头费率和空头费率两个序列（非结算时点为 NaN），可选 `funding_price`。多空分开，是因为外汇和 CFD 的多空费率不同，券商加点后两边都可能付钱（待决定事项 9）。
+    - [ ] 永续资金费是"空头费率 = −多头费率"的特例，Python 里用 `funding_rate` 一个参数写这个特例。
+    - [ ] 收盘结算 `payment = −|position| × funding_price × multiplier × rate`，`rate` 按持仓方向取多头或空头费率，正数表示付出。资金费记为 `CashRecords(kind=Funding)`，其他持仓费记为 `CashRecords(kind=Financing)`。
     - [ ] `research/phasor_lab` 的 `funding_modeled` 改成真实开关。
 
 - [ ] **C4 标记价格和借贷利息**（M）
-  - 为什么：交易所按标记价格算资金费和强平；借来的钱和券要付利息。
+  - 为什么：交易所按标记价格算资金费和强平，期货按结算价估值；借来的钱和券要付利息，股票融资融券的结果对利息很敏感。
   - 做什么：
-    - [ ] `mark_price` 输入，用于估值、资金费、强平；不传时用收盘价。
-    - [ ] `debt_rate` 按 K 线计息，记为 `CashRecords(kind=Interest)`。
+    - [ ] `mark_price` 输入，用于估值、持仓费、强平；不传时用收盘价。
+    - [ ] 借钱的利息 `debt_rate` 和借券的费用 `borrow_rate` 分开：前者按借款额计，后者按空头市值计、按列给（每只股票不同，难借的很高）。分别记为 `CashRecords(kind=Interest)` 和 `CashRecords(kind=BorrowFee)`。
+    - [ ] 内核只收"这根 K 线的费率"，和其他按 K 线传入的参数一致，不按 K 线根数折算年化利率。Python 按时间索引把年化利率换算成每根的费率：股票周五到周一那根算 3 天，假日同理；crypto 全天交易，每根一样（待决定事项 10）。
 
 - [ ] **C5 外部对照**（M）
   - 为什么：vectorbt 和 PRO 都没有这几项，没有现成的参照实现，只靠自己写的测试容易错得一致。
   - 做什么：
-    - [ ] 手算 fixture：几十个小场景，逐笔写出保证金、权益、强平价。
-    - [ ] 守恒检查：权益 = 现金 + 未实现盈亏；资金费在多空之间对称。
+    - [ ] 手算 fixture：几十个小场景，逐笔写出保证金、权益、强平价。覆盖永续、期货（每手固定保证金）、外汇隔夜利息（多空费率不同）、跨周末计息。
+    - [ ] 守恒检查：权益 = 现金 + 未实现盈亏；永续资金费在多空之间对称、总和为零。其他持仓费不要求对称。
     - [ ] 和 NautilusTrader 的保证金账户在相同成交序列上对照（外部环境运行）。
 
 ### D. 订单与止损
@@ -505,7 +527,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 ```mermaid
 flowchart TD
   A["A 账户模型地基"] --> B["B 现金流 · 杠杆 · 合约"]
-  B --> C["C 保证金 · 强平 · 资金费"]
+  B --> C["C 保证金 · 强平 · 持仓费"]
   A --> D["D 订单与止损"]
   D --> E["E 回调与自定义模拟"]
   B --> E
@@ -524,9 +546,9 @@ A–F 改的是模拟内核，要按顺序做；G、H、I、J、K 基本不碰�
 
 | 里程碑 | 包含 | 状态 | 达成后能做什么 |
 |---|---|---|---|
-| M1 现金流 | A1–A4、B1–B3、B9 | 大部分完成（A2 部分完成，A3 推迟，A4 并入 B4） | 入金出金、利息、分红；把事先算好的资金费传进 `cash_earnings` |
-| M2 杠杆与合约 | B4–B8、B10 | B10 完成，其余未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
-| M3 合约账户 | C1–C5 | 未开始 | 资金费套利、永续 CTA 的准确回测，包括强平 |
+| M1 现金流 | A1–A4、B1–B3、B9 | 大部分完成（A2 部分完成，A3 推迟，A4 随 B4 完成） | 入金出金、利息、分红；把事先算好的资金费传进 `cash_earnings` |
+| M2 杠杆与合约 | B4–B8、B10 | B4、B10 完成，其余未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
+| M3 保证金账户 | C1–C5 | 未开始 | 资金费套利、永续和期货 CTA、外汇和 CFD 隔夜持仓、融资融券利息的准确回测，包括强平 |
 | M4 订单与止损 | D1–D9 | 未开始 | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
 | M5 数据 | G0–G5 | G5 部分完成 | 不再依赖示例脚本下载数据 |
 | M6 回调 | E1–E5 | E4 部分完成（内核、止损判定、记录接口已公开） | 和账户状态相关的策略逻辑 |
@@ -547,7 +569,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 |---|---|---|
 | vectorbt 开源版也有 | `init_cash="auto"`、部分止损选项 | 外部环境运行 vectorbt 1.1.0，生成 TSV fixture |
 | 只有 PRO 有 | 杠杆、限价单、时间止损、`cash_*`、增量更新 | 手算 fixture 加性质测试 |
-| PRO 也没有 | 保证金、强平、资金费 | 手算 fixture、性质测试，加 NautilusTrader 对照（C5） |
+| PRO 也没有 | 保证金、强平、持仓费 | 手算 fixture、性质测试，加 NautilusTrader 对照（C5） |
 
 每个内核功能都要有的性质测试：
 
@@ -572,6 +594,10 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 6 | 负价格下 `percent` 仓位的语义（B7） | 先写文档，评审后再实现 | 未定 |
 | 7 | 图表依赖（I7） | Plotly，作为可选 extra | 未定 |
 | 8 | 文档语言 | 本计划用中文；架构文档中英两份 | 已定 |
+| 9 | 持仓费的参数形式（C3） | 多头、空头两个费率序列，正数表示付出；`funding_rate` 是"空头 = −多头"的简写。参数名待定 | 未定 |
+| 10 | 费率怎么对应时间（C3、C4） | 内核只收每根 K 线的费率；年化换算放在 Python，按时间索引的实际间隔计天数 | 未定 |
+| 11 | 保证金的给法（C1） | 名义价值比例或每手固定金额，都可以随时间变化。按仓位大小分档的保证金、跨品种抵扣的组合保证金先不做 | 未定 |
+| 12 | 换到其他市场还需要、计划里没有的功能 | 多币种账户、币本位（反向）合约、期货换月、A 股的 T+1 和涨跌停、期权。先记在这里，有需要时单独立项 | 未定 |
 
 ---
 
@@ -605,7 +631,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `min_size`、`max_size`、`size_granularity`、`allow_partial`、`raise_reject`、`log` | 有 | — |
 | `cash_limit` | **有** | B9 |
 | `reject_prob` | **有**（带种子） | B9 |
-| `leverage`、`leverage_mode` | 无 | B4 |
+| `leverage`、`leverage_mode` | **有** | B4 |
 | `multiplier` | 无 | B6 |
 | 负价格 | 无 | B7 |
 | `cash_sharing`、`group_by` | 有（`group_lens`） | — |
@@ -643,4 +669,4 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | Rust 回调、steppers | 无 | E1、F5 |
 | 配置文件、持久化、CLI、定时任务、Telegram | 无 | L |
 | 文档检索、ChatVBT、MCP 服务、agent skills | 无 | M |
-| **保证金、强平、资金费、标记价格、借贷利息** | **无（PRO 也无）** | **C** |
+| **保证金、强平、持仓费（资金费、隔夜融资）、标记价格、借贷利息** | **无（PRO 也无）** | **C** |

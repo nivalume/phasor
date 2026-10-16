@@ -20,7 +20,8 @@
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
 use phasor_exec::{
-    Direction, Order, OrderStatus, ProcessOrderState, SizeType, ValidatedOrder, execute_validated,
+    Direction, LeverageMode, Order, OrderStatus, ProcessOrderState, SizeType, ValidatedOrder,
+    execute_validated,
 };
 use phasor_records::{Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
@@ -62,6 +63,15 @@ pub struct FromOrders<'a> {
     pub max_size: FlexArray<'a, f64>,
     /// Round sizes down to a multiple of this.
     pub size_granularity: FlexArray<'a, f64>,
+    /// Buying power per unit of own cash, 1 or more. `1` borrows nothing.
+    ///
+    /// Above 1 a long may borrow the part of its cost beyond `1 / leverage`,
+    /// and a short ties up its proceeds plus `1 / leverage` of its value
+    /// instead of twice its value. See [`Order::leverage`].
+    pub leverage: FlexArray<'a, f64>,
+    /// When a leveraged long borrows: as late as possible or as much as
+    /// possible.
+    pub leverage_mode: FlexArray<'a, LeverageMode>,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     pub cash_limit: FlexArray<'a, f64>,
     /// Probability that an order is rejected at random, in `[0, 1]`.
@@ -152,6 +162,8 @@ impl FromOrders<'_> {
             || self.min_size.varies_by_row()
             || self.max_size.varies_by_row()
             || self.size_granularity.varies_by_row()
+            || self.leverage.varies_by_row()
+            || self.leverage_mode.varies_by_row()
             || self.cash_limit.varies_by_row()
             || self.reject_prob.varies_by_row()
             || self.lock_cash.varies_by_row()
@@ -165,8 +177,9 @@ impl FromOrders<'_> {
 /// `size`, `price`, `size_type` and `direction` are left unset: the loop
 /// supplies them per bar through [`ValidatedOrder::set_bar`], which is what
 /// lets the rest be resolved and checked once when it is column-constant.
-fn build_order(args: &FromOrders<'_>, i: usize, col: usize) -> ValidatedOrder {
-    ValidatedOrder::new(Order {
+/// `levered` marks the request as one from an account that may borrow.
+fn build_order(args: &FromOrders<'_>, i: usize, col: usize, levered: bool) -> ValidatedOrder {
+    let order = ValidatedOrder::new(Order {
         size: f64::NAN,
         price: f64::NAN,
         size_type: SizeType::Amount,
@@ -177,13 +190,20 @@ fn build_order(args: &FromOrders<'_>, i: usize, col: usize) -> ValidatedOrder {
         min_size: args.min_size.get(i, col),
         max_size: args.max_size.get(i, col),
         size_granularity: args.size_granularity.get(i, col),
+        leverage: args.leverage.get(i, col),
+        leverage_mode: args.leverage_mode.get(i, col),
         cash_limit: args.cash_limit.get(i, col),
         reject_prob: args.reject_prob.get(i, col),
         lock_cash: args.lock_cash.get(i, col),
         allow_partial: args.allow_partial.get(i, col),
         raise_reject: args.raise_reject.get(i, col),
         log: args.log.get(i, col),
-    })
+    });
+    if levered {
+        order.in_levered_account()
+    } else {
+        order
+    }
 }
 
 impl FromOrders<'_> {
@@ -220,6 +240,8 @@ impl Default for FromOrders<'_> {
             min_size: FlexArray::Scalar(crate::DEFAULT_MIN_SIZE),
             max_size: FlexArray::Scalar(f64::INFINITY),
             size_granularity: FlexArray::Scalar(f64::NAN),
+            leverage: FlexArray::Scalar(1.0),
+            leverage_mode: FlexArray::Scalar(LeverageMode::Lazy),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,
@@ -282,6 +304,7 @@ pub(crate) fn updated_value(
 struct ColumnState {
     position: f64,
     debt: f64,
+    locked_cash: f64,
     last_val_price: f64,
 }
 
@@ -290,8 +313,15 @@ impl ColumnState {
         Self {
             position: 0.0,
             debt: 0.0,
+            locked_cash: 0.0,
             last_val_price: f64::NAN,
         }
+    }
+
+    /// What the column owes on a long: its debt, which on a short is a
+    /// reservation instead and already in the position's value.
+    fn long_debt(&self) -> f64 {
+        if self.position > 0.0 { self.debt } else { 0.0 }
     }
 }
 
@@ -321,30 +351,44 @@ impl ColumnState {
 /// path writes every group into one buffer. Resetting it per group would point
 /// group 1's logs at group 0's fills — an in-range index naming the wrong
 /// trade, which nothing downstream could flag.
+///
+/// `levered` says whether any column of the run may borrow, decided once for
+/// the run by [`crate::any_levered`] rather than per group: the records keep
+/// balances for every fill of a run or for none.
 fn simulate_group<S: RecordSink + LogSink>(
     args: &FromOrders<'_>,
     group: usize,
+    levered: bool,
     sink: &mut S,
     fills: &mut i64,
 ) -> Result<()> {
-    if crate::cash::all_off(
+    let flows = !crate::cash::all_off(
         &args.cash_deposits,
         &args.cash_dividends,
         &args.cash_earnings,
-    ) {
-        group_loop::<S, false>(args, group, sink, fills)
-    } else {
-        group_loop::<S, true>(args, group, sink, fills)
+    );
+    match (flows, levered) {
+        (false, false) => group_loop::<S, false, false>(args, group, sink, fills),
+        (true, false) => group_loop::<S, true, false>(args, group, sink, fills),
+        (false, true) => group_loop::<S, false, true>(args, group, sink, fills),
+        (true, true) => group_loop::<S, true, true>(args, group, sink, fills),
     }
 }
 
-/// The loop of [`simulate_group`], in two copies: with `FLOWS` false it has no
-/// code for cash flows at all. See [`crate::cash::all_off`].
+/// The loop of [`simulate_group`], in four copies: with `FLOWS` false it has
+/// no code for cash flows at all (see [`crate::cash::all_off`]), and with
+/// `LEV` false none for leverage.
+///
+/// `LEV` values a long net of what it borrowed, and records each fill's
+/// balances so the analysis layer can rebuild the free cash. A column at
+/// leverage 1 owes nothing, so in a leveraged run it still comes out as it
+/// would without one; the copy without leverage exists only so the default
+/// run does not pay for the branches.
 #[allow(
     clippy::too_many_lines,
     reason = "the bar's phases read in order: deposit, resolve, execute, earn"
 )]
-fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
+fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     args: &FromOrders<'_>,
     group: usize,
     sink: &mut S,
@@ -366,8 +410,8 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
     let mut seq: Vec<usize> = (0..group_len).collect();
 
     // Build each request once per column, not once per bar. That hoists two
-    // things: the nine flexible-array reads it takes to fill in, and the
-    // seven of the kernel's fourteen checks that read only those fields.
+    // things: the eleven flexible-array reads it takes to fill in, and the
+    // nine of the kernel's checks that read only those fields.
     // Both are constant down a column unless a caller says otherwise, which
     // `params_vary_by_row` is what asks.
     //
@@ -376,7 +420,8 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
     // total +30% and +22%. Validation dominates on sparse because a bar that
     // does not fill used to pay all fourteen checks and little else.
     let params_vary = args.params_vary_by_row();
-    let mut orders: Vec<ValidatedOrder> = cols.clone().map(|c| build_order(args, 0, c)).collect();
+    let mut orders: Vec<ValidatedOrder> =
+        cols.clone().map(|c| build_order(args, 0, c, LEV)).collect();
     let at_open = FLOWS
         && (!crate::cash::is_off(&args.cash_deposits)
             || !crate::cash::is_off(&args.cash_dividends));
@@ -397,7 +442,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
         }
         if params_vary {
             for (k, col) in cols.clone().enumerate() {
-                orders[k] = build_order(args, i, col);
+                orders[k] = build_order(args, i, col, LEV);
             }
         }
 
@@ -445,6 +490,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                 if st.position != 0.0 {
                     group_value += st.position * st.last_val_price;
                 }
+                if LEV {
+                    group_value -= st.long_debt();
+                }
             }
             if args.call_seq == CallSeq::Auto {
                 for (k, col) in cols.clone().enumerate() {
@@ -478,6 +526,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                 } else {
                     cash + st.position * st.last_val_price
                 };
+                if LEV {
+                    group_value -= st.long_debt();
+                }
             }
             let value = group_value;
 
@@ -493,6 +544,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                 cash,
                 position: st.position,
                 debt: st.debt,
+                locked_cash: st.locked_cash,
                 free_cash,
                 val_price: st.last_val_price,
                 value,
@@ -523,7 +575,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
             // forward-fill is on, and then changes the size of a target-sized
             // order.
             let (new_val_price, new_value) = if result.is_filled() && args.update_value {
-                updated_value(
+                let (val_price, value) = updated_value(
                     cash,
                     exec_state.cash,
                     st.position,
@@ -531,7 +583,18 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                     st.last_val_price,
                     result.price,
                     value,
-                )
+                );
+                if LEV {
+                    // Borrowing moves no value: it adds as much debt as cash.
+                    let now = ColumnState {
+                        position: exec_state.position,
+                        debt: exec_state.debt,
+                        ..st
+                    };
+                    (val_price, value - (now.long_debt() - st.long_debt()))
+                } else {
+                    (val_price, value)
+                }
             } else {
                 (st.last_val_price, value)
             };
@@ -540,6 +603,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
             if result.is_filled() {
                 let side = result.side.expect("a filled order always carries a side");
                 sink.push_order(i, col, result.size, result.price, result.fees, side);
+                if LEV {
+                    sink.push_balances(exec_state.debt, exec_state.locked_cash);
+                }
                 // The record's own index, so a log joins back to the fill it
                 // produced. Counted rather than read off the sink, because a
                 // sink need not be an array.
@@ -555,6 +621,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                     cash,
                     position: st.position,
                     debt: st.debt,
+                    locked_cash: st.locked_cash,
                     free_cash,
                     val_price: st.last_val_price,
                     value,
@@ -562,6 +629,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
                     new_cash: exec_state.cash,
                     new_position: exec_state.position,
                     new_debt: exec_state.debt,
+                    new_locked_cash: exec_state.locked_cash,
                     new_free_cash: exec_state.free_cash,
                     new_val_price,
                     new_value,
@@ -574,6 +642,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
             free_cash = exec_state.free_cash;
             state[k].position = exec_state.position;
             state[k].debt = exec_state.debt;
+            state[k].locked_cash = exec_state.locked_cash;
             // The reference guards this write with the same NaN/ffill test
             // used during resolution. Here that guard provably cannot change
             // anything: `new_val_price` is either the current
@@ -638,8 +707,9 @@ fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
+    let levered = crate::any_levered(&args.leverage, args.n_rows, args.n_cols);
     for group in 0..args.groups.len() {
-        simulate_group(args, group, &mut sink, &mut fills)?;
+        simulate_group(args, group, levered, &mut sink, &mut fills)?;
     }
     Ok(sink)
 }
@@ -736,6 +806,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     // Contiguous chunks keep each thread's columns adjacent in memory and
     // make the merge an ordered append.
     let ranges = args.groups.chunks(n_threads);
+    let levered = crate::any_levered(&args.leverage, args.n_rows, args.n_cols);
 
     let results: Vec<Result<S>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
@@ -753,7 +824,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
                     // numbering depend on interleaving.
                     let mut fills = 0_i64;
                     for group in start..end {
-                        simulate_group(args, group, &mut sink, &mut fills)?;
+                        simulate_group(args, group, levered, &mut sink, &mut fills)?;
                     }
                     Ok(sink)
                 })

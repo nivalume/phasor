@@ -105,6 +105,28 @@ logs), for testing how a strategy degrades when fills fail. Each draw depends
 only on `seed`, the bar and the column, so a run is reproducible on any thread
 count and under any grouping.
 
+## Leverage
+
+`leverage` (1 or more, per column) lets a buy be worth that many times its own
+cash. `leverage_mode="lazy"`, the default, spends own cash first and borrows
+only what it cannot cover; `"eager"` borrows `1 - 1/leverage` of every buy.
+Fees come out of own cash, `percent` sizes against the levered buying power,
+and a short ties up its proceeds plus `value / leverage` instead of twice its
+value. A buy with no own cash left is refused (`NoCashLeverage` in the logs).
+
+- `pf.value()` is the equity: positions at market, less what the longs owe.
+- `pf.cash()` is own cash less that borrowing, so it goes negative on a
+  levered long; `pf.free_cash()` also takes out what shorts tie up, and
+  `pf.gross_exposure()` rises above 1 with the leverage.
+- `pf.orders()` gains `debt` and `locked_cash` per fill, and the logs gain
+  `locked_cash`, `new_locked_cash`, `req_leverage` and `req_leverage_mode`.
+- There is no interest on the borrowing and no liquidation yet.
+
+```python
+# Twice the cash in the first bar's buy: 1,000 of own money, 1,000 borrowed.
+pf = phasor.from_orders(close, size=np.inf, init_cash=1_000.0, leverage=2.0)
+```
+
 ## Factor expressions
 
 ### Function strategies

@@ -184,6 +184,14 @@ pub fn deposits(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Option<M
 /// chain works — and it keeps the portfolio's stored state down to records
 /// plus prices.
 ///
+/// A levered run is the exception: there a short ties up its proceeds plus
+/// `value / leverage`, not twice its value, and the fills alone do not say what
+/// leverage each one was taken at. Such a run records each fill's `debt` and
+/// `locked_cash`, and the reserve is read from them instead. A levered long
+/// reserves nothing, but its borrowing is already out of [`cash_flow`], which
+/// charges the whole price: free cash is then own cash less what was borrowed,
+/// negative when more was borrowed than is held.
+///
 /// # Errors
 ///
 /// Returns [`phasor_core::Error::Invariant`] if the records are not grouped by
@@ -191,6 +199,11 @@ pub fn deposits(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Option<M
 pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Result<Matrix> {
     let map = ColMap::build(&orders.col, n_cols)?;
     let mut out = Matrix::zeros(n_rows, n_cols);
+    if !orders.debt.is_empty() {
+        levered_free_cash_flow(orders, &map, &mut out);
+        add_cash_records(&mut out, orders);
+        return Ok(out);
+    }
     for col in 0..n_cols {
         let mut position = 0.0_f64;
         let mut debt = 0.0_f64;
@@ -239,6 +252,32 @@ pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Re
     }
     add_cash_records(&mut out, orders);
     Ok(out)
+}
+
+/// [`free_cash_flow`] for a run that recorded its balances.
+///
+/// A short's reserve is the `debt` plus `locked_cash` its last fill left
+/// behind; anything else reserves nothing. Each fill moves free cash by its
+/// cash flow less the change in that reserve.
+fn levered_free_cash_flow(orders: &OrderRecords, map: &ColMap, out: &mut Matrix) {
+    for col in 0..out.n_cols() {
+        let mut position = 0.0_f64;
+        let mut reserve = 0.0_f64;
+        for &r in map.column(col) {
+            let size = signed_size(orders.size[r], orders.side[r]);
+            position = add(position, size);
+            let new_reserve = if position < 0.0 {
+                orders.debt[r] + orders.locked_cash[r]
+            } else {
+                0.0
+            };
+            let final_cash = -size * orders.price[r] - orders.fees[r];
+            let diff = add(final_cash, -add(new_reserve, -reserve));
+            reserve = new_reserve;
+            let cell = &mut out.column_mut(col)[orders.idx[r] as usize];
+            *cell = add(*cell, diff);
+        }
+    }
 }
 
 /// Gross exposure per bar: how much of the account is in the position.

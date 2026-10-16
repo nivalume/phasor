@@ -53,7 +53,7 @@ use crate::mapped::ColMap;
 /// One order's full context, as the simulation saw it.
 ///
 /// Built by the simulation loop and handed to [`LogSink::push_log`]. A struct
-/// rather than thirty-eight arguments, because a positional call that long is
+/// rather than forty-two arguments, because a positional call that long is
 /// a swap waiting to happen — and `cash` and `free_cash` sitting next to each
 /// other, both `f64`, is exactly the pair that would swap silently.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +71,8 @@ pub struct LogEntry {
     pub position: f64,
     /// Debt before the order.
     pub debt: f64,
+    /// Own cash the position tied up before the order.
+    pub locked_cash: f64,
     /// Free cash before the order.
     pub free_cash: f64,
     /// Valuation price used to size the order.
@@ -87,6 +89,8 @@ pub struct LogEntry {
     pub new_position: f64,
     /// Debt after.
     pub new_debt: f64,
+    /// Own cash the position ties up after.
+    pub new_locked_cash: f64,
     /// Free cash after.
     pub new_free_cash: f64,
     /// Valuation price after, which `update_value` may have re-marked.
@@ -103,7 +107,9 @@ pub struct LogEntry {
 /// Logs, struct-of-arrays, one row per order considered.
 ///
 /// Field names and order follow the reference's schema so a caller can line
-/// the two up column by column. `id` is not stored: it is the record's index.
+/// the two up column by column, with leverage's four fields beside the ones
+/// they extend: `locked_cash` after `debt`, the leverage request after the
+/// granularity. `id` is not stored: it is the record's index.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[allow(
     clippy::struct_field_names,
@@ -124,6 +130,8 @@ pub struct LogRecords {
     pub position: Vec<f64>,
     /// Debt before.
     pub debt: Vec<f64>,
+    /// Own cash the position tied up before.
+    pub locked_cash: Vec<f64>,
     /// Free cash before.
     pub free_cash: Vec<f64>,
     /// Valuation price.
@@ -151,6 +159,10 @@ pub struct LogRecords {
     pub req_max_size: Vec<f64>,
     /// Requested size granularity.
     pub req_size_granularity: Vec<f64>,
+    /// Requested leverage.
+    pub req_leverage: Vec<f64>,
+    /// Requested leverage mode, as its discriminant.
+    pub req_leverage_mode: Vec<i64>,
     /// Requested random rejection probability.
     pub req_reject_prob: Vec<f64>,
     /// Whether cash was locked.
@@ -168,6 +180,8 @@ pub struct LogRecords {
     pub new_position: Vec<f64>,
     /// Debt after.
     pub new_debt: Vec<f64>,
+    /// Own cash the position ties up after.
+    pub new_locked_cash: Vec<f64>,
     /// Free cash after.
     pub new_free_cash: Vec<f64>,
     /// Valuation price after.
@@ -203,6 +217,7 @@ impl LogRecords {
             cash: Vec::new(),
             position: Vec::new(),
             debt: Vec::new(),
+            locked_cash: Vec::new(),
             free_cash: Vec::new(),
             val_price: Vec::new(),
             value: Vec::new(),
@@ -216,6 +231,8 @@ impl LogRecords {
             req_min_size: Vec::new(),
             req_max_size: Vec::new(),
             req_size_granularity: Vec::new(),
+            req_leverage: Vec::new(),
+            req_leverage_mode: Vec::new(),
             req_reject_prob: Vec::new(),
             req_lock_cash: Vec::new(),
             req_allow_partial: Vec::new(),
@@ -224,6 +241,7 @@ impl LogRecords {
             new_cash: Vec::new(),
             new_position: Vec::new(),
             new_debt: Vec::new(),
+            new_locked_cash: Vec::new(),
             new_free_cash: Vec::new(),
             new_val_price: Vec::new(),
             new_value: Vec::new(),
@@ -274,6 +292,7 @@ impl LogRecords {
         self.cash.push(e.cash);
         self.position.push(e.position);
         self.debt.push(e.debt);
+        self.locked_cash.push(e.locked_cash);
         self.free_cash.push(e.free_cash);
         self.val_price.push(e.val_price);
         self.value.push(e.value);
@@ -289,6 +308,8 @@ impl LogRecords {
         self.req_min_size.push(r.min_size);
         self.req_max_size.push(r.max_size);
         self.req_size_granularity.push(r.size_granularity);
+        self.req_leverage.push(r.leverage);
+        self.req_leverage_mode.push(r.leverage_mode as i64);
         self.req_reject_prob.push(r.reject_prob);
         self.req_lock_cash.push(r.lock_cash);
         self.req_allow_partial.push(r.allow_partial);
@@ -298,6 +319,7 @@ impl LogRecords {
         self.new_cash.push(e.new_cash);
         self.new_position.push(e.new_position);
         self.new_debt.push(e.new_debt);
+        self.new_locked_cash.push(e.new_locked_cash);
         self.new_free_cash.push(e.new_free_cash);
         self.new_val_price.push(e.new_val_price);
         self.new_value.push(e.new_value);
@@ -326,6 +348,7 @@ impl LogRecords {
             cash,
             position,
             debt,
+            locked_cash,
             free_cash,
             val_price,
             value,
@@ -339,6 +362,8 @@ impl LogRecords {
             req_min_size,
             req_max_size,
             req_size_granularity,
+            req_leverage,
+            req_leverage_mode,
             req_reject_prob,
             req_lock_cash,
             req_allow_partial,
@@ -347,6 +372,7 @@ impl LogRecords {
             new_cash,
             new_position,
             new_debt,
+            new_locked_cash,
             new_free_cash,
             new_val_price,
             new_value,
@@ -500,6 +526,10 @@ impl crate::RecordSink for Journal {
     fn push_cash(&mut self, row: usize, col: usize, amount: f64, kind: phasor_model::CashFlowKind) {
         crate::RecordSink::push_cash(&mut self.orders, row, col, amount, kind);
     }
+
+    fn push_balances(&mut self, debt: f64, locked_cash: f64) {
+        self.orders.push_balances(debt, locked_cash);
+    }
 }
 
 impl LogSink for Journal {
@@ -514,7 +544,7 @@ mod tests {
     use super::*;
     use crate::RecordSink;
     use phasor_exec::{Order, OrderResult};
-    use phasor_model::{Direction, SizeType};
+    use phasor_model::{Direction, LeverageMode, SizeType};
 
     fn request() -> Order {
         Order {
@@ -528,6 +558,8 @@ mod tests {
             min_size: 0.0,
             max_size: f64::INFINITY,
             size_granularity: f64::NAN,
+            leverage: 1.0,
+            leverage_mode: LeverageMode::Lazy,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,
@@ -545,6 +577,7 @@ mod tests {
             cash: 1000.0,
             position: 0.0,
             debt: 0.0,
+            locked_cash: 0.0,
             free_cash: 1000.0,
             val_price: 100.0,
             value: 1000.0,
@@ -552,6 +585,7 @@ mod tests {
             new_cash: 0.0,
             new_position: 10.0,
             new_debt: 0.0,
+            new_locked_cash: 0.0,
             new_free_cash: 0.0,
             new_val_price: 100.0,
             new_value: 1000.0,
@@ -681,7 +715,8 @@ mod tests {
     fn every_field_of_the_schema_is_carried() {
         // The log's value is that nothing about the order is missing from it,
         // so the count is asserted rather than trusted. 38 in the reference,
-        // less `id`, which is the record's index here as everywhere.
+        // less `id`, which is the record's index here as everywhere, plus
+        // leverage's four.
         let mut logs = LogRecords::new();
         logs.push(&entry(0, 0, filled(), 0));
         let widths = [
@@ -691,6 +726,7 @@ mod tests {
             logs.cash.len(),
             logs.position.len(),
             logs.debt.len(),
+            logs.locked_cash.len(),
             logs.free_cash.len(),
             logs.val_price.len(),
             logs.value.len(),
@@ -704,6 +740,8 @@ mod tests {
             logs.req_min_size.len(),
             logs.req_max_size.len(),
             logs.req_size_granularity.len(),
+            logs.req_leverage.len(),
+            logs.req_leverage_mode.len(),
             logs.req_reject_prob.len(),
             logs.req_lock_cash.len(),
             logs.req_allow_partial.len(),
@@ -712,6 +750,7 @@ mod tests {
             logs.new_cash.len(),
             logs.new_position.len(),
             logs.new_debt.len(),
+            logs.new_locked_cash.len(),
             logs.new_free_cash.len(),
             logs.new_val_price.len(),
             logs.new_value.len(),
@@ -723,7 +762,11 @@ mod tests {
             logs.res_status_info.len(),
             logs.order_id.len(),
         ];
-        assert_eq!(widths.len(), 37, "the schema's 38 fields, less the index");
+        assert_eq!(
+            widths.len(),
+            41,
+            "the reference's 38 fields, less the index, plus leverage's four"
+        );
         assert!(widths.iter().all(|&w| w == 1), "a field was not written");
     }
 }

@@ -223,7 +223,9 @@ fn matches_the_reference_loop() {
             cash_deposits: FlexArray::Scalar(0.0),
             cash_earnings: FlexArray::Scalar(0.0),
             cash_dividends: FlexArray::Scalar(0.0),
-            // Neither is in the reference.
+            // None of these is in the reference.
+            leverage: FlexArray::Scalar(1.0),
+            leverage_mode: FlexArray::Scalar(phasor_model::LeverageMode::Lazy),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,

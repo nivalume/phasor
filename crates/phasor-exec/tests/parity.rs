@@ -36,6 +36,13 @@ fn matches_the_reference_implementation() {
             cash: row.f64("in_cash"),
             position: row.f64("in_position"),
             debt: row.f64("in_debt"),
+            // The reference has no collateral of its own: a short ties up its
+            // value twice, once as debt and once as this.
+            locked_cash: if row.f64("in_position") < 0.0 {
+                row.f64("in_debt")
+            } else {
+                0.0
+            },
             free_cash: row.f64("in_free_cash"),
             val_price: row.f64("in_val_price"),
             value: row.f64("in_value"),

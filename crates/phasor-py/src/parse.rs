@@ -10,8 +10,8 @@
 //! tested without a Python interpreter; the caller wraps the message.
 
 use phasor_model::{
-    AccumulationMode, Direction, SizeType, StopEntryPrice, StopExitMode, StopExitPrice,
-    StopUpdateMode, TradesType,
+    AccumulationMode, Direction, LeverageMode, SizeType, StopEntryPrice, StopExitMode,
+    StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -52,6 +52,21 @@ pub fn direction(name: &str) -> Result<Direction, String> {
         "both" => Ok(Direction::Both),
         other => Err(format!(
             "direction must be 'longonly', 'shortonly' or 'both'; got {other:?}"
+        )),
+    }
+}
+
+/// When a leveraged long borrows.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn leverage_mode(name: &str) -> Result<LeverageMode, String> {
+    match name {
+        "lazy" => Ok(LeverageMode::Lazy),
+        "eager" => Ok(LeverageMode::Eager),
+        other => Err(format!(
+            "leverage_mode must be 'lazy' or 'eager'; got {other:?}"
         )),
     }
 }
@@ -181,6 +196,13 @@ mod tests {
         assert_eq!(direction("shortonly").unwrap(), Direction::ShortOnly);
         assert_eq!(direction("short").unwrap(), Direction::ShortOnly);
         assert_eq!(direction("both").unwrap(), Direction::Both);
+    }
+
+    #[test]
+    fn every_leverage_mode_maps_to_its_own_variant() {
+        assert_eq!(leverage_mode("lazy").unwrap(), LeverageMode::Lazy);
+        assert_eq!(leverage_mode("eager").unwrap(), LeverageMode::Eager);
+        assert!(leverage_mode("Lazy").is_err());
     }
 
     #[test]

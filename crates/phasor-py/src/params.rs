@@ -40,6 +40,8 @@ pub struct Shared<'py> {
     pub max_size: Option<Borrowed<'py>>,
     /// Lot size to round down to.
     pub size_granularity: Option<Borrowed<'py>>,
+    /// Buying power per unit of own cash.
+    pub leverage: Option<Borrowed<'py>>,
     /// The most cash one buy may spend.
     pub cash_limit: Option<Borrowed<'py>>,
     /// Probability of a random rejection.
@@ -75,6 +77,7 @@ impl<'py> Shared<'py> {
         min_size: Option<&Bound<'py, PyAny>>,
         max_size: Option<&Bound<'py, PyAny>>,
         size_granularity: Option<&Bound<'py, PyAny>>,
+        leverage: Option<&Bound<'py, PyAny>>,
         cash_limit: Option<&Bound<'py, PyAny>>,
         reject_prob: Option<&Bound<'py, PyAny>>,
         lock_cash: Option<&Bound<'py, PyAny>>,
@@ -91,6 +94,7 @@ impl<'py> Shared<'py> {
             min_size: borrow_opt_f64(min_size, "min_size")?,
             max_size: borrow_opt_f64(max_size, "max_size")?,
             size_granularity: borrow_opt_f64(size_granularity, "size_granularity")?,
+            leverage: borrow_opt_f64(leverage, "leverage")?,
             cash_limit: borrow_opt_f64(cash_limit, "cash_limit")?,
             reject_prob: borrow_opt_f64(reject_prob, "reject_prob")?,
             lock_cash: borrow_opt_bool(lock_cash, "lock_cash")?,

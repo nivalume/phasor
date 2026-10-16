@@ -38,6 +38,23 @@ pub enum Direction {
     Both = 2,
 }
 
+/// How a leveraged buy is financed.
+///
+/// Both modes cap a buy at the same size — own cash covers `1 / leverage` of
+/// the notional plus the fees — and differ only in how much of it is borrowed.
+/// A short is unaffected: its collateral is `value / leverage` in either mode,
+/// because posting more than the requirement would only move free cash into a
+/// reserve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(i8)]
+pub enum LeverageMode {
+    /// Spend own cash first and borrow only the part it cannot cover.
+    #[default]
+    Lazy = 0,
+    /// Borrow `1 - 1 / leverage` of every buy, however much cash is free.
+    Eager = 1,
+}
+
 /// Which side an order executed on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -66,7 +83,7 @@ pub enum OrderStatus {
 
 /// Why an order was ignored or rejected.
 ///
-/// Fourteen distinct reasons, kept separate because "why did this backtest
+/// Fifteen distinct reasons, kept separate because "why did this backtest
 /// not trade" is the most common question a user brings to a sweep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -99,6 +116,8 @@ pub enum StatusInfo {
     MinSizeNotReached = 12,
     /// Partial fill was required but not allowed.
     PartialFill = 13,
+    /// No own cash to put up for a leveraged buy.
+    NoCashLeverage = 14,
 }
 
 impl StatusInfo {
@@ -126,6 +145,7 @@ impl StatusInfo {
             11 => Self::CantCoverFees,
             12 => Self::MinSizeNotReached,
             13 => Self::PartialFill,
+            14 => Self::NoCashLeverage,
             _ => return None,
         })
     }
@@ -148,6 +168,7 @@ impl StatusInfo {
             Self::CantCoverFees => "proceeds do not cover fees",
             Self::MinSizeNotReached => "size is below the minimum",
             Self::PartialFill => "partial fill required but not allowed",
+            Self::NoCashLeverage => "no own cash to put up for a leveraged buy",
         }
     }
 }

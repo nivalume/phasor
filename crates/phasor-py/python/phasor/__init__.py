@@ -298,6 +298,8 @@ def from_signals(
     min_size=None,
     max_size=None,
     size_granularity=None,
+    leverage=None,
+    leverage_mode="lazy",
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -366,7 +368,7 @@ def from_signals(
     log
         ``True`` to record why every order ended the way it did, or a
         ``(n_bars, n_cols)`` mask to log one column or one row. Off by default:
-        a log row is 38 fields against an order record's 7, written for every
+        a log row is 42 fields against an order record's 7, written for every
         order *considered* rather than every one filled. Read them back with
         ``pf.logs()``, ``pf.log_reasons()`` and ``pf.reason_counts(col)``.
     raise_reject
@@ -419,6 +421,17 @@ def from_signals(
     cash_limit
         The most cash one buy may spend, fees included. Applied before
         ``percent`` takes its share. Sells and shorts are not affected.
+    leverage, leverage_mode
+        How many times its own cash a buy may be worth: 1 or more, as a
+        number, one value per column or a matrix. ``lazy`` (the default)
+        spends own cash first and borrows only what it cannot cover;
+        ``eager`` borrows ``1 - 1/leverage`` of every buy. Fees are paid from
+        own cash, and ``percent`` sizes against the levered buying power. A
+        short ties up its proceeds plus ``value / leverage`` (twice its value
+        at 1). A buy with no own cash left is refused as
+        ``NoCashLeverage``. Under leverage ``pf.cash()`` is own cash less what
+        the longs borrowed and can go negative, ``pf.value()`` stays the
+        equity, and ``pf.orders()`` gains ``debt`` and ``locked_cash``.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -457,6 +470,8 @@ def from_signals(
         min_size=_param(min_size, "min_size"),
         max_size=_param(max_size, "max_size"),
         size_granularity=_param(size_granularity, "size_granularity"),
+        leverage=_param(leverage, "leverage"),
+        leverage_mode=leverage_mode,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
@@ -504,6 +519,8 @@ def from_orders(
     min_size=None,
     max_size=None,
     size_granularity=None,
+    leverage=None,
+    leverage_mode="lazy",
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -589,6 +606,17 @@ def from_orders(
     cash_limit
         The most cash one buy may spend, fees included. Applied before
         ``percent`` takes its share. Sells and shorts are not affected.
+    leverage, leverage_mode
+        How many times its own cash a buy may be worth: 1 or more, as a
+        number, one value per column or a matrix. ``lazy`` (the default)
+        spends own cash first and borrows only what it cannot cover;
+        ``eager`` borrows ``1 - 1/leverage`` of every buy. Fees are paid from
+        own cash, and ``percent`` sizes against the levered buying power. A
+        short ties up its proceeds plus ``value / leverage`` (twice its value
+        at 1). A buy with no own cash left is refused as
+        ``NoCashLeverage``. Under leverage ``pf.cash()`` is own cash less what
+        the longs borrowed and can go negative, ``pf.value()`` stays the
+        equity, and ``pf.orders()`` gains ``debt`` and ``locked_cash``.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -622,6 +650,8 @@ def from_orders(
         min_size=_param(min_size, "min_size"),
         max_size=_param(max_size, "max_size"),
         size_granularity=_param(size_granularity, "size_granularity"),
+        leverage=_param(leverage, "leverage"),
+        leverage_mode=leverage_mode,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use phasor_core::math::is_close;
-use phasor_exec::{Direction, Order, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_exec::{Direction, LeverageMode, Order, OrderSide, OrderStatus, SizeType, StatusInfo};
 
 /// Whether two floats agree for fixture purposes.
 ///
@@ -160,6 +160,8 @@ impl Row<'_> {
             max_size: self.f64("max_size"),
             size_granularity: self.f64("size_granularity"),
             // Not in the reference.
+            leverage: 1.0,
+            leverage_mode: LeverageMode::Lazy,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: self.bool("lock_cash"),
