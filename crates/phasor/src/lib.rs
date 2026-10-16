@@ -1,8 +1,7 @@
 //! `phasor` — a parallel, factor-driven vectorized backtesting engine.
 //!
 //! This crate is the façade: it re-exports the workspace's crates and
-//! provides a [`prelude`]. Read `docs/ARCHITECTURE.md` first; the short
-//! version is:
+//! provides a [`prelude`]. The short version is:
 //!
 //! - Factor expressions produce a `(time x symbol)` panel.
 //! - Signals derived from it fan out across a column axis where parameters
@@ -26,7 +25,7 @@
 //! layers, the analysis layer, the array layer and the indicators are
 //! implemented and pinned against the reference. The factor DSL computes the
 //! full Alpha158 and Alpha360 expression sets and feeds the existing signal simulator. See
-//! `docs/ARCHITECTURE.md §17` for what is planned and known gaps.
+//! `docs/plan.md` for what is planned and known gaps.
 
 pub use phasor_analysis as analysis;
 pub use phasor_core as core;

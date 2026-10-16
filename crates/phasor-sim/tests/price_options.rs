@@ -1,4 +1,4 @@
-//! Price options (D4) in both loops, worked by hand on five bars.
+//! Price options in both loops, worked by hand on five bars.
 //!
 //! ```text
 //! bar   open  high   low  close

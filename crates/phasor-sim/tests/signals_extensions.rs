@@ -1,5 +1,5 @@
-//! Stop exits without a simulation (D6), and targets and order mode in
-//! `from_signals` (D7).
+//! Stop exits without a simulation, and targets and order mode in
+//! `from_signals`.
 use phasor_core::flex::FlexArray;
 use phasor_exec::SizeType;
 use phasor_model::{AccumulationMode, Direction, OrderSide};

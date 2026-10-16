@@ -1,7 +1,6 @@
 //! Cash that moved without a fill.
 //!
-//! The analysis layer rebuilds every balance from records alone
-//! (`docs/ARCHITECTURE.md §10.2`). Fills used to be the only thing that moved
+//! The analysis layer rebuilds every balance from records alone. Fills used to be the only thing that moved
 //! cash, so order records were enough. A deposit, an interest payment or a
 //! fee charged on a schedule changes the balance without a fill, and the
 //! amount actually applied is path-dependent — a withdrawal is capped at the

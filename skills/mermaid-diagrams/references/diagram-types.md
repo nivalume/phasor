@@ -5,8 +5,7 @@ uses). Copy the skeleton, replace the identifiers, keep the structure.
 
 ## Style (shared)
 
-Palette, matching `docs/img/generate.py` so Mermaid and the generated SVGs look
-like one family:
+Palette, shared by every diagram in the repository and the knowledge base:
 
 | role | fill | stroke | use |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 //! Bar / OHLCV data.
 //!
-//! Phase 1 is bar-only by design (see `docs/ARCHITECTURE.md §2.4`). The
+//! Phase 1 is bar-only by design. The
 //! vectorized tier reads OHLCV as four parallel column-major `f64` arrays
 //! rather than as a `Bar` struct per row — a struct-of-arrays layout, because
 //! the stop engine touches `open`, `high` and `low` in separate passes and an
@@ -43,7 +43,7 @@ pub struct Bar {
 /// Column-major OHLCV panel: the shape the vectorized tier actually consumes.
 ///
 /// Each field is `n_rows * n_cols` elements, column-major, so one column's
-/// full history is contiguous. See `docs/ARCHITECTURE.md §3.2`.
+/// full history is contiguous.
 #[derive(Debug, Clone, Default)]
 pub struct OhlcvPanel {
     /// Opening prices.

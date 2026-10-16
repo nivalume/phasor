@@ -1,5 +1,5 @@
-"""Multi-resolution helpers (D8), sessions and forced exits (D9), and the
-percent size types (B5) through the Python API."""
+"""Multi-resolution helpers, sessions and forced exits, and the percent
+size types through the Python API."""
 
 import numpy as np
 import pytest

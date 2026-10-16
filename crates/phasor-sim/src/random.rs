@@ -1,7 +1,7 @@
 //! Reproducible random draws for `reject_prob`.
 //!
 //! The execution kernel never draws a random number itself: the caller passes
-//! the draw in (`docs/ARCHITECTURE.md §7.6`). A shared generator advanced by
+//! the draw in. A shared generator advanced by
 //! the loop would make each draw depend on how many came before it, which
 //! depends on the grouping and the thread count. A draw computed from
 //! `(seed, row, col)` alone depends on neither, so a run is reproducible and

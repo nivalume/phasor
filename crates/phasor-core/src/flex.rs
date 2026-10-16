@@ -15,8 +15,7 @@
 //!
 //! [`FlexArray::Full`] is **column-major**: `data[col * n_rows + row]`. Every
 //! column is an independent simulation that is scanned start-to-finish, so
-//! column-major is the layout that keeps that scan sequential. See
-//! `docs/ARCHITECTURE.md §3.2–3.3`.
+//! column-major is the layout that keeps that scan sequential.
 
 use crate::error::{Error, Result};
 

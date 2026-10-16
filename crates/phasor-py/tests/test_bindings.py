@@ -164,7 +164,7 @@ def test_every_stats_row_matches_the_reference():
 )
 def test_a_target_size_sets_where_the_signal_path_ends_up(size_type):
     """The reference refuses targets in its signal path (pinned below); this
-    one defines them (D7): an entry moves the position to the target, from
+    one defines them: an entry moves the position to the target, from
     flat, from the other side in one order, or from the same side where
     accumulation lets it add, and an exit closes. On a flat price the
     target's units are the same for all three types."""

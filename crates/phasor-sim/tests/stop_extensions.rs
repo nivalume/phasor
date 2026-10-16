@@ -1,4 +1,5 @@
-//! The stops of D5 in `from_signals`, worked by hand.
+//! The trailing, time and laddered stops and stop-limit exits in
+//! `from_signals`, worked by hand.
 //!
 //! A rising series for the trailing stop, the time stops and the
 //! take-profit ladder:

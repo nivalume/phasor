@@ -80,8 +80,8 @@ takes a completely different execution path but emits the same records — so on
 analysis layer serves both, and a vectorized sweep can be validated against an
 event-driven replay column by column.
 
-**Start with [the architecture document](docs/ARCHITECTURE.md)** ([中文](docs/ARCHITECTURE.zh-CN.md)).
-It reads top down; §2 (system overview) and §11 (parallelism) cover the load-bearing decisions.
+For what is done and what is left against VectorBT PRO, by feature, see
+[the plan](docs/plan.md) (中文).
 
 For a guided path through the source itself (reading order per crate, the core algorithm of each
 module, class and sequence diagrams, exercises and further reading), see the
@@ -101,8 +101,8 @@ aggregation — plus the array layer (rolling, expanding and exponential
 windows), the eight indicators with their parameter sweep, and the signal
 layer that produces entries and exits rather than only consuming them. The factor DSL is
 implemented through Alpha158 and Alpha360, and the Python package provides the
-external market-data boundary. See [§17 of the architecture document](docs/ARCHITECTURE.md#17-roadmap-and-known-gaps)
-for what is planned and the known gaps.
+external market-data boundary. See [the plan](docs/plan.md) for what is
+planned and the known gaps.
 
 ### TODO
 
@@ -180,5 +180,15 @@ Apache-2.0. See [LICENSE](LICENSE).
 Both reference projects are studied as specifications and used as test oracles;
 no code is copied from either. NautilusTrader is LGPL-3.0-only and vectorbt is
 Apache-2.0 with Commons Clause, so every line here is an independent
-implementation written against public semantics. See
-[Appendix A of the architecture document](docs/ARCHITECTURE.md#appendix-a-licensing-and-provenance).
+implementation written against public semantics.
+
+| Reference | Licence | Consequence |
+|---|---|---|
+| NautilusTrader | LGPL-3.0-only | not linked (static Rust linking would require relinkable objects); a clean-room API with the same method names is allowed |
+| vectorbt | Apache-2.0 + Commons Clause | no code copied; reimplementing documented behaviour is allowed |
+| VectorBT PRO | proprietary | only the public documentation's behaviour is implemented; parameter names follow it where possible |
+
+Rules: read, do not copy; fixtures may derive from upstream tests as data only;
+docs cite paths and short quotes. References run only in external environments
+(`.venv-parity`, Qlib conda, editable vectorbt) and are not dependencies; vectorbt
+appears only in the optional `test` extra.

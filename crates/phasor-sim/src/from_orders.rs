@@ -70,8 +70,9 @@ pub struct FromOrders<'a> {
     /// What to do with an order price outside the bar's low–high range.
     pub price_area_vio_mode: FlexArray<'a, PriceAreaVioMode>,
     /// Bars that close the column's position at the order price, in place
-    /// of any other order on them: the end of a trading session. See the
-    /// `force_exit` section of `docs/ARCHITECTURE.md` §8.15.
+    /// of any other order on them: the end of a trading session. A flat
+    /// column does nothing; the close goes through the kernel as
+    /// `TargetAmount 0` on `Both`.
     pub force_exit: FlexArray<'a, bool>,
     /// How to interpret `size`.
     pub size_type: FlexArray<'a, SizeType>,
@@ -1218,7 +1219,7 @@ pub fn simulate_from_orders_logged(args: &FromOrders<'_>) -> Result<Journal> {
 /// Uses `std::thread::scope` rather than a work-stealing pool, as a genuine
 /// test of the architecture: scoped threads require the whole argument set
 /// to be `Sync` and every column's state to be owned locally, which is
-/// exactly the constraint `docs/ARCHITECTURE.md §11.2` imposes. Tasks are
+/// exactly the constraint the parallel design imposes. Tasks are
 /// whole groups of 10⁴–10⁶ iterations, so scheduling is noise. Swapping in a
 /// pool later is a change to this function alone.
 ///

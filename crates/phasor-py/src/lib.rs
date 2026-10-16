@@ -768,8 +768,7 @@ impl PyPortfolio {
         out.set_item("pnl", t.pnl.clone().into_pyarray(py))?;
         out.set_item("ret", t.ret.clone().into_pyarray(py))?;
         // Derived rather than stored, and not `exit_idx - entry_idx`: a closed
-        // trade is measured exclusively and an open one inclusively. See
-        // `docs/ARCHITECTURE.md §9.6`.
+        // trade is measured exclusively and an open one inclusively.
         out.set_item("duration", t.duration().into_pyarray(py))?;
         let direction: Vec<i64> = t.direction.iter().map(|d| i64::from(*d)).collect();
         out.set_item("direction", direction.into_pyarray(py))?;

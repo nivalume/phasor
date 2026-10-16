@@ -14,8 +14,8 @@
 //!   all collapse into the column axis, so labels are the *only* way to
 //!   attribute a result back to what produced it.
 //!
-//! See `docs/ARCHITECTURE.md §3.1–3.3` for why the column axis is laid out the way
-//! it is, and `docs/ARCHITECTURE.md §11` for how it maps onto threads.
+//! [`columns`] and [`flex`] explain why the column axis is laid out the way it
+//! is.
 
 pub mod columns;
 pub mod error;

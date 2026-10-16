@@ -5,9 +5,9 @@ Instructions for coding agents (Codex, Grok Build, Claude Code via `CLAUDE.md`, 
 ## What this repository is
 
 phasor: a parallel, factor-driven vectorized backtesting engine in Rust with a Python package.
-Read `README.md`, then `docs/ARCHITECTURE.md` (design, bilingual) and the source knowledge base
-(https://phasor-docs.vercel.app, repository nivalume/phasor-docs: how to read the code, Chinese) before changing anything non-trivial.
-`docs/plan.md` is the task list.
+Read `README.md`, then the source knowledge base (https://phasor-docs.vercel.app, repository
+nivalume/phasor-docs: how to read the code, Chinese) before changing anything non-trivial.
+`docs/plan.md` is the feature plan against VectorBT PRO: what is done and what is left, by feature.
 
 ## Commands
 
@@ -16,7 +16,6 @@ cargo test --workspace                                   # all Rust tests; repla
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 uv sync && uv run --with pytest python -m pytest crates/phasor-py/tests -q   # Python package
-python docs/img/generate.py                              # regenerate the architecture SVGs
 ```
 
 ## Rules that are easy to break

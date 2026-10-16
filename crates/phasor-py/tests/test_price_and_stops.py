@@ -1,4 +1,4 @@
-"""Price options (D4) and the extended stops (D5) through the Python API.
+"""Price options and the extended stops through the Python API.
 
 The bars mirror crates/phasor-sim/tests/{price_options,stop_extensions}.rs.
 """

@@ -16,8 +16,7 @@
 //! Parameter levels **repeat** and the input level **tiles**, so one
 //! combination's columns are contiguous. Writing it down here rather than
 //! leaving it implicit is what lets [`crate::Indicator`] hand its output
-//! straight to the simulator with no reshuffling. See
-//! `docs/ARCHITECTURE.md §3.1`.
+//! straight to the simulator with no reshuffling.
 //!
 //! # Zipped or crossed is the caller's decision
 //!

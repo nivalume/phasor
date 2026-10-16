@@ -19,8 +19,7 @@
 //!
 //! so every column belonging to one parameter combination is **contiguous**.
 //! Nothing in this module enforces that — it is a convention the constructors
-//! establish and the rest of the engine relies on. See
-//! `docs/ARCHITECTURE.md §3.1`.
+//! establish and the rest of the engine relies on.
 
 use std::collections::HashMap;
 use std::sync::Arc;

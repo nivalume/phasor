@@ -13,8 +13,7 @@ metadata:
 
 Diagrams in this repository are Mermaid blocks inside Markdown, because GitHub
 renders them, reviewers can diff them, and they can be checked mechanically.
-The only other diagram source is `docs/img/generate.py`, which emits the
-bilingual SVGs that `docs/ARCHITECTURE*.md` embed; do not add new SVGs by hand.
+Do not add SVGs by hand.
 
 ## 1. Decide whether a diagram earns its place
 
@@ -111,8 +110,4 @@ rejects.
 - [nivalume/phasor-docs](https://github.com/nivalume/phasor-docs) — the knowledge base, a separate repository;
   Mermaid everywhere. Its site renders the blocks with mermaid 11 in the browser;
   check a checkout with `python3 skills/mermaid-diagrams/scripts/check_mermaid.py ../phasor-docs`.
-- `docs/ARCHITECTURE*.md` — a few Mermaid blocks plus the generated SVGs in
-  `docs/img/{en,zh}/`; regenerate those with `python docs/img/generate.py`,
-  never by editing the SVG.
-- A diagram that duplicates one of the generated SVGs should use the SVG
-  instead, as the knowledge base does (it keeps copies in `assets/img/`).
+- `docs/plan.md` and the READMEs — Mermaid blocks only.

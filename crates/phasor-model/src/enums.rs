@@ -8,7 +8,7 @@
 ///
 /// These are resolved by a strictly ordered cascade in `phasor-exec`, each stage
 /// rewriting the size type until only [`SizeType::Amount`] is left. The order
-/// matters; see `docs/ARCHITECTURE.md §7.3`.
+/// matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
 pub enum SizeType {
@@ -457,7 +457,7 @@ pub enum TradeStatus {
 ///
 /// All three share one record schema and differ only in how fills are
 /// attributed. Getting this distinction wrong is the most common porting
-/// mistake; see `docs/ARCHITECTURE.md §9.5`.
+/// mistake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
 pub enum TradesType {

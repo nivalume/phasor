@@ -10,9 +10,9 @@
 //! that something in the pipeline drifted.
 //!
 //! The series are compared as well as the scalars. A Sharpe ratio that agrees
-//! over a value curve that does not is a coincidence, not a result — and the
-//! reason `docs/ARCHITECTURE.md §14.1` insists on comparing record arrays rather
-//! than aggregates applies here too.
+//! over a value curve that does not is a coincidence, not a result — the
+//! same reason the parity tests compare record arrays rather than
+//! aggregates.
 //!
 //! Fixtures come from `tests/parity/generate_analysis.py` and are committed,
 //! so this needs neither Python nor vectorbt.

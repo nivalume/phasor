@@ -1,5 +1,5 @@
-"""Stop exits without a simulation (D6), and targets and order mode in
-from_signals (D7), through the Python API."""
+"""Stop exits without a simulation, and targets and order mode in
+from_signals, through the Python API."""
 
 import numpy as np
 import pytest

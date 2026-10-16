@@ -124,8 +124,10 @@ pub struct FromSignals<'a> {
     /// What to do with an order price outside the bar's low–high range.
     pub price_area_vio_mode: FlexArray<'a, PriceAreaVioMode>,
     /// Bars that close the column's position at the order price, in place
-    /// of any other order on them: the end of a trading session. See the
-    /// `force_exit` section of `docs/ARCHITECTURE.md` §8.15.
+    /// of any other order on them: the end of a trading session. A stop
+    /// that triggers on the bar still fills first, at its level; otherwise
+    /// the bar's signals and a resting limit order are dropped and the stops
+    /// cleared. A flat column does nothing.
     pub force_exit: FlexArray<'a, bool>,
     /// Proportional fee rate.
     pub fees: FlexArray<'a, f64>,
@@ -859,8 +861,8 @@ fn prepare_order<const EXTENDED: bool>(
     if args.use_stops && stops.armed() {
         let (open, high, low, _) = bar_range(args, i, col);
         if EXTENDED {
-            // The same stop-loss and take-profit, plus D5's stops, and which
-            // of them fired.
+            // The same stop-loss and take-profit, plus the trailing, time
+            // and laddered stops, and which of them fired.
             hit = crate::stops::test(&stops, position, i, open, high, low)?;
             if let Some(h) = hit {
                 triggered = h.price;
