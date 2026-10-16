@@ -24,6 +24,15 @@ pub enum SizeType {
     TargetValue = 4,
     /// Target a fraction of portfolio value.
     TargetPercent = 5,
+    /// A fraction of portfolio value, as a cash value: `Value` of
+    /// `size × value`. Negative sells.
+    ValuePercent = 6,
+    /// `Percent`, written in percent: 50 is half.
+    Percent100 = 7,
+    /// `ValuePercent`, written in percent.
+    ValuePercent100 = 8,
+    /// `TargetPercent`, written in percent.
+    TargetPercent100 = 9,
 }
 
 /// Which side of the market a column may take.
@@ -505,6 +514,8 @@ mod tests {
         // These are written into record arrays; changing one is a breaking
         // change to the on-disk format.
         assert_eq!(SizeType::TargetPercent as i8, 5);
+        assert_eq!(SizeType::ValuePercent as i8, 6);
+        assert_eq!(SizeType::TargetPercent100 as i8, 9);
         assert_eq!(Direction::Both as i8, 2);
         assert_eq!(OrderStatus::Rejected as i8, 2);
         assert_eq!(StatusInfo::PartialFill as i8, 13);

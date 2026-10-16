@@ -405,7 +405,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ![数量换算链：ShortOnly 取反，TargetPercent → TargetValue，Value → Amount，TargetAmount → Amount，−inf → Percent(−1)，Percent → ±inf；按符号分派到买或卖；可选的随机拒单](img/zh/cascade.svg)
 
-每一步都改写数量类型，只有 `Amount` 进入分派。0 和 NaN 走卖出分支，与参考实现一致。
+每一步都改写数量类型，只有 `Amount` 进入分派。0 和 NaN 走卖出分支，与参考实现一致。图中各步之前，`*100` 写法先除以 100 变成它所写的类型；`ValuePercent`（账户组价值的比例）按 `TargetPercent` 变成 `TargetValue` 的方式变成 `Value`（§8.15）。
 
 ### 7.4 买入与卖出
 
@@ -627,6 +627,15 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - **订单模式**（`order_mode = true`）：`size`（按 `size_type`、在 `direction` 允许的方向上）就是订单，和 `from_orders` 一样（`NaN` 或 0 表示不下单），不读信号数组；止损、限价单、冲突规则和价格选项照常适用。输入相同且没有止损时，成交和 `from_orders` 完全相同（独立账户和共享账户都测过）。
 - **方向。** 限价单、买卖价和冲突判断需要在内核决定之前知道订单的买卖方向。信号的订单按做空翻转之前数量的正负判断；目标类订单就是目标的正负，所以同方向往更小的目标调整也算在这一方向上。
 - **`generate_ohlc_stop_exits`**（`crates/phasor-sim/src/stop_exits.rs`，Python 在 `phasor.signals`）：每个入场在收盘布置止损，用 `stops::test` 和 `stops::trail` 逐根检查，返回出场、触发价和止损类型。`wait` 推迟第一次检查，`until_next` 到下一个入场就停，`skip_until_exit` 跳过出场之前的入场。`until_next = false`、`skip_until_exit = true` 时，结果就是 `from_signals` 对同样入场的止损出场，多空都是；`crates/phasor-sim/tests/signals_extensions.rs` 在随机行情上用全部止损类型逐笔核对。
+
+### 8.15 百分比仓位、细周期和交易时段
+
+- **`ValuePercent` 和 `*100` 写法**（`SizeType` 6–9）。`ValuePercent` 是价值为账户组价值一定比例的订单（`size × value`，再按 `Value`），`Percent` 则是可用现金或持仓的比例。`Percent100`、`ValuePercent100`、`TargetPercent100` 是用百分数写的 `Percent`、`ValuePercent`、`TargetPercent`：内核先除以 100，所以 `Percent100` 的 `50` 和 `Percent` 的 `0.5` 成交相同。`call_seq="auto"`（`groups::approx_order_value`）和买卖方向判断（`prices::buys`）也这样读。`from_signals` 里百分数写法按 `Percent` 走 `signals_to_size`，目标类走 `signals_to_target`。
+- **细周期**（`phasor.resolution`，只在 Python）。引擎没有时间戳，所以在细周期上运行按粗周期决定的策略，是运行前的一步对齐：`align` 把每个粗周期的值放到它可用时刻当时或之后的第一根细 K 线上（布尔值取或，数值可用 `fill` 延续），`resample` 把细周期序列读回粗周期（`last`、`sum`、`compound`）。止损在细 K 线上检查，就知道止损和止盈哪个先到；一根同时包含两者的粗 K 线只能假定止损在先。`Portfolio.resample` 等 I4。
+- **交易时段**（`phasor.sessions`，只在 Python）。`session_mask` 标出本地时刻（IANA 时区，按 UTC 小时查偏移，夏令时正确）落在 `[start, end)`、且是交易日的 K 线；`end` 早于 `start` 是隔夜时段，属于开始那一天。`session_end` 标出每个时段的最后一根。`BarPanel.drop_missing` 只保留每个品种都有 K 线的时刻。
+- **`force_exit`**（两个循环，布尔数组，默认 `false`）。在标记的 K 线上按订单价平掉该列持仓，替代那根上的其他订单：`from_orders` 里订单变成 `Both` 方向的 `TargetAmount 0`；`from_signals` 里在这根触发的止损仍先按止损价成交，否则丢掉这根的信号和挂着的限价单、清掉止损，平仓是持仓方向上的 `Amount` 订单。空仓的列什么也不做。它和其他订单一样经过内核，手续费、滑点、买卖价都适用，也和其他成交一样落成记录。关闭时，`from_orders` 每个账户组多一次标量判断，`from_signals` 归入 `EXTENDED` 那份实例。
+
+`crates/phasor-sim/tests/signals_extensions.rs` 手算核对百分数写法和对应的小数写法、强制平仓；`crates/phasor-py/tests/test_resolution_sessions.py` 检查对齐、聚合、在细周期上判断止损、跨时区和夏令时的时段、时段结束的强制平仓。
 
 ---
 
@@ -1058,7 +1067,7 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 | 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding,liquidation}.rs` | §8 |
 | 记录 | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | 分析 | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/`（`rates.py`：每根 K 线的费率） | §12 |
+| Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/`（`rates.py`：每根 K 线的费率；`resolution.py`、`sessions.py`：细周期和交易时段，§8.15） | §12 |
 | 研究协议 | `research/phasor_lab/` | §13 |
 | 一致性测试框架 | `tests/parity/`、`tests/fixtures/`、`crates/*/tests/` | §14 |
 | 基准测试 | `benchmarks/`、`crates/phasor-sim/examples/{bench,scaling}.rs`、`crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |

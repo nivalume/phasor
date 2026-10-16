@@ -17,7 +17,8 @@ use phasor_model::{
 };
 
 /// Every accepted spelling of a size type, for the error message.
-const SIZE_TYPES: &str = "amount, value, percent, targetamount, targetvalue, targetpercent";
+const SIZE_TYPES: &str = "amount, value, percent, targetamount, targetvalue, targetpercent, \
+                          valuepercent, percent100, valuepercent100, targetpercent100";
 
 /// How a size is interpreted.
 ///
@@ -32,6 +33,10 @@ pub fn size_type(name: &str) -> Result<SizeType, String> {
         "targetamount" => Ok(SizeType::TargetAmount),
         "targetvalue" => Ok(SizeType::TargetValue),
         "targetpercent" => Ok(SizeType::TargetPercent),
+        "valuepercent" => Ok(SizeType::ValuePercent),
+        "percent100" => Ok(SizeType::Percent100),
+        "valuepercent100" => Ok(SizeType::ValuePercent100),
+        "targetpercent100" => Ok(SizeType::TargetPercent100),
         other => Err(format!(
             "size_type must be one of {SIZE_TYPES}; got {other:?}"
         )),
@@ -434,6 +439,16 @@ mod tests {
         assert_eq!(size_type("targetamount").unwrap(), SizeType::TargetAmount);
         assert_eq!(size_type("targetvalue").unwrap(), SizeType::TargetValue);
         assert_eq!(size_type("targetpercent").unwrap(), SizeType::TargetPercent);
+        assert_eq!(size_type("valuepercent").unwrap(), SizeType::ValuePercent);
+        assert_eq!(size_type("percent100").unwrap(), SizeType::Percent100);
+        assert_eq!(
+            size_type("valuepercent100").unwrap(),
+            SizeType::ValuePercent100
+        );
+        assert_eq!(
+            size_type("targetpercent100").unwrap(),
+            SizeType::TargetPercent100
+        );
     }
 
     #[test]

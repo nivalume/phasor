@@ -94,10 +94,16 @@ pub(crate) fn buys(
     value: f64,
 ) -> bool {
     match size_type {
-        SizeType::Amount | SizeType::Value | SizeType::Percent => size > 0.0,
+        SizeType::Amount
+        | SizeType::Value
+        | SizeType::Percent
+        | SizeType::ValuePercent
+        | SizeType::Percent100
+        | SizeType::ValuePercent100 => size > 0.0,
         SizeType::TargetAmount => size > position,
         SizeType::TargetValue => size / val_price > position,
         SizeType::TargetPercent => size * value / val_price > position,
+        SizeType::TargetPercent100 => size / 100.0 * value / val_price > position,
     }
 }
 

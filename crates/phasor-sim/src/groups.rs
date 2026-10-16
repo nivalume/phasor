@@ -275,10 +275,18 @@ pub fn approx_order_value(
     } else {
         size
     };
+    // The percent spellings are the fractions they write, a hundredth.
+    let (size, size_type) = match size_type {
+        SizeType::Percent100 => (size / 100.0, SizeType::Percent),
+        SizeType::ValuePercent100 => (size / 100.0, SizeType::ValuePercent),
+        SizeType::TargetPercent100 => (size / 100.0, SizeType::TargetPercent),
+        other => (size, other),
+    };
     let asset_value = position * val_price;
     match size_type {
         SizeType::Amount => size * val_price,
         SizeType::Value => size,
+        SizeType::ValuePercent => size * value,
         SizeType::Percent => {
             if size >= 0.0 {
                 size * cash
@@ -293,6 +301,8 @@ pub fn approx_order_value(
         SizeType::TargetAmount => size * val_price - asset_value,
         SizeType::TargetValue => size - asset_value,
         SizeType::TargetPercent => size * value - asset_value,
+        // Rewritten above.
+        SizeType::Percent100 | SizeType::ValuePercent100 | SizeType::TargetPercent100 => f64::NAN,
     }
 }
 

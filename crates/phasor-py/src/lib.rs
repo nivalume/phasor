@@ -1122,6 +1122,7 @@ fn deposits_view<'a>(
     bid_price = None,
     ask_price = None,
     price_area_vio_mode = None,
+    force_exit = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1216,6 +1217,7 @@ fn from_signals(
     bid_price: Option<&Bound<'_, PyAny>>,
     ask_price: Option<&Bound<'_, PyAny>>,
     price_area_vio_mode: Option<&str>,
+    force_exit: Option<&Bound<'_, PyAny>>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1321,6 +1323,7 @@ fn from_signals(
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
+    let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
     let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
@@ -1559,6 +1562,7 @@ fn from_signals(
         bid_price: bid,
         ask_price: ask,
         price_area_vio_mode,
+        force_exit: flex_or_bool(&force_exit_b, n_rows, n_cols, d.force_exit)?,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
@@ -1738,6 +1742,7 @@ fn from_signals(
     bid_price = None,
     ask_price = None,
     price_area_vio_mode = None,
+    force_exit = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1802,6 +1807,7 @@ fn from_orders(
     bid_price: Option<&Bound<'_, PyAny>>,
     ask_price: Option<&Bound<'_, PyAny>>,
     price_area_vio_mode: Option<&str>,
+    force_exit: Option<&Bound<'_, PyAny>>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1863,6 +1869,7 @@ fn from_orders(
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
+    let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
     let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let p = Shared::borrow(
         size,
@@ -1998,6 +2005,7 @@ fn from_orders(
         bid_price: bid,
         ask_price: ask,
         price_area_vio_mode,
+        force_exit: flex_or_bool(&force_exit_b, n_rows, n_cols, d.force_exit)?,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,

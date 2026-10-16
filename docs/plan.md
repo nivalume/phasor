@@ -29,9 +29,9 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 |---|---|---:|---:|---:|
 | P | 维护与技术债 | 3 | 0 | 0 |
 | A | 账户模型地基 | 3 | 1 | 0 |
-| B | 现金流、杠杆、合约 | 7 | 0 | 3 |
+| B | 现金流、杠杆、合约 | 8 | 0 | 2 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
-| D | 订单与止损 | 6 | 1 | 2 |
+| D | 订单与止损 | 8 | 1 | 0 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
@@ -41,12 +41,12 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **24** | **11** | **44** |
+| **合计** | | **27** | **11** | **41** |
 
 ### 下一步（按优先级）
 
-1. **B5 `valuepercent` 和 `*100` 仓位类型**：D7 已让 `from_signals` 接受现有的全部仓位类型，B5 再加新的几种。
-2. **D8 多分辨率模拟**、**D9 交易时段**：D 阶段剩下的两项。
+1. **D2 按时间给的有效期**：D 阶段只剩这一项（`time_delta_format`），要先给引擎时间戳。
+2. **B7 负价格**、**B8 初始持仓**：B 阶段剩下的两项。
 3. **C5 剩下的 NautilusTrader 对照**：要在外部环境里跑。
 
 ---
@@ -168,7 +168,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
     - [x] `leverage ≥ 1`，按列设置（标量、每列、`(T, C)`）。`lazy`（默认）：自有现金用完再借；`eager`：每笔都按 `1/leverage` 出自有资金。
     - [x] 多头借款计入 `debt`；`locked_cash` 记录被占用的自有资金（A4）；手续费只从自有现金付。买回空头的部分不加杠杆，按全价付。卖出多头按比例还借款、释放 `locked_cash`。
     - [x] 做空占用按 `leverage` 换算：占用 = 卖出所得 + 市值 / `leverage`。`debt` 仍是按均价计的卖出所得，`locked_cash` 是市值 / `leverage`。`leverage = 1` 就是原来的 2 倍市值，`leverage = 2` 是美股 Reg T 做空要求的 150%。
-    - [x] `percent` 用满带杠杆的购买力。`valuepercent` 按权益的 100%，随 B5 做。
+    - [x] `percent` 用满带杠杆的购买力。`valuepercent` 按权益的比例（B5）。
     - [x] 新增 `StatusInfo::NoCashLeverage`（14），追加在原有 14 个之后：带杠杆的买入没有自有现金可出时拒单。
     - [x] 日志加 4 列：`locked_cash`、`new_locked_cash` 和请求的 `leverage`、`leverage_mode`，共 41 列。带杠杆的运行里，成交记录另存每笔成交后的 `debt` 和 `locked_cash`，分析层据此重建可用现金。
     - 分析层：`value()` 是权益，扣掉多头借款；`cash()` 是自有现金减多头借款，借钱买入时为负。所以 2 倍多头的 `gross_exposure` 是 2。
@@ -189,9 +189,11 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
   - 没做：借款利息、维持保证金、强平、持仓费（C1–C4）；`call_seq="auto"` 估算订单价值时不考虑杠杆。
   - 位置：`crates/phasor-exec/src/{kernel,types}.rs`，`crates/phasor-model/src/enums.rs`，`crates/phasor-records/src/{lib,logs}.rs`，`crates/phasor-sim/src/{from_orders,from_signals,lib}.rs`，`crates/phasor-analysis/src/{series,portfolio}.rs`，`crates/phasor-py/src/{lib,params,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §7.7。测试 `crates/phasor-sim/tests/leverage.rs`、`crates/phasor-analysis/tests/leverage.rs`、`crates/phasor-py/tests/test_order_controls.py`，内核单元测试在 `kernel.rs`。
 
-- [ ] **B5 `valuepercent` 和 `*100` 仓位类型**（S）
+- [x] **B5 `valuepercent` 和 `*100` 仓位类型**（S）
   - 为什么：按权益比例下单、用百分数写参数，都是常见用法。
-  - 做什么：`SizeType` 加 `ValuePercent`、`Percent100`、`ValuePercent100`、`TargetPercent100`；换算链各加一级。`from_signals` 放开全部仓位类型随 D7 做。
+  - 做了什么：`SizeType` 加 `ValuePercent`（6）、`Percent100`、`ValuePercent100`、`TargetPercent100`（7–9）。内核在换算链最前面把 `*100` 除以 100，`ValuePercent` 按 `size × value` 变成 `Value`；这两步放在不内联的冷函数里，没用到时只多一次比较。`call_seq="auto"` 的估值和买卖方向判断同样处理。`from_signals` 里百分数写法按 `Percent` 定数量，目标类按 D7 的 `signals_to_target`。Python 的 `size_type` 接受 `"valuepercent"`、`"percent100"`、`"valuepercent100"`、`"targetpercent100"`。
+  - 验收：内核单元测试 1 个（各种持仓和方向下，`*100` 写法和对应小数写法结果相同）；模拟测试 1 个（共享账户 3 列，百分数写法和小数写法成交逐笔相同）；Python 1 个。
+  - 位置：`crates/phasor-model/src/enums.rs`，`crates/phasor-exec/src/kernel.rs`，`crates/phasor-sim/src/{groups,prices,signals}.rs`，`crates/phasor-py/src/parse.rs`；`ARCHITECTURE.md` §7.3、§8.15。
 
 - [x] **B6 合约乘数 `multiplier`**（M）
   - 为什么：期货一点的价值不是 1（例如 ES 每点 50 美元），不乘就算错盈亏和保证金。
@@ -420,18 +422,26 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 做了什么：
     - [x] 目标类仓位（`TargetAmount`、`TargetValue`、`TargetPercent`）：入场调到目标（反向入场一笔调到反向目标，同方向在允许加仓时调到目标），出场全部平仓。新函数 `signals_to_target`；`signals_to_size` 仍按参考实现拒绝目标类仓位，fixture 不变。
     - [x] `order_mode=True`：`size` 就是订单，和 `from_orders` 相同，止损、限价单、冲突规则、价格选项照常可用。Python 里 `entries`、`exits` 变为可选。
-    - B5 新增的仓位类型（`ValuePercent` 等）随 B5 做。
+    - [x] B5 新增的仓位类型（`ValuePercent` 等）。
   - 验收：纯函数测试 1 个（各种持仓和信号下的目标、出场全平、加仓规则、参考函数仍拒绝）；模拟测试 2 个（目标入场、反手和加仓的手算；订单模式在独立和共享账户上与 `from_orders` 记录完全相同，加止损的手算）；Python 2 个，原来"拒绝目标类仓位"的两个测试改为检查新行为。
   - 性能（D6、D7 合计，功能全关，和 ab4674c 比，单线程，指令数几何平均）：`from_orders` +0.00%，`from_signals` +0.29%。没有跑交替计时。
   - 位置：`crates/phasor-sim/src/{signals,from_signals}.rs`，`crates/phasor-py/src/lib.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.14。
 
-- [ ] **D8 多分辨率模拟**（M）
+- [x] **D8 多分辨率模拟**（M）
   - 为什么：在小时线上判断止损时，同一根 K 线里先碰止损还是先碰止盈分不清，结果会偏；用分钟线模拟能解决。
-  - 做什么：粗周期信号按 `available_time` 对齐到细周期；`Portfolio.resample` 聚合回粗周期（和 I4 一起做）。
+  - 做了什么：`phasor.resolution`。`align` 把粗周期的值放到它可用时刻当时或之后的第一根细 K 线上（布尔值取或，数值可选 `fill` 延续）；`resample` 把细周期序列聚合回粗周期（`last`、`sum`、`compound`）。引擎不变：细周期就是普通的 K 线。`Portfolio.resample` 留给 I4。
+  - 验收：Python 3 个，其中一个用同一小时的四根 15 分钟线：细周期先到止盈（102），同一小时的 K 线只能假定止损在先（98）。
+  - 位置：`crates/phasor-py/python/phasor/resolution.py`；`ARCHITECTURE.md` §8.15。测试 `crates/phasor-py/tests/test_resolution_sessions.py`。
 
-- [ ] **D9 交易时段**（S）
+- [x] **D9 交易时段**（S）
   - 为什么：日内策略要在收盘前平仓、跳过非交易时段。
-  - 做什么：时段掩码工具；时段结束强制平仓；`missing_index="drop"`。
+  - 做了什么：
+    - [x] `phasor.sessions.session_mask`、`session_end`：按交易所时区（IANA，夏令时正确）的本地时刻判断，支持隔夜时段和自选交易日。
+    - [x] `force_exit`（`from_orders`、`from_signals`，布尔数组，默认关）：在标记的 K 线上按订单价平仓，替代那根上的其他订单、信号和挂着的限价单；在这根触发的止损仍先成交。Python 里一维掩码作用于所有列。
+    - [x] `BarPanel.drop_missing()`：只保留每个品种都有 K 线的时刻，即 `missing_index="drop"`。
+  - 验收：模拟测试 1 个（手算：`from_orders`、`from_signals` 各一次，以及止损和强制平仓在同一根）；Python 4 个（时区和夏令时、隔夜时段和最后一根、时段结束强制平仓、`drop_missing`）。
+  - 位置：`crates/phasor-sim/src/{from_orders,from_signals}.rs`，`crates/phasor-py/src/lib.rs`，`crates/phasor-py/python/phasor/{__init__,sessions,data}.py`；`ARCHITECTURE.md` §8.15。测试 `crates/phasor-sim/tests/signals_extensions.rs`、`crates/phasor-py/tests/test_resolution_sessions.py`。
+  - 性能（B5、D8、D9 合计，功能全关，和 e9d8d59 比，单线程，指令数几何平均）：`from_orders` +1.24%，`from_signals` +0.04%。内核和循环各占约一半：新仓位类型放进不内联的冷函数后，内核仍多约 0.65 个百分点（换回 e9d8d59 的内核时是 +0.58%）。没有跑交替计时。
 
 ### E. 回调与自定义模拟
 
@@ -685,9 +695,9 @@ A–F 改的是模拟内核，要按顺序做；G、H、I、J、K 基本不碰�
 | 里程碑 | 包含 | 状态 | 达成后能做什么 |
 |---|---|---|---|
 | M1 现金流 | A1–A4、B1–B3、B9 | 大部分完成（A2 部分完成，A3 推迟，A4 随 B4 完成） | 入金出金、利息、分红；把事先算好的资金费传进 `cash_earnings` |
-| M2 杠杆与合约 | B4–B8、B10 | B4、B10 完成，其余未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
+| M2 杠杆与合约 | B4–B8、B10 | B4–B6、B10 完成，B7、B8 未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
 | M3 保证金账户 | C1–C5 | C1–C4 完成，C5 部分完成（差 NautilusTrader 对照） | 资金费套利、永续和期货 CTA、外汇和 CFD 隔夜持仓、融资融券利息的准确回测，包括强平 |
-| M4 订单与止损 | D1–D9 | D1 完成，D2 部分完成（缺按时间给的有效期） | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
+| M4 订单与止损 | D1–D9 | D2 部分完成（缺按时间给的有效期），其余完成 | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
 | M5 数据 | G0–G5 | G5 部分完成 | 不再依赖示例脚本下载数据 |
 | M6 回调 | E1–E5 | E4 部分完成（内核、止损判定、记录接口已公开） | 和账户状态相关的策略逻辑 |
 | M7 增量与持久化 | F1–F6、L2 | 未开始 | 回测接新数据，长历史分批 |
@@ -764,7 +774,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `stop_ladder` | 部分（`uniform`、`weighted`） | D5 |
 | `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | **有**（名字沿用 vectorbt 1.x，没有 PRO 的别名） | D5 |
 | `generate_ohlc_stop_exits` | **有** | D6 |
-| 全部仓位类型、`*100` 变体、`valuepercent` | 部分（`from_signals` 已接受全部现有类型；`*100`、`valuepercent` 无） | B5、D7 |
+| 全部仓位类型、`*100` 变体、`valuepercent` | **有** | B5、D7 |
 | `order_mode=True` | **有** | D7 |
 | 基于风险的仓位 | 无 | E3 |
 | `min_size`、`max_size`、`size_granularity`、`allow_partial`、`raise_reject`、`log` | 有 | — |
@@ -780,7 +790,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `init_position`、`init_price`、`init_cash="auto"` | 无 | B8 |
 | 敞口（`allocations`、`gross_exposure`、`net_exposure`、`position_coverage`） | **有** | B10 |
 | 订单、日志、交易、持仓记录 | 有 | — |
-| 用细周期数据判断止损、tick、交易时段 | 部分（tick 可以直接跑） | D8、D9 |
+| 用细周期数据判断止损、tick、交易时段 | **有**（`phasor.resolution`、`phasor.sessions`、`force_exit`；`Portfolio.resample` 随 I4） | D8、D9 |
 | 增量回测（`pf.update`）、`last_state`、`save`/`load`、`row_stack(chained=True)`、stepper | 无 | F |
 | 数据源：YF、Binance、CCXT、Alpaca、Polygon、Databento、Alpha Vantage、NDL、TradingView、findatapy | 无（只有示例脚本） | G1 |
 | 存储：文件、DuckDB、SQL、ArcticDB | 部分（CSV、Parquet 读取） | G2 |

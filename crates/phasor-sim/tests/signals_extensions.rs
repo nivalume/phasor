@@ -273,3 +273,94 @@ fn order_mode_is_from_orders_with_the_signal_engine() {
     .unwrap();
     assert_eq!(fills(&stopped), [(0, 100., 2., 0), (2, 95., 2., 1)]);
 }
+
+#[test]
+fn the_percent_spellings_size_as_the_fractions_they_write() {
+    let mut rng = Lcg(8);
+    let b = bars(&mut rng, 200, 3);
+    let (n_rows, n_cols) = (b.n_rows, b.n_cols);
+    let size: Vec<f64> = (0..n_rows * n_cols)
+        .map(|_| {
+            let u = rng.next();
+            if u < 0.7 { N } else { (u - 0.85) * 2.0 }
+        })
+        .collect();
+    let hundredfold: Vec<f64> = size.iter().map(|s| s * 100.0).collect();
+    let run = |size: &[f64], size_type| {
+        simulate_from_orders(&FromOrders {
+            n_rows,
+            n_cols,
+            init_cash: FlexArray::scalar(5000.),
+            close: matrix(&b.close, n_rows, n_cols),
+            size: matrix(size, n_rows, n_cols),
+            size_type: FlexArray::scalar(size_type),
+            groups: Groups::from_lens(&[3], 3).unwrap(),
+            ..FromOrders::default()
+        })
+        .unwrap()
+    };
+    for (spelled, plain) in [
+        (SizeType::Percent100, SizeType::Percent),
+        (SizeType::TargetPercent100, SizeType::TargetPercent),
+        (SizeType::ValuePercent100, SizeType::ValuePercent),
+    ] {
+        let (a, b) = (run(&hundredfold, spelled), run(&size, plain));
+        assert!(a.len() > 30, "too few fills");
+        assert_eq!(a.size.len(), b.size.len(), "{spelled:?}");
+        for k in 0..a.len() {
+            assert!((a.size[k] - b.size[k]).abs() < 1e-9 * b.size[k].abs().max(1.0));
+        }
+    }
+    // `ValuePercent` against `Value` is the kernel's test: it needs the
+    // value the order is sized against.
+}
+
+#[test]
+fn a_forced_exit_closes_the_position_in_place_of_the_bar_s_orders() {
+    let close = [100., 101., 102., 103., 104.];
+    let force = [false, false, true, false, false];
+    // from_orders: bought on bar 0, the order on bar 2 is replaced by a close.
+    let size = [2., N, 5., N, 1.];
+    let orders = simulate_from_orders(&FromOrders {
+        n_rows: 5,
+        n_cols: 1,
+        init_cash: FlexArray::scalar(1000.),
+        close: FlexArray::per_row(&close, 5).unwrap(),
+        size: FlexArray::per_row(&size, 5).unwrap(),
+        force_exit: FlexArray::per_row(&force, 5).unwrap(),
+        groups: Groups::ungrouped(1),
+        ..FromOrders::default()
+    })
+    .unwrap();
+    assert_eq!(
+        fills(&orders),
+        [(0, 100., 2., 0), (2, 102., 2., 1), (4, 104., 1., 0)]
+    );
+    // from_signals: an entry on the forced bar is not taken either.
+    let entries = [true, false, true, true, false];
+    let signals = FromSignals {
+        n_rows: 5,
+        n_cols: 1,
+        init_cash: FlexArray::scalar(1000.),
+        close: FlexArray::per_row(&close, 5).unwrap(),
+        entries: FlexArray::per_row(&entries[..], 5).unwrap(),
+        size: FlexArray::scalar(1.),
+        force_exit: FlexArray::per_row(&force, 5).unwrap(),
+        ..FromSignals::default()
+    };
+    assert_eq!(
+        fills(&simulate_from_signals(&signals).unwrap()),
+        [(0, 100., 1., 0), (2, 102., 1., 1), (3, 103., 1., 0)]
+    );
+    // A stop that fires inside the forced bar fills first, at its level.
+    let low = [100., 101., 90., 103., 104.];
+    let stopped = FromSignals {
+        low: FlexArray::per_row(&low, 5).unwrap(),
+        sl_stop: FlexArray::scalar(0.05),
+        ..signals
+    };
+    assert_eq!(
+        fills(&simulate_from_signals(&stopped).unwrap()),
+        [(0, 100., 1., 0), (2, 95., 1., 1), (3, 103., 1., 0)]
+    );
+}

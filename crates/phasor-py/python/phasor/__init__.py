@@ -38,7 +38,19 @@ from typing import Any
 
 import numpy as np
 
-from . import _phasor, data, events, labels, rates, robust, signals, synthetic, validation
+from . import (
+    _phasor,
+    data,
+    events,
+    labels,
+    rates,
+    resolution,
+    robust,
+    sessions,
+    signals,
+    synthetic,
+    validation,
+)
 from ._phasor import InstrumentId, BarType
 from ._phasor import Portfolio
 
@@ -52,7 +64,9 @@ __all__ = [
     "events",
     "labels",
     "rates",
+    "resolution",
     "robust",
+    "sessions",
     "signals",
     "synthetic",
     "validation",
@@ -242,6 +256,20 @@ def _flag(value: Any, name: str) -> Any:
     return np.asfortranarray(array)
 
 
+def _per_bar(value: Any, close: Any, column_map: Any, name: str) -> Any:
+    """A bool mask that may be one value per bar for every column (1-D)."""
+    if value is None or isinstance(value, (bool, np.bool_)):
+        return _flag(value, name)
+    array = np.asarray(value, dtype=bool)
+    if array.ndim == 1:
+        if column_map is not None:
+            n_cols = len(column_map)
+        else:
+            n_cols = 1 if np.ndim(close) == 1 else np.shape(close)[1]
+        array = np.repeat(array.reshape(-1, 1), n_cols, axis=1)
+    return _flag(array, name)
+
+
 def _accumulate(value: Any) -> str:
     """The accumulation mode, accepting the reference's boolean spelling.
 
@@ -376,6 +404,7 @@ def from_signals(
     bid_price=None,
     ask_price=None,
     price_area_vio_mode=None,
+    force_exit=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -575,6 +604,12 @@ def from_signals(
         ``price_area_vio_mode`` decides what an order price outside the bar's
         low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
         range, or ``"error"``.
+    force_exit
+        A mask of bars that close the position at the order price in place of
+        anything else on them: the end of a trading session
+        (``phasor.sessions.session_end``). In ``from_signals`` a stop that
+        fires inside such a bar fills first, and a resting limit order is
+        cancelled.
     upon_adj_stop_conflict, upon_opp_stop_conflict
         The same choice between a stop that fires and the bar's own signal.
         The default ``"keepignore"`` lets the stop replace the signal.
@@ -745,6 +780,7 @@ def from_signals(
         bid_price=_market(bid_price, "bid_price"),
         ask_price=_market(ask_price, "ask_price"),
         price_area_vio_mode=price_area_vio_mode,
+        force_exit=_per_bar(force_exit, close, column_map, "force_exit"),
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
@@ -834,6 +870,7 @@ def from_orders(
     bid_price=None,
     ask_price=None,
     price_area_vio_mode=None,
+    force_exit=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -914,6 +951,12 @@ def from_orders(
         ``price_area_vio_mode`` decides what an order price outside the bar's
         low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
         range, or ``"error"``.
+    force_exit
+        A mask of bars that close the position at the order price in place of
+        anything else on them: the end of a trading session
+        (``phasor.sessions.session_end``). In ``from_signals`` a stop that
+        fires inside such a bar fills first, and a resting limit order is
+        cancelled.
     val_price
         What the position is marked at when a value- or percent-sized order is
         resolved. ``inf`` (the default) is the order price.
@@ -1082,6 +1125,7 @@ def from_orders(
         bid_price=_market(bid_price, "bid_price"),
         ask_price=_market(ask_price, "ask_price"),
         price_area_vio_mode=price_area_vio_mode,
+        force_exit=_per_bar(force_exit, close, column_map, "force_exit"),
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,

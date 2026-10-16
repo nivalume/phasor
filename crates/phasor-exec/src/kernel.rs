@@ -1020,6 +1020,40 @@ pub fn execute_order(
     execute_validated(state, &ValidatedOrder::new(*order), reject_draw)
 }
 
+/// The percent spellings are the fractions they write, a hundredth;
+/// `ValuePercent` is `Value` of `size × value`, as `TargetPercent` is
+/// `TargetValue`. A `TargetPercent100` comes back as `TargetPercent`.
+#[cold]
+#[inline(never)]
+fn percent_spelling(
+    size: f64,
+    size_type: SizeType,
+    value: f64,
+) -> std::result::Result<(f64, SizeType), OrderResult> {
+    let (size, size_type) = match size_type {
+        SizeType::Percent100 => (size / 100.0, SizeType::Percent),
+        SizeType::ValuePercent100 => (size / 100.0, SizeType::ValuePercent),
+        SizeType::TargetPercent100 => (size / 100.0, SizeType::TargetPercent),
+        other => (size, other),
+    };
+    if size_type != SizeType::ValuePercent {
+        return Ok((size, size_type));
+    }
+    if value.is_nan() {
+        return Err(OrderResult::not_filled(
+            OrderStatus::Ignored,
+            StatusInfo::ValueNaN,
+        ));
+    }
+    if value <= 0.0 {
+        return Err(OrderResult::not_filled(
+            OrderStatus::Rejected,
+            StatusInfo::ValueZeroNeg,
+        ));
+    }
+    Ok((size * value, SizeType::Value))
+}
+
 /// [`execute_order`], with the parameter checks already done.
 ///
 /// Identical in every observable way — same fills, same rejections, same
@@ -1094,21 +1128,31 @@ pub fn execute_validated(
         order_size = -order_size;
     }
 
-    if size_type == SizeType::TargetPercent {
-        if value.is_nan() {
-            return Ok((
-                exec_state,
-                OrderResult::not_filled(OrderStatus::Ignored, StatusInfo::ValueNaN),
-            ));
+    // `TargetPercent` (5), and `ValuePercent` and the `*100` spellings (6–9)
+    // out of line: one comparison when none of them is used.
+    if size_type as i8 >= SizeType::TargetPercent as i8 {
+        if size_type != SizeType::TargetPercent {
+            match percent_spelling(order_size, size_type, value) {
+                Ok(rewritten) => (order_size, size_type) = rewritten,
+                Err(status) => return Ok((exec_state, status)),
+            }
         }
-        if value <= 0.0 {
-            return Ok((
-                exec_state,
-                OrderResult::not_filled(OrderStatus::Rejected, StatusInfo::ValueZeroNeg),
-            ));
+        if size_type == SizeType::TargetPercent {
+            if value.is_nan() {
+                return Ok((
+                    exec_state,
+                    OrderResult::not_filled(OrderStatus::Ignored, StatusInfo::ValueNaN),
+                ));
+            }
+            if value <= 0.0 {
+                return Ok((
+                    exec_state,
+                    OrderResult::not_filled(OrderStatus::Rejected, StatusInfo::ValueZeroNeg),
+                ));
+            }
+            order_size *= value;
+            size_type = SizeType::TargetValue;
         }
-        order_size *= value;
-        size_type = SizeType::TargetValue;
     }
 
     if matches!(size_type, SizeType::Value | SizeType::TargetValue) {
@@ -1192,6 +1236,71 @@ mod tests {
 
     fn flat() -> ProcessOrderState {
         ProcessOrderState::flat(100.0, 10.0)
+    }
+
+    #[test]
+    fn the_percent_spellings_are_the_types_they_rewrite_to() {
+        let held = ProcessOrderState {
+            cash: 1000.0,
+            position: 5.0,
+            debt: 0.0,
+            locked_cash: 0.0,
+            free_cash: 1000.0,
+            val_price: 10.0,
+            value: 1050.0,
+            oidx: 0,
+            lidx: 0,
+        };
+        for state in [flat(), held] {
+            let run = |size, size_type, direction| {
+                let order = Order {
+                    size,
+                    price: 10.0,
+                    size_type,
+                    direction,
+                    ..Default::default()
+                };
+                execute_order(&state, &order, None).unwrap()
+            };
+            // A long cannot be held in a short-only column.
+            let directions: &[Direction] = if state.position > 0.0 {
+                &[Direction::Both, Direction::LongOnly]
+            } else {
+                &[Direction::Both, Direction::LongOnly, Direction::ShortOnly]
+            };
+            for &direction in directions {
+                let pairs = [
+                    (50.0, SizeType::Percent100, 0.5, SizeType::Percent),
+                    (-50.0, SizeType::Percent100, -0.5, SizeType::Percent),
+                    (
+                        30.0,
+                        SizeType::TargetPercent100,
+                        0.3,
+                        SizeType::TargetPercent,
+                    ),
+                    (
+                        0.3,
+                        SizeType::ValuePercent,
+                        0.3 * state.value,
+                        SizeType::Value,
+                    ),
+                    (
+                        -20.0,
+                        SizeType::ValuePercent100,
+                        -0.2 * state.value,
+                        SizeType::Value,
+                    ),
+                ];
+                for (size, spelled, plain, as_type) in pairs {
+                    // As text: a refused order's NaNs are equal there.
+                    assert_eq!(
+                        format!("{:?}", run(size, spelled, direction)),
+                        format!("{:?}", run(plain, as_type, direction)),
+                        "{spelled:?} {size} on {direction:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

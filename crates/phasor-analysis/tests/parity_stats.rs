@@ -160,6 +160,7 @@ fn matches_the_reference_stats_table() {
             bid_price: FlexArray::scalar(f64::NAN),
             ask_price: FlexArray::scalar(f64::NAN),
             price_area_vio_mode: FlexArray::scalar(phasor_model::PriceAreaVioMode::Ignore),
+            force_exit: FlexArray::scalar(false),
             cash_limit: FlexArray::scalar(f64::INFINITY),
             reject_prob: FlexArray::scalar(0.0),
             seed: 0,

@@ -123,6 +123,10 @@ pub struct FromSignals<'a> {
     pub ask_price: FlexArray<'a, f64>,
     /// What to do with an order price outside the bar's low–high range.
     pub price_area_vio_mode: FlexArray<'a, PriceAreaVioMode>,
+    /// Bars that close the column's position at the order price, in place
+    /// of any other order on them: the end of a trading session. See the
+    /// `force_exit` section of `docs/ARCHITECTURE.md` §8.15.
+    pub force_exit: FlexArray<'a, bool>,
     /// Proportional fee rate.
     pub fees: FlexArray<'a, f64>,
     /// Flat fee per fill.
@@ -340,6 +344,7 @@ impl Default for FromSignals<'_> {
             bid_price: FlexArray::Scalar(f64::NAN),
             ask_price: FlexArray::Scalar(f64::NAN),
             price_area_vio_mode: FlexArray::Scalar(PriceAreaVioMode::Ignore),
+            force_exit: FlexArray::Scalar(false),
             fees: FlexArray::Scalar(0.0),
             fixed_fees: FlexArray::Scalar(0.0),
             slippage: FlexArray::Scalar(0.0),
@@ -896,6 +901,30 @@ fn prepare_order<const EXTENDED: bool>(
                 }
             }
         }
+    }
+
+    // --- a forced exit ------------------------------------------------
+    // After the stops, which fire inside the bar: the position left is
+    // closed at the order price, and nothing else is ordered or rests.
+    if EXTENDED && triggered.is_nan() && args.force_exit.get(i, col) {
+        state.limit = LimitOrder::none();
+        state.stops = stops;
+        state.last_val_price = last_val_price;
+        if position == 0.0 {
+            return Ok(None);
+        }
+        let long = position > 0.0;
+        let close = crate::signals::SizedOrder {
+            size: -position,
+            size_type: SizeType::Amount,
+            direction: if long {
+                Direction::LongOnly
+            } else {
+                Direction::ShortOnly
+            },
+        };
+        let price = args.quotes().order_price(i, col, price, !long)?;
+        return Ok(Some(Pending::new(price, close)));
     }
 
     // --- the resting limit order --------------------------------------
@@ -1514,6 +1543,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 }) > 0
             })
         || args.from_ago > 0
+        || !matches!(args.force_exit, FlexArray::Scalar(false))
         || args.order_mode
         || args.quotes().on()
         || ext_stops;

@@ -431,7 +431,10 @@ pub fn signals_to_size(
 pub const fn is_target(size_type: SizeType) -> bool {
     matches!(
         size_type,
-        SizeType::TargetAmount | SizeType::TargetValue | SizeType::TargetPercent
+        SizeType::TargetAmount
+            | SizeType::TargetValue
+            | SizeType::TargetPercent
+            | SizeType::TargetPercent100
     )
 }
 
@@ -515,6 +518,11 @@ pub fn signals_to_target(
 /// Sizes a bar's resolved signals: [`signals_to_target`] for a target size
 /// type, [`signals_to_size`] otherwise.
 ///
+/// The percent spellings (`*100`) are sized as the fractions they write and
+/// keep their own type, which the kernel divides. `ValuePercent` is sized as
+/// `Percent` is — a share of something the signal path does not know, so it
+/// cannot reverse a position either.
+///
 /// # Errors
 ///
 /// As the one it calls.
@@ -529,9 +537,38 @@ pub fn size_signals(
 ) -> Result<SizedOrder> {
     if is_target(size_type) {
         signals_to_target(position, signals, size, size_type, accumulate)
-    } else {
+    } else if matches!(
+        size_type,
+        SizeType::Amount | SizeType::Value | SizeType::Percent
+    ) {
         signals_to_size(position, signals, size, size_type, accumulate, val_price)
+    } else {
+        size_percent_spelling(position, signals, size, size_type, accumulate)
     }
+}
+
+/// [`size_signals`] for `ValuePercent` and the `*100` spellings of the
+/// non-target types: sized as `Percent`, then given back their own type.
+#[inline(never)]
+fn size_percent_spelling(
+    position: f64,
+    signals: Signals,
+    size: f64,
+    size_type: SizeType,
+    accumulate: AccumulationMode,
+) -> Result<SizedOrder> {
+    let mut sized = signals_to_size(
+        position,
+        signals,
+        size,
+        SizeType::Percent,
+        accumulate,
+        f64::NAN,
+    )?;
+    if sized.size_type == SizeType::Percent {
+        sized.size_type = size_type;
+    }
+    Ok(sized)
 }
 
 #[cfg(test)]
@@ -614,6 +651,41 @@ mod tests {
             0.5
         );
         assert!(signals_to_target(0.0, sig(true, false, false, false), -1.0, t, off).is_err());
+        // The percent spelling of a target is a target.
+        assert_eq!(
+            size_signals(
+                0.0,
+                sig(true, false, false, false),
+                50.0,
+                SizeType::TargetPercent100,
+                off,
+                1.0
+            )
+            .unwrap()
+            .size_type,
+            SizeType::TargetPercent100
+        );
+        let v = size_signals(
+            0.0,
+            sig(true, false, false, false),
+            0.5,
+            SizeType::ValuePercent,
+            off,
+            1.0,
+        )
+        .unwrap();
+        assert_eq!((v.size, v.size_type), (0.5, SizeType::ValuePercent));
+        // An exit is an amount, whatever the spelling.
+        let x = size_signals(
+            4.0,
+            sig(false, true, false, false),
+            50.0,
+            SizeType::Percent100,
+            off,
+            1.0,
+        )
+        .unwrap();
+        assert_eq!((x.size, x.size_type), (-4.0, SizeType::Amount));
         // The reference's function still refuses targets.
         assert!(signals_to_size(0.0, sig(true, false, false, false), 1.0, t, off, 1.0).is_err());
         assert_eq!(

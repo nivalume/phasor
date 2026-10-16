@@ -376,6 +376,7 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         bid_price: FlexArray::Scalar(f64::NAN),
         ask_price: FlexArray::Scalar(f64::NAN),
         price_area_vio_mode: FlexArray::Scalar(phasor_model::PriceAreaVioMode::Ignore),
+        force_exit: FlexArray::Scalar(false),
         cash_limit: FlexArray::Scalar(f64::INFINITY),
         reject_prob: FlexArray::Scalar(0.0),
         seed: 0,

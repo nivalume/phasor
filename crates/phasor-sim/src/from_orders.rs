@@ -69,6 +69,10 @@ pub struct FromOrders<'a> {
     pub ask_price: FlexArray<'a, f64>,
     /// What to do with an order price outside the bar's low–high range.
     pub price_area_vio_mode: FlexArray<'a, PriceAreaVioMode>,
+    /// Bars that close the column's position at the order price, in place
+    /// of any other order on them: the end of a trading session. See the
+    /// `force_exit` section of `docs/ARCHITECTURE.md` §8.15.
+    pub force_exit: FlexArray<'a, bool>,
     /// How to interpret `size`.
     pub size_type: FlexArray<'a, SizeType>,
     /// Which sides a column may take.
@@ -372,6 +376,7 @@ impl Default for FromOrders<'_> {
             bid_price: FlexArray::Scalar(f64::NAN),
             ask_price: FlexArray::Scalar(f64::NAN),
             price_area_vio_mode: FlexArray::Scalar(PriceAreaVioMode::Ignore),
+            force_exit: FlexArray::Scalar(false),
             size_type: FlexArray::Scalar(SizeType::Amount),
             direction: FlexArray::Scalar(Direction::Both),
             fees: FlexArray::Scalar(0.0),
@@ -584,7 +589,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     let ago = args.from_ago;
     // Neither: the order is this bar's and its price is `price`'s, read as
     // the loop always did.
-    let plain = ago == 0 && !quotes_on;
+    let plain = ago == 0 && !quotes_on && matches!(args.force_exit, FlexArray::Scalar(false));
     let mut raw_price = if quotes_on {
         vec![f64::NAN; group_len]
     } else {
@@ -997,7 +1002,7 @@ fn requested_price(
 
 /// The size, size type and direction of the order executing on bar `i`:
 /// the one decided `from_ago` bars back, and a `NaN` size before there is
-/// one, which the kernel ignores.
+/// one, which the kernel ignores; a close to flat on a `force_exit` bar.
 #[inline(never)]
 fn order_at(
     args: &FromOrders<'_>,
@@ -1005,6 +1010,10 @@ fn order_at(
     col: usize,
     from_ago: usize,
 ) -> (f64, SizeType, Direction) {
+    if args.force_exit.get(i, col) {
+        // To flat; nothing when already flat.
+        return (0.0, SizeType::TargetAmount, Direction::Both);
+    }
     match crate::prices::source_row(i, from_ago) {
         Some(r) => (
             args.size.get(r, col),

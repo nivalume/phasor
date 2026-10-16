@@ -77,6 +77,25 @@ class BarPanel:
     def coverage(self):
         return np.isfinite(self.close).sum(axis=0) / self.n_rows if self.n_rows else np.zeros(self.n_cols)
 
+    def drop_missing(self):
+        """The panel without the times any instrument has no bar at.
+
+        A panel of several instruments has a row for every time any of them
+        traded, NaN where one did not. Dropping those rows leaves only the
+        times all of them have, as ``missing_index="drop"`` does elsewhere;
+        leaving them is ``"nan"``, the panel as it comes.
+        """
+        keep = np.isfinite(self.close).all(axis=1)
+        return BarPanel(
+            time=self.time[keep],
+            bar_types=self.bar_types,
+            open=self.open[keep],
+            high=self.high[keep],
+            low=self.low[keep],
+            close=self.close[keep],
+            volume=self.volume[keep],
+        )
+
 
 class Dataset:
     """Decoded Arrow batches with explicit numeric views onto a BarPanel."""

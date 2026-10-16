@@ -482,7 +482,10 @@ swaps only per-bar fields (`set_bar`): +30% sparse / +22% dense in `benchmarks/R
 ![Size cascade: ShortOnly flip, TargetPercent → TargetValue, Value → Amount, TargetAmount → Amount, −inf → Percent(−1), Percent → ±inf; the sign dispatches buy or sell; optional random rejection](img/en/cascade.svg)
 
 Each stage rewrites the size type; only `Amount` reaches dispatch. Zero and NaN
-take the sell branch, as in the reference.
+take the sell branch, as in the reference. Before the stages in the figure, the
+`*100` spellings are divided by 100 into the type they spell, and
+`ValuePercent` (a fraction of the group's value) becomes `Value` the way
+`TargetPercent` becomes `TargetValue` (§8.15).
 
 ### 7.4 Buying and selling
 
@@ -951,6 +954,50 @@ each option by hand, with unit tests in `prices.rs` and `stops.rs`.
   same entries, long and short, which `crates/phasor-sim/tests/
   signals_extensions.rs` checks fill by fill on random bars with every kind
   of stop.
+
+### 8.15 Percent sizes, finer bars and sessions
+
+- **`ValuePercent` and the `*100` spellings** (`SizeType` 6–9). `ValuePercent`
+  is an order worth a fraction of the group's value (`size × value`, then
+  `Value`), where `Percent` is a fraction of the cash or position available.
+  `Percent100`, `ValuePercent100` and `TargetPercent100` are `Percent`,
+  `ValuePercent` and `TargetPercent` written in percent: the kernel divides by
+  100 first, so `50` with `Percent100` and `0.5` with `Percent` fill the same.
+  `call_seq="auto"` (`groups::approx_order_value`) and bid/ask side detection
+  (`prices::buys`) read them the same way. In `from_signals` the percent
+  spellings go through `signals_to_size` as `Percent` and the target ones
+  through `signals_to_target`.
+- **Finer bars** (`phasor.resolution`, Python only). The engine has no
+  timestamps, so running a strategy decided on coarse bars over fine bars is
+  an alignment step before the run: `align` puts each coarse value on the
+  first fine bar at or after the time it became available (booleans OR-ed,
+  numbers optionally held with `fill`), and `resample` reads a fine series
+  back onto coarse bars (`last`, `sum`, `compound`). A stop tested on fine
+  bars then knows which of the stop-loss and take-profit came first, where a
+  coarse bar containing both assumes the stop-loss. `Portfolio.resample`
+  waits for I4.
+- **Sessions** (`phasor.sessions`, Python only). `session_mask` marks bars
+  whose local time of day (an IANA time zone, offsets looked up per UTC
+  hour, so daylight saving is right) is in `[start, end)` on a session
+  weekday; an `end` before `start` is an overnight session belonging to the
+  day it starts. `session_end` marks each session's last bar.
+  `BarPanel.drop_missing` keeps the times every instrument has a bar at.
+- **`force_exit`** (both loops, a boolean array, default `false`). On a
+  marked bar the column's position is closed at the order price in place of
+  anything else ordered there: in `from_orders` the order becomes
+  `TargetAmount 0` on `Both`; in `from_signals` a stop that triggers on the
+  bar still fills first, at its level, and otherwise the bar's signals and a
+  resting limit order are dropped, the stops cleared, and the close is an
+  `Amount` order on the position's side. A flat column does nothing. It goes through the kernel
+  like any order, so fees, slippage and bid/ask apply, and it is a record
+  like any fill. Off, it costs `from_orders` one scalar check per group and
+  is part of `from_signals`' `EXTENDED` copy.
+
+`crates/phasor-sim/tests/signals_extensions.rs` checks the percent spellings
+against the fractions they write and the forced exit by hand;
+`crates/phasor-py/tests/test_resolution_sessions.py` checks alignment,
+resampling, a stop settled on fine bars, sessions across time zones and
+daylight saving, and forced exits at session ends.
 
 ---
 
@@ -1459,7 +1506,7 @@ appears only in the optional `test` extra.
 | simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding,liquidation}.rs` | §8 |
 | records | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | analysis | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` (`rates.py`: per-bar rates) | §12 |
+| Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` (`rates.py`: per-bar rates; `resolution.py`, `sessions.py`: finer bars and sessions, §8.15) | §12 |
 | research protocol | `research/phasor_lab/` | §13 |
 | parity harness | `tests/parity/`, `tests/fixtures/`, `crates/*/tests/` | §14 |
 | benchmarks | `benchmarks/`, `crates/phasor-sim/examples/{bench,scaling}.rs`, `crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
