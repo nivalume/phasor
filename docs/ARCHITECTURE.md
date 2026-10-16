@@ -447,7 +447,7 @@ executes one order against one account at one bar. Both loops call it, and phase
 |---|---|
 | `ExecuteOrderState` | `cash, position (signed), debt, locked_cash, free_cash` |
 | `ProcessOrderState` | + `val_price, value`, record counters |
-| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, leverage=1, leverage_mode=Lazy, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
+| `Order` | `size=+inf, price=+inf, size_type=Amount, direction=Both, fees, fixed_fees, slippage, min_size=0, max_size=+inf, size_granularity=NaN, leverage=1, leverage_mode=Lazy, account_type=Cash, initial_margin=NaN, margin_basis=Notional, cash_limit=+inf, reject_prob, lock_cash, allow_partial=true, raise_reject, log` |
 | `OrderResult` | `size, price, fees, side, status, status_info` |
 
 `cash` is own cash: borrowed money is never in it. `debt` is what the column
@@ -458,14 +458,15 @@ net of what shorts tie up, so opening a short moves it by
 `proceeds − short_value − short_value / leverage`, the reference's
 `proceeds − 2 × short_value` at leverage 1. All of it is path-dependent, so it is
 explicit state. Without leverage a long has no debt and a short's `locked_cash`
-equals its `debt`, the only state the reference can describe (§7.7).
+equals its `debt`, the only state the reference can describe (§7.7). A margin
+column reads `debt` and `locked_cash` as cost basis and margin posted (§7.8).
 
 ### 7.2 Validation
 
 1. Zero-snap state values that are `is_close` to 0.
 2. NaN size / NaN price → `Ignored` (before validation).
-3. `validate_bar`: cash not NaN and ≥ 0 (below 0 allowed in a leveraged account, §7.7), finite non-negative `debt` and `locked_cash`, finite position, price > 0, direction consistent with position.
-4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `leverage` finite and ≥ 1, `reject_prob ∈ [0,1]`, `cash_limit ≥ 0`.
+3. `validate_bar`: cash not NaN and ≥ 0 (below 0 allowed in a leveraged or margin account, §7.7–7.8), finite non-negative `debt` and `locked_cash`, finite position, price > 0, direction consistent with position.
+4. `param_violation`: fees finite, slippage ≥ 0, sizes positive, `leverage` finite and ≥ 1, `reject_prob ∈ [0,1]`, `cash_limit ≥ 0`; a margin order's `initial_margin` (§7.8).
 
 `locked_cash` is not zero-snapped: it is only read in proportion to a position, and
 the kernel leaves no residue in it. `debt` and `locked_cash` are tested together
@@ -533,9 +534,56 @@ of line where they would otherwise sit on the hot path.
 | short | reserves proceeds + value | reserves proceeds + `value / λ` (λ = 2 is Reg T's 150%); with `lock_cash` or a percentage the size limit is `(free_cash − fixed_fees) / (price × (1/λ + fees))` |
 | negative cash | invalid state | a long sold below its debt leaves the account owing; the account can sell, and its buys are rejected (`NoCashLeverage` if the order is leveraged, else `NoCashLong`) |
 
-Not yet: interest on debt, maintenance margin, liquidation and funding (plan C1–C4).
+Not yet: interest on debt, maintenance margin, liquidation and funding (plan C2–C4).
 `CallSeq::Auto` sorts by `approx_order_value`, which does not account for
 leverage.
+
+### 7.8 Margin accounts
+
+`Order::account_type` says how a column pays for its trades: `Cash` (the
+default, everything above) or `Margin`, for futures, perpetuals and CFDs. It is
+a property of the column for the whole run, so one that changes down a column
+is an error; one group can hold spot columns beside margin columns and share
+their cash, which is how a spot-long, perpetual-short pair is one account. Not
+in the reference. A margin column reads the same five state fields
+differently, and `margin_trade` (`kernel.rs`, cold, out of line) fills it:
+
+| | Cash column | Margin column |
+|---|---|---|
+| opening | a long pays its price, a short reserves proceeds + `value / λ` (§7.7) | either side posts initial margin out of `free_cash` and pays its fees; nothing is borrowed or received |
+| `debt` | what a long borrowed, a short's proceeds | cost basis: `abs(position) ×` average entry price |
+| `locked_cash` | own cash the position ties up | initial margin posted, still in `cash` |
+| closing | proceeds to cash, debt repaid | realizes profit against `debt / abs(position)`, releases that share of the margin |
+| each bar | nothing | the loop settles the profit since the last bar into `cash` and `free_cash` and moves the basis to the valuation price |
+| `free_cash` | cash net of what shorts tie up | equity less every margin position's margin |
+
+- **How much margin.** `initial_margin` per unit opened, in `margin_basis`:
+  `Notional` (default) is a fraction of the notional at the fill price, and
+  `NaN` (default) means `1 / leverage`, so `leverage = 10` alone is a 10×
+  perpetual; `Unit` is cash per unit of size, as a futures exchange publishes
+  it per contract, and must be set. The margin is fixed at the fill: a later
+  value applies to later fills only. Both are flexible per bar.
+- **How much may open.** Closing is always allowed. Opening is capped at
+  `(free_cash + freed − fixed_fees) / (unit_margin + price × fees)`, where
+  `freed` is what closing the whole opposite position would realize and
+  release, so a reversal opens with it; `cash_limit` caps the budget, and
+  `percent` takes its share of what closes plus what may open. Out of free cash
+  the opening is `NoCashLong` / `NoCashShort`; `LongOnly` and `ShortOnly`
+  only close the other side (`NoOpenPosition`). `leverage_mode` and
+  `lock_cash` do not apply: nothing is borrowed, and every position reserves
+  its margin anyway.
+- **Negative cash.** Fees come out of cash and a loss can exceed it, so cash may
+  go below zero, as in a leveraged account; the account can still close and
+  its openings are rejected. Margin calls and liquidation are not modelled
+  yet (plan C2).
+- **Validation.** `param_violation` adds two checks for margin orders:
+  `initial_margin` is `NaN` or finite and > 0, and set when the basis is `Unit`.
+  `ValidatedOrder` marks a margin order `in_levered_account`.
+
+Settlement is the loop's (§8.4), and it is not a cash flow: it moves money
+between the position and the cash without changing the equity, so it leaves
+no record. The analysis rebuilds the same equity from the fills alone (§10.2).
+Isolated margin, maintenance margin and liquidation are plan C2.
 
 ---
 
@@ -580,6 +628,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Both loops build each column's `ValidatedOrder` once (a second, slippage-free one for stops resting at their level in `from_signals`) and rebuild per bar only when a parameter varies by row; a bar with no signal and no armed stop skips sizing.
 - Both loops are generic over `SinkBuffer` (§9.3).
 - Leverage: `any_levered` decides once per run whether any column's `leverage` exceeds 1. Each loop has a `const LEV: bool` copy, as `FLOWS` (§8.5), so a run without leverage has no code for it. With it, every order is marked `in_levered_account()` (accepts negative cash), the bar's value subtracts each long's debt, an `update_value` re-mark subtracts the debt a fill added, and each fill records its `debt` and `locked_cash` (§9.1). A column at leverage 1 in a leveraged run fills exactly as in a run without one.
+- Margin columns (§7.8, `crates/phasor-sim/src/margin.rs`): `any_levered` also counts them, so they run in the `LEV` copy, which reads each group's account types once (`margin_columns`). Every bar, once the valuation price is resolved and before the group is valued, `settle` moves each margin position's profit since the last bar into the group's `cash` and `free_cash` and its cost basis to the price; `from_signals` does it on bars with no signal too, because a shared account's next order sizes from it. The group's value counts a margin position at `unsettled` (its profit against the basis) rather than `position × price`, and the `update_value` re-mark subtracts the basis a fill added, as it does a leveraged long's debt. A cash column in the same run keeps its §7.7 bookkeeping.
 
 ### 8.5 Cash flows outside fills
 
@@ -608,8 +657,8 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 
 | Record | Fields | Row = |
 |---|---|---|
-| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill, in leveraged runs only (empty otherwise) | one fill |
-| `LogRecords` | 41: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode` | one order considered |
+| `OrderRecords` | `col, idx, size, price, fees, side`; `debt, locked_cash` after the fill and `margin` (the column's account type), in leveraged or margin runs only (empty otherwise) | one fill |
+| `LogRecords` | 44: before-state, `req_*`, `new_*`, `res_*`, `order_id`; the reference's 37 plus `locked_cash`, `new_locked_cash`, `req_leverage`, `req_leverage_mode`, `req_account_type`, `req_initial_margin`, `req_margin_basis` | one order considered |
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | phasor-signals ranges |
@@ -682,6 +731,7 @@ groups), `from_orders` / `from_signals` (run the simulation).
 - A deposit is not a return: `returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`, the first bar measured from `init_cash + deposit[0]`. Without deposits the chain is unchanged, bit for bit.
 - With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
 - Leverage: a fill's cash flow is its full price, so `cash()` is own cash less what longs borrowed and can go below zero, while `value()` stays equity. `free_cash` cannot be rebuilt from fills alone once a short's collateral depends on λ, so in a leveraged run `free_cash_flow` reads each fill's recorded `debt + locked_cash` as the short's reserve (a leveraged long reserves nothing). `gross_exposure` of a 2× long is therefore 2.
+- Margin columns: their fills are charged their full price too, so `value = cash + position × close` is the equity the per-bar settlements add up to, and `value()` needs nothing new. `free_cash_flow` reads a margin fill's `locked_cash` as its reserve, on either side, and `Portfolio::free_cash` adds each margin column's `position × close` back into its account, which the account never paid: free cash is then equity less the margin posted, the simulation's own figure. `gross_exposure` counts the whole contract over that.
 
 ### 10.3 Metrics
 
@@ -786,7 +836,10 @@ read a 1-D array as one value per bar; a shared run's `cash_deposits` matrix is
 `(T, n_groups)`, mapped onto columns without copying. `Portfolio.cash_records()`
 returns what was applied. `leverage` takes the same shapes as the other
 parameters, `leverage_mode` is `"lazy" | "eager"` (§7.7); in a leveraged run
-`orders()` adds `debt` and `locked_cash`.
+`orders()` adds `debt` and `locked_cash`. `account_type` is `"cash" | "margin"`
+or one of them per column, `initial_margin` takes the usual shapes, and
+`margin_basis` is `"notional" | "unit"` (§7.8); a margin run's `orders()` also
+has `margin`, and `Portfolio.free_cash()` returns the rebuilt free cash.
 
 ### 12.4 Other bindings
 
@@ -1073,6 +1126,7 @@ appears only in the optional `test` extra.
 | fill | an executed order; one `OrderRecords` row |
 | log row | one order considered, with before/after state (§9.1) |
 | rejection | an unfillable order, returned as a status, not an error (§3.5) |
+| margin column / settlement | a column that posts initial margin instead of paying in full / moving its profit into cash each bar (§7.8) |
 | factor | a named expression producing a time × symbol matrix (§5) |
 | node / slot | a deduplicated graph operation / its reusable scratch series (§5.3) |
 | `column_map` | logical column → source price column (§3.3) |
@@ -1088,7 +1142,7 @@ appears only in the optional `test` extra.
 | expressions | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | signals, sweeps, indicators | `crates/phasor/src/sweep.rs`, `crates/phasor-signals/src`, `crates/phasor-indicators/src`, `crates/phasor-py/python/phasor/strategy.py` | §6 |
 | execution kernel | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
-| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash}.rs` | §8 |
+| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin}.rs` | §8 |
 | records | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | analysis | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
 | Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` | §12 |

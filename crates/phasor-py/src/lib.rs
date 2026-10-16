@@ -410,6 +410,25 @@ impl PyPortfolio {
             .into_pyarray(py))
     }
 
+    /// Cash an account has free at the end of each bar: its cash less what
+    /// its open shorts reserve and its margin columns post, with each margin
+    /// position counted at its profit.
+    #[pyo3(signature = (col = None, *, group = None))]
+    fn free_cash<'py>(
+        &self,
+        py: Python<'py>,
+        col: Option<usize>,
+        group: Option<usize>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let index = self.account_index(col, group)?;
+        Ok(py
+            .detach(|| -> PyResult<_> {
+                let pf = self.core()?;
+                Ok(pf.free_cash().map_err(to_py_err)?.column(index).to_vec())
+            })?
+            .into_pyarray(py))
+    }
+
     /// Position quantity of one symbol column.
     fn assets<'py>(&self, py: Python<'py>, col: usize) -> PyResult<Bound<'py, PyArray1<f64>>> {
         self.column_of(py, col, |pf, c| pf.assets().column(c).to_vec())
@@ -527,10 +546,13 @@ impl PyPortfolio {
     /// Struct-of-arrays, as the record layer stores them, so a caller can build
     /// a DataFrame from it without a transpose.
     ///
-    /// A run with any column above leverage 1 adds `debt` and `locked_cash`:
-    /// what each fill left the column owing and tying up of its own cash.
-    /// Other runs leave them out rather than return them empty, so every array
-    /// in the dict has one entry per fill.
+    /// A run with any column above leverage 1, or any margin column, adds
+    /// `debt`, `locked_cash` and `margin`: what each fill left the column
+    /// owing and tying up of its own cash, and whether the column trades on
+    /// margin. A margin column's `debt` is its position's cost basis and its
+    /// `locked_cash` the initial margin posted. Other runs leave them out
+    /// rather than return them empty, so every array in the dict has one entry
+    /// per fill.
     fn orders<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let out = PyDict::new(py);
         out.set_item("col", self.orders.col.clone().into_pyarray(py))?;
@@ -546,6 +568,7 @@ impl PyPortfolio {
                 "locked_cash",
                 self.orders.locked_cash.clone().into_pyarray(py),
             )?;
+            out.set_item("margin", self.orders.margin.clone().into_pyarray(py))?;
         }
         Ok(out)
     }
@@ -576,7 +599,10 @@ impl PyPortfolio {
     /// The logs, as a dict of NumPy arrays — the reference's 38-field schema
     /// plus leverage's four: `locked_cash` and `new_locked_cash` on either
     /// side of the order, `req_leverage` and `req_leverage_mode` in the
-    /// request. `req_leverage_mode` is 0 for lazy and 1 for eager.
+    /// request. `req_leverage_mode` is 0 for lazy and 1 for eager. And
+    /// margin's three, all in the request: `req_account_type` (0 cash, 1
+    /// margin), `req_initial_margin` and `req_margin_basis` (0 notional, 1
+    /// unit).
     ///
     /// One row per order **considered**, filled or not, which is the difference
     /// from [`Self::orders`] and the whole reason to ask for logs. Without them
@@ -605,6 +631,8 @@ impl PyPortfolio {
         put_i("req_size_type", l.req_size_type.clone())?;
         put_i("req_direction", l.req_direction.clone())?;
         put_i("req_leverage_mode", l.req_leverage_mode.clone())?;
+        put_i("req_account_type", l.req_account_type.clone())?;
+        put_i("req_margin_basis", l.req_margin_basis.clone())?;
         put_i("res_side", l.res_side.clone())?;
         put_i("res_status", l.res_status.clone())?;
         put_i("res_status_info", l.res_status_info.clone())?;
@@ -630,6 +658,7 @@ impl PyPortfolio {
         put_f("req_max_size", l.req_max_size.clone())?;
         put_f("req_size_granularity", l.req_size_granularity.clone())?;
         put_f("req_leverage", l.req_leverage.clone())?;
+        put_f("req_initial_margin", l.req_initial_margin.clone())?;
         put_f("req_reject_prob", l.req_reject_prob.clone())?;
         put_f("new_cash", l.new_cash.clone())?;
         put_f("new_position", l.new_position.clone())?;
@@ -840,6 +869,41 @@ fn matrix_out(py: Python<'_>, m: Matrix) -> PyResult<Bound<'_, PyArray2<f64>>> {
     columns_out(py, m.into_vec(), rows, cols)
 }
 
+/// `account_type` as one type per column: `None` keeps the engine's default.
+///
+/// A string applies to every column, and a list gives each column its own,
+/// which is how a spot leg and a perpetual leg share one account. A type is a
+/// column's for the whole run, so there is no matrix form.
+fn account_types(
+    value: Option<&Bound<'_, PyAny>>,
+    n_cols: usize,
+) -> PyResult<Option<Vec<phasor_model::AccountType>>> {
+    let bad = pyo3::exceptions::PyValueError::new_err;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Ok(name) = value.extract::<String>() {
+        let ty = parse::account_type(&name).map_err(bad)?;
+        return Ok(Some(vec![ty; n_cols]));
+    }
+    let names: Vec<String> = value.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "account_type must be 'cash', 'margin', or one of them per column",
+        )
+    })?;
+    if names.len() != n_cols {
+        return Err(bad(format!(
+            "account_type has {} entries for {n_cols} columns",
+            names.len()
+        )));
+    }
+    names
+        .iter()
+        .map(|name| parse::account_type(name).map_err(bad))
+        .collect::<PyResult<_>>()
+        .map(Some)
+}
+
 /// Resolves group capital once, expanding only for the simulator's per-column API.
 fn account_inputs(
     shared: bool,
@@ -945,6 +1009,9 @@ fn deposits_view<'a>(
     size_granularity = None,
     leverage = None,
     leverage_mode = "lazy",
+    account_type = None,
+    initial_margin = None,
+    margin_basis = "notional",
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1001,6 +1068,9 @@ fn from_signals(
     size_granularity: Option<&Bound<'_, PyAny>>,
     leverage: Option<&Bound<'_, PyAny>>,
     leverage_mode: &str,
+    account_type: Option<&Bound<'_, PyAny>>,
+    initial_margin: Option<&Bound<'_, PyAny>>,
+    margin_basis: &str,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1079,6 +1149,7 @@ fn from_signals(
         max_size,
         size_granularity,
         leverage,
+        initial_margin,
         cash_limit,
         reject_prob,
         lock_cash,
@@ -1090,6 +1161,8 @@ fn from_signals(
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
+    let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
+    let account_types = account_types(account_type, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     if !matches!(
         st,
@@ -1190,6 +1263,11 @@ fn from_signals(
         )?,
         leverage: flex_or_f64(&p.leverage, n_rows, n_cols, per_col, d.leverage)?,
         leverage_mode: FlexArray::Scalar(leverage_mode),
+        account_type: account_types.as_ref().map_or(Ok(d.account_type), |types| {
+            FlexArray::per_column(types, n_cols).map_err(to_py_err)
+        })?,
+        initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
+        margin_basis: FlexArray::Scalar(margin_basis),
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
@@ -1293,6 +1371,9 @@ fn from_signals(
     size_granularity = None,
     leverage = None,
     leverage_mode = "lazy",
+    account_type = None,
+    initial_margin = None,
+    margin_basis = "notional",
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1336,6 +1417,9 @@ fn from_orders(
     size_granularity: Option<&Bound<'_, PyAny>>,
     leverage: Option<&Bound<'_, PyAny>>,
     leverage_mode: &str,
+    account_type: Option<&Bound<'_, PyAny>>,
+    initial_margin: Option<&Bound<'_, PyAny>>,
+    margin_basis: &str,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1384,6 +1468,7 @@ fn from_orders(
         max_size,
         size_granularity,
         leverage,
+        initial_margin,
         cash_limit,
         reject_prob,
         lock_cash,
@@ -1395,6 +1480,8 @@ fn from_orders(
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
+    let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
+    let account_types = account_types(account_type, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
     let trades_type = parse::trades_type(trades).map_err(bad)?;
 
@@ -1451,6 +1538,11 @@ fn from_orders(
         )?,
         leverage: flex_or_f64(&p.leverage, n_rows, n_cols, per_col, d.leverage)?,
         leverage_mode: FlexArray::Scalar(leverage_mode),
+        account_type: account_types.as_ref().map_or(Ok(d.account_type), |types| {
+            FlexArray::per_column(types, n_cols).map_err(to_py_err)
+        })?,
+        initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
+        margin_basis: FlexArray::Scalar(margin_basis),
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,

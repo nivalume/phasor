@@ -345,6 +345,9 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         // None of these is in the reference.
         leverage: FlexArray::Scalar(1.0),
         leverage_mode: FlexArray::Scalar(phasor_model::LeverageMode::Lazy),
+        account_type: FlexArray::Scalar(phasor_model::AccountType::Cash),
+        initial_margin: FlexArray::Scalar(f64::NAN),
+        margin_basis: FlexArray::Scalar(phasor_model::MarginBasis::Notional),
         cash_limit: FlexArray::Scalar(f64::INFINITY),
         reject_prob: FlexArray::Scalar(0.0),
         seed: 0,

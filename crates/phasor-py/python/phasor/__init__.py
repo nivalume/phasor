@@ -270,6 +270,18 @@ def _group_lens(value):
     return [int(n) for n in lengths]
 
 
+def _account_type(value):
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        names = list(value)
+    except TypeError:
+        names = None
+    if names is None or not all(isinstance(name, str) for name in names):
+        raise TypeError("account_type must be 'cash', 'margin', or one of them per column")
+    return names
+
+
 def _column_map(value):
     if value is None:
         return None
@@ -300,6 +312,9 @@ def from_signals(
     size_granularity=None,
     leverage=None,
     leverage_mode="lazy",
+    account_type=None,
+    initial_margin=None,
+    margin_basis="notional",
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -368,7 +383,7 @@ def from_signals(
     log
         ``True`` to record why every order ended the way it did, or a
         ``(n_bars, n_cols)`` mask to log one column or one row. Off by default:
-        a log row is 42 fields against an order record's 7, written for every
+        a log row is 45 fields against an order record's 7, written for every
         order *considered* rather than every one filled. Read them back with
         ``pf.logs()``, ``pf.log_reasons()`` and ``pf.reason_counts(col)``.
     raise_reject
@@ -432,6 +447,21 @@ def from_signals(
         ``NoCashLeverage``. Under leverage ``pf.cash()`` is own cash less what
         the longs borrowed and can go negative, ``pf.value()`` stays the
         equity, and ``pf.orders()`` gains ``debt`` and ``locked_cash``.
+    account_type, initial_margin, margin_basis
+        ``cash`` (the default) holds what it buys; ``margin`` trades like a
+        futures or perpetual contract on the account's cash. A string for
+        every column or one per column, so a spot leg and a perpetual leg can
+        share one account with ``cash_sharing``. Opening either side of a
+        margin position posts ``initial_margin`` from free cash: a fraction of
+        the notional under ``margin_basis="notional"`` (``None`` means
+        ``1 / leverage``), or cash per unit under ``"unit"``. Every bar the
+        position's profit since the last bar is settled into cash, so a loss
+        shrinks what new orders may post and cash can go below zero. Closing
+        realizes against the average entry and releases the margin.
+        ``leverage_mode`` and ``lock_cash`` do not apply to margin columns.
+        ``pf.value()`` is the equity, ``pf.free_cash()`` the equity less the
+        margin posted, and ``pf.orders()`` gains ``debt`` (the cost basis),
+        ``locked_cash`` (the margin) and ``margin``.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -472,6 +502,9 @@ def from_signals(
         size_granularity=_param(size_granularity, "size_granularity"),
         leverage=_param(leverage, "leverage"),
         leverage_mode=leverage_mode,
+        account_type=_account_type(account_type),
+        initial_margin=_param(initial_margin, "initial_margin"),
+        margin_basis=margin_basis,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
@@ -521,6 +554,9 @@ def from_orders(
     size_granularity=None,
     leverage=None,
     leverage_mode="lazy",
+    account_type=None,
+    initial_margin=None,
+    margin_basis="notional",
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -617,6 +653,21 @@ def from_orders(
         ``NoCashLeverage``. Under leverage ``pf.cash()`` is own cash less what
         the longs borrowed and can go negative, ``pf.value()`` stays the
         equity, and ``pf.orders()`` gains ``debt`` and ``locked_cash``.
+    account_type, initial_margin, margin_basis
+        ``cash`` (the default) holds what it buys; ``margin`` trades like a
+        futures or perpetual contract on the account's cash. A string for
+        every column or one per column, so a spot leg and a perpetual leg can
+        share one account with ``cash_sharing``. Opening either side of a
+        margin position posts ``initial_margin`` from free cash: a fraction of
+        the notional under ``margin_basis="notional"`` (``None`` means
+        ``1 / leverage``), or cash per unit under ``"unit"``. Every bar the
+        position's profit since the last bar is settled into cash, so a loss
+        shrinks what new orders may post and cash can go below zero. Closing
+        realizes against the average entry and releases the margin.
+        ``leverage_mode`` and ``lock_cash`` do not apply to margin columns.
+        ``pf.value()`` is the equity, ``pf.free_cash()`` the equity less the
+        margin posted, and ``pf.orders()`` gains ``debt`` (the cost basis),
+        ``locked_cash`` (the margin) and ``margin``.
     reject_prob, seed
         Probability that an order is rejected at random, for testing how a
         strategy degrades when fills fail. Each draw depends only on ``seed``,
@@ -652,6 +703,9 @@ def from_orders(
         size_granularity=_param(size_granularity, "size_granularity"),
         leverage=_param(leverage, "leverage"),
         leverage_mode=leverage_mode,
+        account_type=_account_type(account_type),
+        initial_margin=_param(initial_margin, "initial_margin"),
+        margin_basis=margin_basis,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,

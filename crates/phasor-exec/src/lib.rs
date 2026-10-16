@@ -50,4 +50,6 @@ pub use kernel::{ValidatedOrder, execute_order, execute_validated};
 pub use types::{ExecuteOrderState, Order, OrderResult, ProcessOrderState};
 
 // Re-exported so callers matching on a result do not need `phasor-model` too.
-pub use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, StatusInfo};
+pub use phasor_model::{
+    AccountType, Direction, LeverageMode, MarginBasis, OrderSide, OrderStatus, SizeType, StatusInfo,
+};

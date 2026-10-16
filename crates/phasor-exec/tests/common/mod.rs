@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use phasor_core::math::is_close;
-use phasor_exec::{Direction, LeverageMode, Order, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_exec::{
+    AccountType, Direction, LeverageMode, MarginBasis, Order, OrderSide, OrderStatus, SizeType,
+    StatusInfo,
+};
 
 /// Whether two floats agree for fixture purposes.
 ///
@@ -162,6 +165,9 @@ impl Row<'_> {
             // Not in the reference.
             leverage: 1.0,
             leverage_mode: LeverageMode::Lazy,
+            account_type: AccountType::Cash,
+            initial_margin: f64::NAN,
+            margin_basis: MarginBasis::Notional,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: self.bool("lock_cash"),

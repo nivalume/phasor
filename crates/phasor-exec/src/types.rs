@@ -1,6 +1,8 @@
 //! State, request and result types for order execution.
 
-use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_model::{
+    AccountType, Direction, LeverageMode, MarginBasis, OrderSide, OrderStatus, SizeType, StatusInfo,
+};
 
 /// Account state that an order execution reads and rewrites.
 ///
@@ -25,6 +27,14 @@ use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, St
 ///
 /// Without leverage a long has no debt and a short's `locked_cash` equals its
 /// `debt`, which is the only state the reference can describe.
+///
+/// A margin column ([`AccountType::Margin`]) reads the same fields
+/// differently, on both sides alike: `debt` is the position's cost basis,
+/// `|position|` times its average entry price, which the loop moves to the
+/// valuation price as it settles each bar's profit into `cash`; `locked_cash`
+/// is the initial margin posted, still in `cash` but not free. So `free_cash`
+/// is `cash` less the margin of every margin position, and less the
+/// reservations of any cash column's shorts in the same group.
 ///
 /// Carrying only `cash` and `position` and deriving the rest does not work —
 /// the reservation is path-dependent.
@@ -121,6 +131,19 @@ pub struct Order {
     /// Whether a leveraged buy borrows only what own cash cannot cover, or
     /// always `1 - 1 / leverage` of it.
     pub leverage_mode: LeverageMode,
+    /// Whether the column pays for its trades in full or posts margin.
+    ///
+    /// [`AccountType::Margin`] fills either side by posting `initial_margin`
+    /// out of free cash, and ignores `leverage_mode` and `lock_cash`. Its
+    /// state reads differently; see [`ExecuteOrderState`].
+    pub account_type: AccountType,
+    /// The margin a margin order posts per unit opened, in `margin_basis`.
+    ///
+    /// `NaN`, the default, is `1 / leverage` of the notional. Fixed at the
+    /// fill: a later change applies to later fills only.
+    pub initial_margin: f64,
+    /// Whether `initial_margin` is a fraction of the notional or cash per unit.
+    pub margin_basis: MarginBasis,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     ///
     /// Applied to the cash available before `percent` takes its share, so
@@ -158,6 +181,9 @@ impl Default for Order {
             size_granularity: f64::NAN,
             leverage: 1.0,
             leverage_mode: LeverageMode::Lazy,
+            account_type: AccountType::Cash,
+            initial_margin: f64::NAN,
+            margin_basis: MarginBasis::Notional,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,

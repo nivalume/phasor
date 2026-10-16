@@ -55,6 +55,36 @@ pub enum LeverageMode {
     Eager = 1,
 }
 
+/// How a column's trades are paid for.
+///
+/// Set per column, so one account group can hold spot columns next to futures
+/// or perpetual columns and share their cash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(i8)]
+pub enum AccountType {
+    /// A long pays its price in full, a short ties up its proceeds and its
+    /// collateral. `leverage` borrows part of a long's price.
+    #[default]
+    Cash = 0,
+    /// Either side only posts initial margin out of free cash, and the
+    /// position's profit or loss is settled into cash every bar: futures,
+    /// perpetuals, CFDs.
+    Margin = 1,
+}
+
+/// What a margin column's `initial_margin` is measured in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(i8)]
+pub enum MarginBasis {
+    /// A fraction of the notional at the fill price, as perpetuals, forex and
+    /// CFDs quote it. Left `NaN`, it is `1 / leverage`.
+    #[default]
+    Notional = 0,
+    /// A fixed amount of cash per unit of size, as futures exchanges publish
+    /// it per contract.
+    Unit = 1,
+}
+
 /// Which side an order executed on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -359,6 +389,8 @@ mod tests {
         assert_eq!(CashFlowKind::Deposit as i8, 0);
         assert_eq!(CashFlowKind::Earning as i8, 1);
         assert_eq!(CashFlowKind::Dividend as i8, 2);
+        assert_eq!(AccountType::Margin as i8, 1);
+        assert_eq!(MarginBasis::Unit as i8, 1);
     }
 
     #[test]

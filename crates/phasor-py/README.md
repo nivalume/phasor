@@ -127,6 +127,36 @@ value. A buy with no own cash left is refused (`NoCashLeverage` in the logs).
 pf = phasor.from_orders(close, size=np.inf, init_cash=1_000.0, leverage=2.0)
 ```
 
+## Margin accounts
+
+`account_type="margin"` makes a column trade the way futures, perpetuals and
+CFDs do: either side only posts initial margin out of free cash, and the
+position's profit or loss is settled into cash at every bar. Give one type for
+every column, or a list with one per column, so a spot column and a perpetual
+column in one group share their cash. `initial_margin` is a fraction of the
+notional (`margin_basis="notional"`, the default; left unset it is
+`1 / leverage`) or cash per unit of size (`margin_basis="unit"`, as futures
+exchanges publish it per contract). Closing is always allowed; opening needs
+free cash for its margin and fees, and is refused (`NoCashLong` /
+`NoCashShort`) once a loss has used it up.
+
+- `pf.value()` is the equity; `pf.free_cash()` is that equity less the margin
+  posted, and `pf.gross_exposure()` counts the whole contract over it.
+- `pf.orders()` gains `debt` (the cost basis), `locked_cash` (the margin) and
+  `margin` per fill, and the logs gain `req_account_type`,
+  `req_initial_margin` and `req_margin_basis`.
+- There is no maintenance margin, liquidation or funding yet.
+
+```python
+# Spot long, perpetual short on 10% margin, one account: at 120 one gains
+# what the other loses, so the value stays 1,000.
+close = np.array([[100.0, 100.0], [120.0, 120.0]])
+size = np.array([[5.0, -5.0], [np.nan, np.nan]])
+pf = phasor.from_orders(close, size=size, init_cash=1_000.0, cash_sharing=True,
+                        account_type=["cash", "margin"],
+                        initial_margin=np.array([np.nan, 0.1]))
+```
+
 ## Factor expressions
 
 ### Function strategies

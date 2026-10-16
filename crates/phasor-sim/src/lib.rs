@@ -40,10 +40,13 @@
 //! portfolio there is a single unit of work, which is inherent — a shared cash
 //! balance is a sequential dependency across the whole group.
 
+use phasor_model::AccountType;
+
 mod cash;
 pub mod from_orders;
 pub mod from_signals;
 pub mod groups;
+mod margin;
 mod random;
 pub mod signals;
 
@@ -92,18 +95,45 @@ pub(crate) fn count_where<T: Copy>(
     }
 }
 
-/// Whether any column of a run may borrow: whether `leverage` exceeds 1
-/// anywhere in it.
+/// Whether any column of a run may borrow or trade on margin: whether
+/// `leverage` exceeds 1 anywhere in it, or any column is a margin column.
 ///
 /// Decided once per run, because it decides whether the records keep
-/// balances, and they keep them for every fill or for none. The default, a
-/// scalar 1, is answered without a scan.
+/// balances, and they keep them for every fill or for none. The defaults, a
+/// scalar 1 and a scalar cash account, are answered without a scan.
 pub(crate) fn any_levered(
     leverage: &phasor_core::flex::FlexArray<'_, f64>,
+    account_type: &phasor_core::flex::FlexArray<'_, AccountType>,
     n_rows: usize,
     n_cols: usize,
 ) -> bool {
     count_where(leverage, n_rows, 0..n_cols, |l| l > 1.0) > 0
+        || count_where(account_type, n_rows, 0..n_cols, |a| {
+            a == AccountType::Margin
+        }) > 0
+}
+
+/// Which of the columns `cols` are margin columns.
+///
+/// An account type decides how a column's balances read, so it is a property
+/// of the column for the whole run: one that changes down a column is an
+/// error rather than being read at its first row.
+pub(crate) fn margin_columns(
+    account_type: &phasor_core::flex::FlexArray<'_, AccountType>,
+    n_rows: usize,
+    cols: std::ops::Range<usize>,
+) -> phasor_core::error::Result<Vec<bool>> {
+    cols.map(|col| {
+        let first = account_type.get(0, col);
+        if account_type.varies_by_row() && (1..n_rows).any(|i| account_type.get(i, col) != first) {
+            return Err(phasor_core::error::Error::Invariant(format!(
+                "account_type changes down column {col}; a column is a cash or a margin column \
+                 for the whole run"
+            )));
+        }
+        Ok(first == AccountType::Margin)
+    })
+    .collect()
 }
 
 /// The smallest fill the reference accepts by default.

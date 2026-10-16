@@ -163,6 +163,12 @@ pub struct LogRecords {
     pub req_leverage: Vec<f64>,
     /// Requested leverage mode, as its discriminant.
     pub req_leverage_mode: Vec<i64>,
+    /// The column's account type, as its discriminant.
+    pub req_account_type: Vec<i64>,
+    /// Requested initial margin; `NaN` is `1 / leverage` of the notional.
+    pub req_initial_margin: Vec<f64>,
+    /// What the initial margin is measured in, as its discriminant.
+    pub req_margin_basis: Vec<i64>,
     /// Requested random rejection probability.
     pub req_reject_prob: Vec<f64>,
     /// Whether cash was locked.
@@ -233,6 +239,9 @@ impl LogRecords {
             req_size_granularity: Vec::new(),
             req_leverage: Vec::new(),
             req_leverage_mode: Vec::new(),
+            req_account_type: Vec::new(),
+            req_initial_margin: Vec::new(),
+            req_margin_basis: Vec::new(),
             req_reject_prob: Vec::new(),
             req_lock_cash: Vec::new(),
             req_allow_partial: Vec::new(),
@@ -310,6 +319,9 @@ impl LogRecords {
         self.req_size_granularity.push(r.size_granularity);
         self.req_leverage.push(r.leverage);
         self.req_leverage_mode.push(r.leverage_mode as i64);
+        self.req_account_type.push(r.account_type as i64);
+        self.req_initial_margin.push(r.initial_margin);
+        self.req_margin_basis.push(r.margin_basis as i64);
         self.req_reject_prob.push(r.reject_prob);
         self.req_lock_cash.push(r.lock_cash);
         self.req_allow_partial.push(r.allow_partial);
@@ -364,6 +376,9 @@ impl LogRecords {
             req_size_granularity,
             req_leverage,
             req_leverage_mode,
+            req_account_type,
+            req_initial_margin,
+            req_margin_basis,
             req_reject_prob,
             req_lock_cash,
             req_allow_partial,
@@ -527,8 +542,8 @@ impl crate::RecordSink for Journal {
         crate::RecordSink::push_cash(&mut self.orders, row, col, amount, kind);
     }
 
-    fn push_balances(&mut self, debt: f64, locked_cash: f64) {
-        self.orders.push_balances(debt, locked_cash);
+    fn push_balances(&mut self, debt: f64, locked_cash: f64, margin: bool) {
+        self.orders.push_balances(debt, locked_cash, margin);
     }
 }
 
@@ -544,7 +559,7 @@ mod tests {
     use super::*;
     use crate::RecordSink;
     use phasor_exec::{Order, OrderResult};
-    use phasor_model::{Direction, LeverageMode, SizeType};
+    use phasor_model::{AccountType, Direction, LeverageMode, MarginBasis, SizeType};
 
     fn request() -> Order {
         Order {
@@ -560,6 +575,9 @@ mod tests {
             size_granularity: f64::NAN,
             leverage: 1.0,
             leverage_mode: LeverageMode::Lazy,
+            account_type: AccountType::Cash,
+            initial_margin: f64::NAN,
+            margin_basis: MarginBasis::Notional,
             cash_limit: f64::INFINITY,
             reject_prob: 0.0,
             lock_cash: false,
@@ -716,7 +734,7 @@ mod tests {
         // The log's value is that nothing about the order is missing from it,
         // so the count is asserted rather than trusted. 38 in the reference,
         // less `id`, which is the record's index here as everywhere, plus
-        // leverage's four.
+        // leverage's four and margin's three.
         let mut logs = LogRecords::new();
         logs.push(&entry(0, 0, filled(), 0));
         let widths = [
@@ -742,6 +760,9 @@ mod tests {
             logs.req_size_granularity.len(),
             logs.req_leverage.len(),
             logs.req_leverage_mode.len(),
+            logs.req_account_type.len(),
+            logs.req_initial_margin.len(),
+            logs.req_margin_basis.len(),
             logs.req_reject_prob.len(),
             logs.req_lock_cash.len(),
             logs.req_allow_partial.len(),
@@ -764,8 +785,8 @@ mod tests {
         ];
         assert_eq!(
             widths.len(),
-            41,
-            "the reference's 38 fields, less the index, plus leverage's four"
+            44,
+            "the reference's 38 fields, less the index, plus leverage's four and margin's three"
         );
         assert!(widths.iter().all(|&w| w == 1), "a field was not written");
     }

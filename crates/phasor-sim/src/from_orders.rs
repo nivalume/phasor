@@ -20,8 +20,8 @@
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
 use phasor_exec::{
-    Direction, LeverageMode, Order, OrderStatus, ProcessOrderState, SizeType, ValidatedOrder,
-    execute_validated,
+    AccountType, Direction, LeverageMode, MarginBasis, Order, OrderStatus, ProcessOrderState,
+    SizeType, ValidatedOrder, execute_validated,
 };
 use phasor_records::{Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
@@ -72,6 +72,19 @@ pub struct FromOrders<'a> {
     /// When a leveraged long borrows: as late as possible or as much as
     /// possible.
     pub leverage_mode: FlexArray<'a, LeverageMode>,
+    /// Whether a column pays for its trades in full or posts margin. Per
+    /// column: one that changes down a column is an error.
+    ///
+    /// A margin column settles its position's profit into the group's cash
+    /// at every bar's valuation price, so its free cash is its equity less
+    /// the initial margin of its positions. See [`Order::account_type`].
+    pub account_type: FlexArray<'a, AccountType>,
+    /// Initial margin per unit a margin column opens, in `margin_basis`.
+    /// `NaN` is `1 / leverage` of the notional.
+    pub initial_margin: FlexArray<'a, f64>,
+    /// Whether `initial_margin` is a fraction of the notional or cash per
+    /// unit of size.
+    pub margin_basis: FlexArray<'a, MarginBasis>,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     pub cash_limit: FlexArray<'a, f64>,
     /// Probability that an order is rejected at random, in `[0, 1]`.
@@ -164,6 +177,8 @@ impl FromOrders<'_> {
             || self.size_granularity.varies_by_row()
             || self.leverage.varies_by_row()
             || self.leverage_mode.varies_by_row()
+            || self.initial_margin.varies_by_row()
+            || self.margin_basis.varies_by_row()
             || self.cash_limit.varies_by_row()
             || self.reject_prob.varies_by_row()
             || self.lock_cash.varies_by_row()
@@ -192,6 +207,9 @@ fn build_order(args: &FromOrders<'_>, i: usize, col: usize, levered: bool) -> Va
         size_granularity: args.size_granularity.get(i, col),
         leverage: args.leverage.get(i, col),
         leverage_mode: args.leverage_mode.get(i, col),
+        account_type: args.account_type.get(i, col),
+        initial_margin: args.initial_margin.get(i, col),
+        margin_basis: args.margin_basis.get(i, col),
         cash_limit: args.cash_limit.get(i, col),
         reject_prob: args.reject_prob.get(i, col),
         lock_cash: args.lock_cash.get(i, col),
@@ -242,6 +260,9 @@ impl Default for FromOrders<'_> {
             size_granularity: FlexArray::Scalar(f64::NAN),
             leverage: FlexArray::Scalar(1.0),
             leverage_mode: FlexArray::Scalar(LeverageMode::Lazy),
+            account_type: FlexArray::Scalar(AccountType::Cash),
+            initial_margin: FlexArray::Scalar(f64::NAN),
+            margin_basis: FlexArray::Scalar(MarginBasis::Notional),
             cash_limit: FlexArray::Scalar(f64::INFINITY),
             reject_prob: FlexArray::Scalar(0.0),
             seed: 0,
@@ -322,6 +343,17 @@ impl ColumnState {
     /// reservation instead and already in the position's value.
     fn long_debt(&self) -> f64 {
         if self.position > 0.0 { self.debt } else { 0.0 }
+    }
+
+    /// What is subtracted from `position × price` to leave the column's
+    /// share of the value: a cash column's [`long_debt`](Self::long_debt), a
+    /// margin column's signed cost basis.
+    fn owed(&self, margin: bool) -> f64 {
+        if margin {
+            crate::margin::owed(self.position, self.debt)
+        } else {
+            self.long_debt()
+        }
     }
 }
 
@@ -422,6 +454,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     let params_vary = args.params_vary_by_row();
     let mut orders: Vec<ValidatedOrder> =
         cols.clone().map(|c| build_order(args, 0, c, LEV)).collect();
+    // Which columns are margin columns. Only a leveraged run can have any,
+    // because `any_levered` counts them, so the other copies keep none.
+    let margin = if LEV {
+        crate::margin_columns(&args.account_type, args.n_rows, cols.clone())?
+    } else {
+        Vec::new()
+    };
     let at_open = FLOWS
         && (!crate::cash::is_off(&args.cash_deposits)
             || !crate::cash::is_off(&args.cash_dividends));
@@ -477,6 +516,16 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             if !val_price.is_nan() || !args.ffill_val_price {
                 state[k].last_val_price = val_price;
             }
+            if LEV && margin[k] {
+                let st = &mut state[k];
+                crate::margin::settle(
+                    st.position,
+                    &mut st.debt,
+                    st.last_val_price,
+                    &mut cash,
+                    &mut free_cash,
+                );
+            }
         }
 
         // --- the group's value, and the order to execute in ---------------
@@ -486,7 +535,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         // one it is recomputed per column below, which is the same thing.
         let mut group_value = cash;
         if shared {
-            for st in &state {
+            for (k, st) in state.iter().enumerate() {
+                if LEV && margin[k] {
+                    group_value +=
+                        crate::margin::unsettled(st.position, st.debt, st.last_val_price);
+                    continue;
+                }
                 if st.position != 0.0 {
                     group_value += st.position * st.last_val_price;
                 }
@@ -521,12 +575,14 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             // An unshared column values only itself, which is what phase 1
             // did and what a group of one still means.
             if !shared {
-                group_value = if st.position == 0.0 {
+                group_value = if LEV && margin[k] {
+                    cash + crate::margin::unsettled(st.position, st.debt, st.last_val_price)
+                } else if st.position == 0.0 {
                     cash
                 } else {
                     cash + st.position * st.last_val_price
                 };
-                if LEV {
+                if LEV && !margin[k] {
                     group_value -= st.long_debt();
                 }
             }
@@ -586,12 +642,14 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 );
                 if LEV {
                     // Borrowing moves no value: it adds as much debt as cash.
+                    // A margin fill adds as much cost basis as position value.
                     let now = ColumnState {
                         position: exec_state.position,
                         debt: exec_state.debt,
                         ..st
                     };
-                    (val_price, value - (now.long_debt() - st.long_debt()))
+                    let m = margin[k];
+                    (val_price, value - (now.owed(m) - st.owed(m)))
                 } else {
                     (val_price, value)
                 }
@@ -604,7 +662,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 let side = result.side.expect("a filled order always carries a side");
                 sink.push_order(i, col, result.size, result.price, result.fees, side);
                 if LEV {
-                    sink.push_balances(exec_state.debt, exec_state.locked_cash);
+                    sink.push_balances(exec_state.debt, exec_state.locked_cash, margin[k]);
                 }
                 // The record's own index, so a log joins back to the fill it
                 // produced. Counted rather than read off the sink, because a
@@ -707,7 +765,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
-    let levered = crate::any_levered(&args.leverage, args.n_rows, args.n_cols);
+    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
     for group in 0..args.groups.len() {
         simulate_group(args, group, levered, &mut sink, &mut fills)?;
     }
@@ -806,7 +864,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     // Contiguous chunks keep each thread's columns adjacent in memory and
     // make the merge an ordered append.
     let ranges = args.groups.chunks(n_threads);
-    let levered = crate::any_levered(&args.leverage, args.n_rows, args.n_cols);
+    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
 
     let results: Vec<Result<S>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges

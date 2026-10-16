@@ -192,6 +192,12 @@ pub fn deposits(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Option<M
 /// charges the whole price: free cash is then own cash less what was borrowed,
 /// negative when more was borrowed than is held.
 ///
+/// A margin column reserves its initial margin, read from `locked_cash` the
+/// same way. Its fills are charged their whole price here too, so what this
+/// leaves out is the position's market value: the free cash of a margin
+/// column is this flow's running sum plus `position × close`, which
+/// [`Portfolio::free_cash`](crate::Portfolio::free_cash) adds.
+///
 /// # Errors
 ///
 /// Returns [`phasor_core::Error::Invariant`] if the records are not grouped by
@@ -257,8 +263,9 @@ pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Re
 /// [`free_cash_flow`] for a run that recorded its balances.
 ///
 /// A short's reserve is the `debt` plus `locked_cash` its last fill left
-/// behind; anything else reserves nothing. Each fill moves free cash by its
-/// cash flow less the change in that reserve.
+/// behind, and a margin column's is its `locked_cash`, the initial margin, on
+/// either side; anything else reserves nothing. Each fill moves free cash by
+/// its cash flow less the change in that reserve.
 fn levered_free_cash_flow(orders: &OrderRecords, map: &ColMap, out: &mut Matrix) {
     for col in 0..out.n_cols() {
         let mut position = 0.0_f64;
@@ -266,7 +273,10 @@ fn levered_free_cash_flow(orders: &OrderRecords, map: &ColMap, out: &mut Matrix)
         for &r in map.column(col) {
             let size = signed_size(orders.size[r], orders.side[r]);
             position = add(position, size);
-            let new_reserve = if position < 0.0 {
+            // Records built without margin flags have no margin columns.
+            let new_reserve = if orders.margin.get(r) == Some(&true) {
+                orders.locked_cash[r]
+            } else if position < 0.0 {
                 orders.debt[r] + orders.locked_cash[r]
             } else {
                 0.0
@@ -497,6 +507,19 @@ mod tests {
             cash_flow(&long, 3, 1).as_slice(),
             free_cash_flow(&long, 3, 1).unwrap().as_slice()
         );
+    }
+
+    #[test]
+    fn recorded_balances_without_margin_flags_read_as_cash_columns() {
+        // Records filled in by hand, as before margin columns existed, carry
+        // `debt` and `locked_cash` and no flags.
+        let mut o = OrderRecords::new();
+        o.push_order(0, 0, 1.0, 10.0, 0.0, OrderSide::Sell);
+        o.push_order(2, 0, 1.0, 8.0, 0.0, OrderSide::Buy);
+        o.debt = vec![10.0, 0.0];
+        o.locked_cash = vec![5.0, 0.0];
+        let free = free_cash_flow(&o, 3, 1).unwrap();
+        assert_eq!(free.column(0), &[-5.0, 0.0, 7.0]);
     }
 
     #[test]

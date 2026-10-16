@@ -37,6 +37,7 @@ use std::sync::OnceLock;
 
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
+use phasor_core::math::add;
 use phasor_core::matrix::Matrix;
 use phasor_model::TradesType;
 use phasor_records::{DrawdownRecords, Excursions, OrderRecords, TradeRecords, find_drawdowns};
@@ -557,6 +558,10 @@ impl<'a> Portfolio<'a> {
     /// something is short. A short reserves its proceeds plus `value /
     /// leverage`: twice its value without leverage.
     ///
+    /// A margin column's position counts at its profit, as the simulation
+    /// settles it, and reserves its initial margin: what it leaves free is
+    /// its share of the equity less the margin posted.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Invariant`] if the records are not grouped by column,
@@ -565,12 +570,37 @@ impl<'a> Portfolio<'a> {
     pub fn free_cash(&self) -> Result<&Matrix> {
         if self.cache.free_cash.get().is_none() {
             let flow = series::free_cash_flow(&self.orders, self.n_rows, self.n_cols)?;
-            let _ = self.cache.free_cash.set(series::cash(
-                &self.sum_groups(&flow),
-                &self.account_init_cash(),
-            ));
+            let mut free = series::cash(&self.sum_groups(&flow), &self.account_init_cash());
+            self.add_margin_positions(&mut free);
+            let _ = self.cache.free_cash.set(free);
         }
         Ok(self.cache.free_cash.get().expect("just set"))
+    }
+
+    /// Adds each margin column's `position × close` to its account in `free`.
+    ///
+    /// A margin column's fills are charged their whole price, so its cash
+    /// alone is its equity less the position's value, which the account never
+    /// paid. Nothing to do on a run without margin columns.
+    fn add_margin_positions(&self, free: &mut Matrix) {
+        if !self.orders.margin.contains(&true) {
+            return;
+        }
+        let mut margin = vec![false; self.n_cols];
+        for (r, &on) in self.orders.margin.iter().enumerate() {
+            margin[self.orders.col[r] as usize] |= on;
+        }
+        let assets = self.assets();
+        for col in (0..self.n_cols).filter(|&col| margin[col]) {
+            let group = self.groups.of_column(col);
+            for row in 0..self.n_rows {
+                let position = assets.get(row, col);
+                if position != 0.0 {
+                    let cell = &mut free.column_mut(group)[row];
+                    *cell = add(*cell, position * self.close.get(row, col));
+                }
+            }
+        }
     }
 
     /// The position's market value at each bar's close.

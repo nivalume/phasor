@@ -10,8 +10,8 @@
 //! tested without a Python interpreter; the caller wraps the message.
 
 use phasor_model::{
-    AccumulationMode, Direction, LeverageMode, SizeType, StopEntryPrice, StopExitMode,
-    StopExitPrice, StopUpdateMode, TradesType,
+    AccountType, AccumulationMode, Direction, LeverageMode, MarginBasis, SizeType, StopEntryPrice,
+    StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -67,6 +67,36 @@ pub fn leverage_mode(name: &str) -> Result<LeverageMode, String> {
         "eager" => Ok(LeverageMode::Eager),
         other => Err(format!(
             "leverage_mode must be 'lazy' or 'eager'; got {other:?}"
+        )),
+    }
+}
+
+/// Whether a column holds what it buys or trades on margin.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn account_type(name: &str) -> Result<AccountType, String> {
+    match name {
+        "cash" => Ok(AccountType::Cash),
+        "margin" => Ok(AccountType::Margin),
+        other => Err(format!(
+            "account_type must be 'cash' or 'margin'; got {other:?}"
+        )),
+    }
+}
+
+/// What a margin column's `initial_margin` is measured in.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn margin_basis(name: &str) -> Result<MarginBasis, String> {
+    match name {
+        "notional" => Ok(MarginBasis::Notional),
+        "unit" => Ok(MarginBasis::Unit),
+        other => Err(format!(
+            "margin_basis must be 'notional' or 'unit'; got {other:?}"
         )),
     }
 }
@@ -203,6 +233,20 @@ mod tests {
         assert_eq!(leverage_mode("lazy").unwrap(), LeverageMode::Lazy);
         assert_eq!(leverage_mode("eager").unwrap(), LeverageMode::Eager);
         assert!(leverage_mode("Lazy").is_err());
+    }
+
+    #[test]
+    fn every_account_type_maps_to_its_own_variant() {
+        assert_eq!(account_type("cash").unwrap(), AccountType::Cash);
+        assert_eq!(account_type("margin").unwrap(), AccountType::Margin);
+        assert!(account_type("perp").is_err());
+    }
+
+    #[test]
+    fn every_margin_basis_maps_to_its_own_variant() {
+        assert_eq!(margin_basis("notional").unwrap(), MarginBasis::Notional);
+        assert_eq!(margin_basis("unit").unwrap(), MarginBasis::Unit);
+        assert!(margin_basis("Unit").is_err());
     }
 
     #[test]

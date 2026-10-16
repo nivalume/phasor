@@ -8,7 +8,9 @@
 
 use phasor_core::error::{Error, Result};
 use phasor_core::math::{add, is_close, is_close_or_less, is_less};
-use phasor_model::{Direction, LeverageMode, OrderSide, OrderStatus, SizeType, StatusInfo};
+use phasor_model::{
+    AccountType, Direction, LeverageMode, MarginBasis, OrderSide, OrderStatus, SizeType, StatusInfo,
+};
 
 use crate::types::{ExecuteOrderState, Order, OrderResult, ProcessOrderState};
 
@@ -571,6 +573,217 @@ fn sell(
     ))
 }
 
+/// The margin one unit opened at `adj_price` posts.
+#[inline]
+fn unit_margin(order: &Order, adj_price: f64) -> f64 {
+    match order.margin_basis {
+        MarginBasis::Notional => {
+            let rate = if order.initial_margin.is_nan() {
+                1.0 / order.leverage
+            } else {
+                order.initial_margin
+            };
+            rate * adj_price
+        }
+        MarginBasis::Unit => order.initial_margin,
+    }
+}
+
+/// Trades a margin column: closes the part of the position the order runs
+/// against, then opens the rest by posting initial margin.
+///
+/// `size` is signed as the size cascade leaves it, positive to buy; zero and
+/// `NaN` sell, as at the dispatch. `percent`, when not `NaN`, fills that
+/// fraction of the most the order could fill on its side.
+///
+/// Closing is always allowed. The part closed realizes its profit against the
+/// average entry price, `debt / |position|`, and releases its share of the
+/// margin. Opening needs free cash for its margin and fees, counting what
+/// closing the whole opposite position would realize and release, and
+/// `cash_limit` caps what it may post, fees included. Every fee is paid from
+/// cash, which may go below zero, as in any account that may borrow.
+///
+/// `leverage_mode` and `lock_cash` do not apply: nothing is borrowed, and
+/// margin is reserved for every position anyway.
+///
+/// Out of line and cold: a run without margin columns never reaches it, and
+/// the dispatch keeps [`buy`] and [`sell`] on the path it falls through to.
+#[cold]
+#[inline(never)]
+fn margin_trade(
+    state: ExecuteOrderState,
+    size: f64,
+    price: f64,
+    order: &Order,
+    percent: f64,
+) -> Result<Leg> {
+    let reject = |info| Ok((state, OrderResult::not_filled(OrderStatus::Rejected, info)));
+    let ignore_zero = || {
+        Ok((
+            state,
+            OrderResult::not_filled(OrderStatus::Ignored, StatusInfo::SizeZero),
+        ))
+    };
+
+    let buying = size > 0.0;
+    let adj_price = if buying {
+        price * (1.0 + order.slippage)
+    } else {
+        price * (1.0 - order.slippage)
+    };
+    let held = state.position.abs();
+    // The part of the position this order runs against.
+    let closable = if state.position != 0.0 && (state.position > 0.0) != buying {
+        held
+    } else {
+        0.0
+    };
+    let may_open = match order.direction {
+        Direction::Both => true,
+        Direction::LongOnly => buying,
+        Direction::ShortOnly => !buying,
+    };
+    if !may_open && closable == 0.0 {
+        return reject(StatusInfo::NoOpenPosition);
+    }
+    let zero = if percent.is_nan() {
+        size == 0.0
+    } else {
+        percent == 0.0
+    };
+    if zero {
+        return ignore_zero();
+    }
+
+    let open_max = if may_open {
+        if closable == 0.0 && state.free_cash.min(order.cash_limit) <= 0.0 {
+            return reject(if buying {
+                StatusInfo::NoCashLong
+            } else {
+                StatusInfo::NoCashShort
+            });
+        }
+        // Closing all of `closable` first realizes its profit and releases its
+        // margin, both of which the opening part may then post.
+        let freed = if closable > 0.0 {
+            let proceeds = closable * adj_price;
+            let pnl = if state.position > 0.0 {
+                proceeds - state.debt
+            } else {
+                state.debt - proceeds
+            };
+            pnl + state.locked_cash - proceeds * order.fees
+        } else {
+            0.0
+        };
+        let budget = add(
+            add(state.free_cash, freed).min(order.cash_limit),
+            -order.fixed_fees,
+        );
+        if budget > 0.0 {
+            budget / (unit_margin(order, adj_price) + adj_price * order.fees)
+        } else if closable == 0.0 {
+            return reject(StatusInfo::CantCoverFees);
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    let max_total = closable + open_max;
+
+    let mut fill = if percent.is_nan() {
+        size.abs()
+    } else {
+        percent * max_total
+    };
+    if fill > order.max_size {
+        if !order.allow_partial {
+            return reject(StatusInfo::MaxSizeExceeded);
+        }
+        fill = order.max_size;
+    }
+    fill = fill.min(max_total);
+    if fill.is_infinite() {
+        return Err(Error::Invariant(
+            "attempt to trade a margin column infinitely: both the size and the free cash are \
+             infinite"
+                .into(),
+        ));
+    }
+    if !order.size_granularity.is_nan() {
+        fill = floor_to(fill, order.size_granularity);
+    }
+
+    if is_close(fill, 0.0) {
+        return ignore_zero();
+    }
+    if is_less(fill, order.min_size) {
+        return reject(StatusInfo::MinSizeNotReached);
+    }
+    if size.is_finite() && is_less(fill, size.abs()) && !order.allow_partial {
+        return reject(StatusInfo::PartialFill);
+    }
+
+    let new_position = add(state.position, if buying { fill } else { -fill });
+    let closed = fill.min(closable);
+    let opened = fill - closed;
+    let fees_paid = fill * adj_price * order.fees + order.fixed_fees;
+
+    // Closing realizes the closed part's profit and releases its margin. A
+    // close that leaves nothing of the old position takes all of both, so no
+    // residue survives in either balance.
+    let (realized, released, debt, locked_cash) = if closed > 0.0 {
+        let (cost, released) = if new_position * state.position > 0.0 {
+            (
+                closed * (state.debt / held),
+                closed * (state.locked_cash / held),
+            )
+        } else {
+            (state.debt, state.locked_cash)
+        };
+        let proceeds = closed * adj_price;
+        let realized = if state.position > 0.0 {
+            proceeds - cost
+        } else {
+            cost - proceeds
+        };
+        (
+            realized,
+            released,
+            add(state.debt, -cost),
+            add(state.locked_cash, -released),
+        )
+    } else {
+        (0.0, 0.0, state.debt, state.locked_cash)
+    };
+    // Opening adds its cost basis and posts its margin.
+    let posted = opened * unit_margin(order, adj_price);
+
+    Ok((
+        ExecuteOrderState {
+            cash: add(state.cash, realized - fees_paid),
+            position: new_position,
+            debt: debt + opened * adj_price,
+            locked_cash: locked_cash + posted,
+            free_cash: add(
+                state.free_cash,
+                (realized + released) - (fees_paid + posted),
+            ),
+        },
+        OrderResult::filled(
+            fill,
+            adj_price,
+            fees_paid,
+            if buying {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            },
+        ),
+    ))
+}
+
 /// Validates the inputs the kernel's arithmetic depends on.
 ///
 /// These are invariant violations, not rejections — see the crate docs. Two
@@ -640,7 +853,8 @@ fn balance_violation(state: &ExecuteOrderState) -> Result<()> {
     Ok(())
 }
 
-/// The nine checks that read only fields a whole column usually shares.
+/// The nine checks that read only fields a whole column usually shares, and
+/// the two a margin order adds for its initial margin.
 ///
 /// Separated from [`validate_bar`] so a caller with column-constant
 /// parameters can run them once instead of once per bar — see
@@ -680,6 +894,15 @@ fn param_violation(order: &Order) -> Option<&'static str> {
     if order.cash_limit.is_nan() || order.cash_limit < 0.0 {
         return Some("order.cash_limit must be 0 or greater");
     }
+    if order.account_type == AccountType::Margin {
+        // NaN is `1 / leverage` and passes, as granularity's sentinel does.
+        if order.initial_margin.is_infinite() || order.initial_margin <= 0.0 {
+            return Some("order.initial_margin must be NaN, or finite and greater than 0");
+        }
+        if order.margin_basis == MarginBasis::Unit && order.initial_margin.is_nan() {
+            return Some("order.initial_margin must be set when order.margin_basis is Unit");
+        }
+    }
     None
 }
 
@@ -687,7 +910,8 @@ fn param_violation(order: &Order) -> Option<&'static str> {
 ///
 /// Nine of the seventeen checks [`execute_order`] runs look only at fees,
 /// slippage, size bounds, granularity, leverage, rejection probability and
-/// the cash cap — fields a whole column normally shares. A bar that produces
+/// the cash cap — fields a whole column normally shares. A margin order adds
+/// two more on its initial margin. A bar that produces
 /// no fill still pays for all nine, and on a realistic strategy most bars produce no fill. Checking
 /// them once per column instead is worth 12–15% there.
 ///
@@ -712,13 +936,13 @@ pub struct ValidatedOrder {
 impl ValidatedOrder {
     /// Checks `order`'s column-invariant parameters.
     ///
-    /// An order whose `leverage` is above 1 accepts a negative cash balance;
-    /// see [`in_levered_account`](Self::in_levered_account).
+    /// An order whose `leverage` is above 1, and any margin order, accepts a
+    /// negative cash balance; see [`in_levered_account`](Self::in_levered_account).
     #[must_use]
     pub fn new(order: Order) -> Self {
         Self {
             violation: param_violation(&order),
-            levered_account: order.leverage > 1.0,
+            levered_account: order.leverage > 1.0 || order.account_type == AccountType::Margin,
             order,
         }
     }
@@ -726,10 +950,11 @@ impl ValidatedOrder {
     /// Accepts a negative cash balance whatever this order's own leverage.
     ///
     /// A leveraged long sold for less than its debt leaves the account owing
-    /// the difference, so its cash goes below zero. Every order on that
-    /// account then has to accept the state — an unleveraged one in the same
-    /// group included — and is rejected for want of cash rather than stopping
-    /// the run. A loop marks every order of an account that may borrow.
+    /// the difference, so its cash goes below zero, and so can a margin
+    /// position's loss. Every order on that account then has to accept the
+    /// state — an unleveraged one in the same group included — and is
+    /// rejected for want of cash rather than stopping the run. A loop marks
+    /// every order of an account that may borrow or trade on margin.
     #[must_use]
     pub const fn in_levered_account(mut self) -> Self {
         self.levered_account = true;
@@ -944,6 +1169,9 @@ pub fn execute_validated(
         }
     }
 
+    if order.account_type == AccountType::Margin {
+        return margin_trade(exec_state, order_size, order.price, order, percent);
+    }
     // Note zero and NaN both take the sell branch, as in the reference.
     if order_size > 0.0 {
         buy(exec_state, order_size, order.price, order, percent)
@@ -1385,6 +1613,214 @@ mod tests {
             let eager = execute_order(&start, &levered(size, 1.0, LeverageMode::Eager), None);
             assert_eq!(plain.unwrap(), eager.unwrap(), "{size}");
         }
+    }
+
+    /// A margin order at a quarter of the notional, 4x.
+    fn margin(size: f64, price: f64) -> Order {
+        Order {
+            size,
+            price,
+            account_type: AccountType::Margin,
+            initial_margin: 0.25,
+            ..Default::default()
+        }
+    }
+
+    /// Long 20 at 100 on 1000 of cash: 2000 of cost, 500 of margin posted.
+    fn margin_long() -> ProcessOrderState {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (state, _) = execute_order(&start, &margin(20.0, 100.0), None).unwrap();
+        carry(state, start)
+    }
+
+    #[test]
+    fn a_margin_long_posts_margin_and_keeps_its_cost_as_debt() {
+        let held = margin_long();
+        assert_eq!(held.cash, 1000.0);
+        assert_eq!(held.position, 20.0);
+        assert_eq!(held.debt, 2000.0);
+        assert_eq!(held.locked_cash, 500.0);
+        assert_eq!(held.free_cash, 500.0);
+    }
+
+    #[test]
+    fn a_margin_short_posts_the_same_margin_and_keeps_its_proceeds_out_of_cash() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (state, result) = execute_order(&start, &margin(-20.0, 100.0), None).unwrap();
+        assert_eq!(result.side, Some(OrderSide::Sell));
+        assert_eq!(state.cash, 1000.0);
+        assert_eq!(state.position, -20.0);
+        assert_eq!(state.debt, 2000.0);
+        assert_eq!(state.locked_cash, 500.0);
+        assert_eq!(state.free_cash, 500.0);
+    }
+
+    #[test]
+    fn closing_realizes_against_the_average_entry_and_releases_margin() {
+        let held = margin_long();
+        // 8 of 20 at 110: cost 800, proceeds 880, margin 200 back.
+        let (part, _) = execute_order(&held, &margin(-8.0, 110.0), None).unwrap();
+        assert_eq!(part.cash, 1080.0);
+        assert_eq!(part.position, 12.0);
+        assert_eq!(part.debt, 1200.0);
+        assert_eq!(part.locked_cash, 300.0);
+        assert_eq!(part.free_cash, 780.0);
+        // The other 12 at 90: cost 1200, proceeds 1080. Flat, free is cash.
+        let (flat, _) = execute_order(&carry(part, held), &margin(-12.0, 90.0), None).unwrap();
+        assert_eq!(flat.cash, 960.0);
+        assert_eq!(flat.position, 0.0);
+        assert_eq!(flat.debt, 0.0);
+        assert_eq!(flat.locked_cash, 0.0);
+        assert_eq!(flat.free_cash, 960.0);
+    }
+
+    #[test]
+    fn a_short_covered_higher_loses_the_difference() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let (short, _) = execute_order(&start, &margin(-20.0, 100.0), None).unwrap();
+        let (flat, _) = execute_order(&carry(short, start), &margin(20.0, 110.0), None).unwrap();
+        assert_eq!(flat.cash, 800.0);
+        assert_eq!(flat.free_cash, 800.0);
+        assert_eq!((flat.debt, flat.locked_cash), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_reversal_opens_with_what_closing_frees() {
+        // All of the free cash is posted, yet selling everything can still
+        // short: closing the long hands back its 500 of margin first, and
+        // 1000 at 25 a unit opens 40.
+        let held = margin_long();
+        let order = Order {
+            size_type: SizeType::Percent,
+            ..margin(-1.0, 100.0)
+        };
+        let (state, result) = execute_order(&held, &order, None).unwrap();
+        assert_eq!(result.size, 60.0);
+        assert_eq!(state.position, -40.0);
+        assert_eq!(state.cash, 1000.0);
+        assert_eq!(state.debt, 4000.0);
+        assert_eq!(state.locked_cash, 1000.0);
+        assert_eq!(state.free_cash, 0.0);
+    }
+
+    #[test]
+    fn an_opening_pays_margin_and_fees_from_free_cash() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let order = Order {
+            fees: 0.01,
+            fixed_fees: 5.0,
+            ..margin(f64::INFINITY, 100.0)
+        };
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        // 25 of margin and 1 of fees a unit, after the fixed 5.
+        assert_eq!(result.size, 995.0 / 26.0);
+        assert_eq!(result.fees, result.size * 100.0 * 0.01 + 5.0);
+        assert_eq!(state.cash, 1000.0 - result.fees);
+        assert!(state.free_cash.abs() < 1e-9);
+    }
+
+    #[test]
+    fn cash_limit_caps_what_an_opening_posts() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let order = Order {
+            cash_limit: 100.0,
+            ..margin(f64::INFINITY, 100.0)
+        };
+        let (state, result) = execute_order(&start, &order, None).unwrap();
+        assert_eq!(result.size, 4.0);
+        assert_eq!(state.locked_cash, 100.0);
+    }
+
+    #[test]
+    fn without_free_cash_an_opening_is_rejected_but_a_close_is_not() {
+        let start = ProcessOrderState::flat(500.0, 100.0);
+        let (full, _) = execute_order(&start, &margin(20.0, 100.0), None).unwrap();
+        let full = carry(full, start);
+        assert_eq!(full.free_cash, 0.0);
+        let (_, more) = execute_order(&full, &margin(1.0, 100.0), None).unwrap();
+        assert_eq!(more.status_info, Some(StatusInfo::NoCashLong));
+        let (_, close) = execute_order(&full, &margin(-1.0, 100.0), None).unwrap();
+        assert!(close.is_filled());
+
+        // An account that owes, as a loss can leave it, is rejected rather
+        // than stopped.
+        let owing = ProcessOrderState::flat(-50.0, 100.0);
+        let (_, short) = execute_order(&owing, &margin(-1.0, 100.0), None).unwrap();
+        assert_eq!(short.status_info, Some(StatusInfo::NoCashShort));
+    }
+
+    #[test]
+    fn a_one_sided_margin_column_only_closes_the_other_side() {
+        let long_only = |size| Order {
+            direction: Direction::LongOnly,
+            ..margin(size, 100.0)
+        };
+        let flat = ProcessOrderState::flat(1000.0, 100.0);
+        let (_, none) = execute_order(&flat, &long_only(-5.0), None).unwrap();
+        assert_eq!(none.status_info, Some(StatusInfo::NoOpenPosition));
+        let (state, result) = execute_order(&margin_long(), &long_only(-30.0), None).unwrap();
+        assert_eq!(result.size, 20.0);
+        assert_eq!(state.position, 0.0);
+        let strict = Order {
+            allow_partial: false,
+            ..long_only(-30.0)
+        };
+        let (_, partial) = execute_order(&margin_long(), &strict, None).unwrap();
+        assert_eq!(partial.status_info, Some(StatusInfo::PartialFill));
+
+        // In a short-only column a negative size buys back, and there is
+        // nothing to buy back.
+        let short_only = Order {
+            direction: Direction::ShortOnly,
+            ..margin(-5.0, 100.0)
+        };
+        let (_, none) = execute_order(&flat, &short_only, None).unwrap();
+        assert_eq!(none.status_info, Some(StatusInfo::NoOpenPosition));
+    }
+
+    #[test]
+    fn unit_margin_is_cash_per_unit_and_a_nan_margin_is_one_over_leverage() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        let per_unit = Order {
+            margin_basis: MarginBasis::Unit,
+            initial_margin: 30.0,
+            ..margin(10.0, 100.0)
+        };
+        let (state, _) = execute_order(&start, &per_unit, None).unwrap();
+        assert_eq!(state.locked_cash, 300.0);
+        assert_eq!(state.debt, 1000.0);
+        assert_eq!(state.free_cash, 700.0);
+
+        let from_leverage = Order {
+            initial_margin: f64::NAN,
+            leverage: 4.0,
+            ..margin(20.0, 100.0)
+        };
+        let (state, _) = execute_order(&start, &from_leverage, None).unwrap();
+        assert_eq!(state.locked_cash, 500.0);
+    }
+
+    #[test]
+    fn margin_parameters_are_checked_only_on_margin_orders() {
+        let start = ProcessOrderState::flat(1000.0, 100.0);
+        for initial_margin in [0.0, -0.1, f64::INFINITY] {
+            let order = Order {
+                initial_margin,
+                ..margin(1.0, 100.0)
+            };
+            assert!(execute_order(&start, &order, None).is_err());
+            let cash = Order {
+                account_type: AccountType::Cash,
+                ..order
+            };
+            assert!(execute_order(&start, &cash, None).is_ok());
+        }
+        let unset = Order {
+            margin_basis: MarginBasis::Unit,
+            initial_margin: f64::NAN,
+            ..margin(1.0, 100.0)
+        };
+        assert!(execute_order(&start, &unset, None).is_err());
     }
 
     #[test]
