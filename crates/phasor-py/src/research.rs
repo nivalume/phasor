@@ -234,6 +234,111 @@ pub fn pivot_labels<'py>(
     columns_out(py, out, n_rows, n_cols)
 }
 
+/// Where the stops of each entry would fire, without a simulation: the
+/// exits, the price each fired at and which stop (0 stop-loss, 1 trailing,
+/// 2 take-profit, 3 time, -1 none). See `phasor_sim::stop_exits`.
+#[pyfunction]
+#[pyo3(signature = (
+    entries, close, *, open = None, high = None, low = None, sl_stop = None,
+    sl_trail = false, tsl_stop = None, tsl_th = None, tp_stop = None, td_stop = None,
+    dt_stop = None, short = false, wait = 1, until_next = true, skip_until_exit = false,
+))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one argument per input, as the Python signature has"
+)]
+pub fn generate_ohlc_stop_exits<'py>(
+    py: Python<'py>,
+    entries: PyReadonlyArray2<'py, bool>,
+    close: PyReadonlyArray2<'py, f64>,
+    open: Option<PyReadonlyArray2<'py, f64>>,
+    high: Option<PyReadonlyArray2<'py, f64>>,
+    low: Option<PyReadonlyArray2<'py, f64>>,
+    sl_stop: Option<&Bound<'py, PyAny>>,
+    sl_trail: bool,
+    tsl_stop: Option<&Bound<'py, PyAny>>,
+    tsl_th: Option<&Bound<'py, PyAny>>,
+    tp_stop: Option<&Bound<'py, PyAny>>,
+    td_stop: Option<&Bound<'py, PyAny>>,
+    dt_stop: Option<&Bound<'py, PyAny>>,
+    short: bool,
+    wait: usize,
+    until_next: bool,
+    skip_until_exit: bool,
+) -> PyResult<(Columns<'py, bool>, Columns<'py, f64>, Columns<'py, i8>)> {
+    use crate::array::{OneDim, borrow_opt_f64, flex_or_f64};
+    use phasor_core::flex::FlexArray;
+    let (close_flat, n_rows, n_cols) = columns_of(&close)?;
+    let (entry_flat, r, c) = columns_of(&entries)?;
+    if (r, c) != (n_rows, n_cols) {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "entries must have close's shape ({n_rows}, {n_cols}); got ({r}, {c})"
+        )));
+    }
+    fn bar<'a>(
+        a: &'a Option<PyReadonlyArray2<'_, f64>>,
+        name: &str,
+        n_rows: usize,
+        n_cols: usize,
+    ) -> PyResult<FlexArray<'a, f64>> {
+        let Some(a) = a else {
+            return Ok(FlexArray::Scalar(f64::NAN));
+        };
+        let (flat, r, c) = columns_of(a)?;
+        if (r, c) != (n_rows, n_cols) {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "{name} must have close's shape ({n_rows}, {n_cols}); got ({r}, {c})"
+            )));
+        }
+        FlexArray::full(flat, n_rows, n_cols).map_err(to_py_err)
+    }
+    let stops = [
+        borrow_opt_f64(sl_stop, "sl_stop")?,
+        borrow_opt_f64(tsl_stop, "tsl_stop")?,
+        borrow_opt_f64(tsl_th, "tsl_th")?,
+        borrow_opt_f64(tp_stop, "tp_stop")?,
+        borrow_opt_f64(td_stop, "td_stop")?,
+        borrow_opt_f64(dt_stop, "dt_stop")?,
+    ];
+    let stop = |k: usize| {
+        flex_or_f64(
+            &stops[k],
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            FlexArray::Scalar(f64::NAN),
+        )
+    };
+    let args = phasor_sim::stop_exits::OhlcStopExits {
+        n_rows,
+        n_cols,
+        entries: FlexArray::full(entry_flat, n_rows, n_cols).map_err(to_py_err)?,
+        open: bar(&open, "open", n_rows, n_cols)?,
+        high: bar(&high, "high", n_rows, n_cols)?,
+        low: bar(&low, "low", n_rows, n_cols)?,
+        close: FlexArray::full(close_flat, n_rows, n_cols).map_err(to_py_err)?,
+        sl_stop: stop(0)?,
+        sl_trail: FlexArray::Scalar(sl_trail),
+        tsl_stop: stop(1)?,
+        tsl_th: stop(2)?,
+        tp_stop: stop(3)?,
+        td_stop: stop(4)?,
+        dt_stop: stop(5)?,
+        short,
+        wait,
+        until_next,
+        skip_until_exit,
+    };
+    let out = py
+        .detach(|| phasor_sim::stop_exits::generate_ohlc_stop_exits(&args))
+        .map_err(to_py_err)?;
+    Ok((
+        columns_out(py, out.exits, n_rows, n_cols)?,
+        columns_out(py, out.price, n_rows, n_cols)?,
+        columns_out(py, out.kind, n_rows, n_cols)?,
+    ))
+}
+
 /// Each bar fires independently with probability `prob`.
 #[pyfunction]
 pub fn random_by_prob(
@@ -358,6 +463,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(random_by_prob, m)?)?;
     m.add_function(wrap_pyfunction!(random_n, m)?)?;
     m.add_function(wrap_pyfunction!(random_entries_exits, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_ohlc_stop_exits, m)?)?;
     m.add_function(wrap_pyfunction!(random_walk, m)?)?;
     m.add_function(wrap_pyfunction!(gbm, m)?)?;
     m.add_function(wrap_pyfunction!(ohlc_from_close, m)?)?;

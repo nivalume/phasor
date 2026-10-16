@@ -324,6 +324,7 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         allow_partial: allow_partial.as_flex(n_rows, n_cols),
         raise_reject: FlexArray::Scalar(false),
         log: FlexArray::Scalar(false),
+        order_mode: false,
         accumulate: accumulate.as_flex(n_rows, n_cols),
         upon_long_conflict: upon_long_conflict.as_flex(n_rows, n_cols),
         upon_short_conflict: upon_short_conflict.as_flex(n_rows, n_cols),

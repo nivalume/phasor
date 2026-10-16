@@ -1149,6 +1149,7 @@ fn deposits_view<'a>(
     upon_opp_limit_conflict = None,
     upon_adj_stop_conflict = None,
     upon_opp_stop_conflict = None,
+    order_mode = false,
     tsl_stop = None,
     tsl_th = None,
     td_stop = None,
@@ -1242,6 +1243,7 @@ fn from_signals(
     upon_opp_limit_conflict: Option<&str>,
     upon_adj_stop_conflict: Option<&str>,
     upon_opp_stop_conflict: Option<&str>,
+    order_mode: bool,
     tsl_stop: Option<&Bound<'_, PyAny>>,
     tsl_th: Option<&Bound<'_, PyAny>>,
     td_stop: Option<&Bound<'_, PyAny>>,
@@ -1359,17 +1361,6 @@ fn from_signals(
     let account_types = account_types(account_type, n_cols)?;
     let margin_modes = margin_modes(margin_mode, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
-    if !matches!(
-        st,
-        phasor_model::SizeType::Amount
-            | phasor_model::SizeType::Value
-            | phasor_model::SizeType::Percent
-    ) {
-        return Err(bad(
-            "Only Amount, Value and Percent are supported by signals; use from_orders for targets"
-                .to_owned(),
-        ));
-    }
     let acc = parse::accumulate(accumulate).map_err(bad)?;
     let trades_type = parse::trades_type(trades).map_err(bad)?;
 
@@ -1619,6 +1610,7 @@ fn from_signals(
         upon_opp_limit_conflict,
         upon_adj_stop_conflict,
         upon_opp_stop_conflict,
+        order_mode,
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,

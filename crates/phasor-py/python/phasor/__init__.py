@@ -349,8 +349,8 @@ def _price_option(price: Any, from_ago: int) -> tuple[Any, Any, int]:
 
 def from_signals(
     close,
-    entries,
-    exits,
+    entries=None,
+    exits=None,
     *,
     open=None,
     high=None,
@@ -403,6 +403,7 @@ def from_signals(
     upon_opp_limit_conflict=None,
     upon_adj_stop_conflict=None,
     upon_opp_stop_conflict=None,
+    order_mode=False,
     tsl_stop=None,
     tsl_th=None,
     td_stop=None,
@@ -455,7 +456,12 @@ def from_signals(
         A number, one value per column, or a full matrix. ``None`` takes the
         engine's own default, which is the only place a default is written down.
     size_type
-        ``amount``, ``value`` or ``percent``. Targets require ``from_orders``.
+        ``amount``, ``value``, ``percent``, or a target: ``targetamount``,
+        ``targetvalue``, ``targetpercent``. With a target an entry moves the
+        position to ``size`` (``-size`` for a short) from flat, from the other
+        side, or, where ``accumulate`` lets it add, from the same side; an
+        exit closes the position. Limit orders, bid and ask, and conflicts
+        read a target order's side off the target's sign.
     direction
         ``longonly``, ``shortonly`` or ``both``.
     accumulate
@@ -534,6 +540,12 @@ def from_signals(
         ``opp`` default) cancels it and executes the signal, and
         ``"keepexecute"`` and ``"cancelignore"`` the other two. A kept order
         keeps the size it was placed with; a new limit order takes its place.
+    order_mode
+        ``True`` reads ``size`` as the orders, as ``from_orders`` does, instead
+        of the signals: each bar's ``size`` (NaN or 0: none) in ``size_type``,
+        on ``direction``'s sides (set ``direction="both"`` to sell short).
+        ``entries`` and ``exits`` may be left out. Stops, limit orders and
+        the price options apply as to a signal's order.
     tsl_stop, tsl_th
         A trailing stop ``tsl_stop`` below the best price since the entry (above
         it for a short), live once the price has first moved ``tsl_th`` in the
@@ -706,8 +718,8 @@ def from_signals(
     price, price_type, from_ago = _price_option(price, from_ago)
     return _phasor.from_signals(
         _matrix(close, "close"),
-        _signals(entries, "entries"),
-        _signals(exits, "exits"),
+        False if entries is None else _signals(entries, "entries"),
+        False if exits is None else _signals(exits, "exits"),
         open=None if open is None else _matrix(open, "open"),
         high=None if high is None else _matrix(high, "high"),
         low=None if low is None else _matrix(low, "low"),
@@ -760,6 +772,7 @@ def from_signals(
         upon_opp_limit_conflict=upon_opp_limit_conflict,
         upon_adj_stop_conflict=upon_adj_stop_conflict,
         upon_opp_stop_conflict=upon_opp_stop_conflict,
+        order_mode=bool(order_mode),
         tsl_stop=_param(tsl_stop, "tsl_stop"),
         tsl_th=_param(tsl_th, "tsl_th"),
         td_stop=_param(td_stop, "td_stop"),

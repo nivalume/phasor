@@ -31,7 +31,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | A | 账户模型地基 | 3 | 1 | 0 |
 | B | 现金流、杠杆、合约 | 7 | 0 | 3 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
-| D | 订单与止损 | 4 | 1 | 4 |
+| D | 订单与止损 | 6 | 1 | 2 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
@@ -41,12 +41,12 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **22** | **11** | **46** |
+| **合计** | | **24** | **11** | **44** |
 
 ### 下一步（按优先级）
 
-1. **D6 不经模拟生成止损信号**：复用 D5 的 `stops::test`，工作量小。
-2. **D7 `from_signals` 的仓位扩展**：全部仓位类型和 `order_mode`，可以和 B5 一起做。
+1. **B5 `valuepercent` 和 `*100` 仓位类型**：D7 已让 `from_signals` 接受现有的全部仓位类型，B5 再加新的几种。
+2. **D8 多分辨率模拟**、**D9 交易时段**：D 阶段剩下的两项。
 3. **C5 剩下的 NautilusTrader 对照**：要在外部环境里跑。
 
 ---
@@ -409,13 +409,21 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 验收：单元测试 5 个（移动止损的门槛和最好价、空头、时间止损先于价格止损、止损先于止盈并记下触发价、两种阶梯的份额和递增校验）；模拟测试 6 个（移动止损和门槛、两种时间止损、止盈阶梯两种模式、止损阶梯和递减报错、止损限价单在盘中成交和跳空后挂着、多线程一致）；Python 4 个。
   - 位置：`crates/phasor-sim/src/{stops,state,from_signals}.rs`，`crates/phasor-model/src/enums.rs`（`StopLadderMode`），`crates/phasor-py/src/{lib,parse,array}.rs`，`crates/phasor-py/python/phasor/__init__.py`。测试 `crates/phasor-sim/tests/stop_extensions.rs`、`crates/phasor-py/tests/test_price_and_stops.py`。
 
-- [ ] **D6 不经模拟生成止损信号**（S）
+- [x] **D6 不经模拟生成止损信号**（S）
   - 为什么：研究阶段想先看止损信号的分布，不必跑完整模拟。
-  - 做什么：`generate_ohlc_stop_exits`，复用 D5 的止损判定函数，保证和模拟循环结果一致。
+  - 做了什么：`phasor_sim::stop_exits::generate_ohlc_stop_exits`（Python `phasor.signals.generate_ohlc_stop_exits`），直接用 D5 的 `stops::arm`、`test`、`trail`。返回出场、触发价和止损类型；支持止损、移动止损（含门槛）、止盈、两种时间止损、空头，`wait`、`until_next`、`skip_until_exit`（默认值同 PRO）。没有阶梯和止损限价单。
+  - 验收：`until_next=False, skip_until_exit=True` 时，和 `from_signals` 在随机行情上的止损出场逐笔相同（多空各一次，四种止损都出现过）；单元测试 3 个，Python 4 个（含同样的一致性检查）。
+  - 位置：`crates/phasor-sim/src/stop_exits.rs`，`crates/phasor-py/src/research.rs`，`crates/phasor-py/python/phasor/signals.py`；`ARCHITECTURE.md` §8.14。测试 `crates/phasor-sim/tests/signals_extensions.rs`、`crates/phasor-py/tests/test_signals_extensions.py`。
 
-- [ ] **D7 `from_signals` 的仓位扩展**（M）
-  - 为什么：`from_signals` 现在只接受 Amount/Value/Percent，不能按目标仓位调仓。
-  - 做什么：全部仓位类型；`order_mode=True`（用目标仓位代替进出场信号，同时可以用止损和限价单）。
+- [x] **D7 `from_signals` 的仓位扩展**（M）
+  - 为什么：`from_signals` 原来只接受 Amount/Value/Percent，不能按目标仓位调仓。
+  - 做了什么：
+    - [x] 目标类仓位（`TargetAmount`、`TargetValue`、`TargetPercent`）：入场调到目标（反向入场一笔调到反向目标，同方向在允许加仓时调到目标），出场全部平仓。新函数 `signals_to_target`；`signals_to_size` 仍按参考实现拒绝目标类仓位，fixture 不变。
+    - [x] `order_mode=True`：`size` 就是订单，和 `from_orders` 相同，止损、限价单、冲突规则、价格选项照常可用。Python 里 `entries`、`exits` 变为可选。
+    - B5 新增的仓位类型（`ValuePercent` 等）随 B5 做。
+  - 验收：纯函数测试 1 个（各种持仓和信号下的目标、出场全平、加仓规则、参考函数仍拒绝）；模拟测试 2 个（目标入场、反手和加仓的手算；订单模式在独立和共享账户上与 `from_orders` 记录完全相同，加止损的手算）；Python 2 个，原来"拒绝目标类仓位"的两个测试改为检查新行为。
+  - 性能（D6、D7 合计，功能全关，和 ab4674c 比，单线程，指令数几何平均）：`from_orders` +0.00%，`from_signals` +0.29%。没有跑交替计时。
+  - 位置：`crates/phasor-sim/src/{signals,from_signals}.rs`，`crates/phasor-py/src/lib.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.14。
 
 - [ ] **D8 多分辨率模拟**（M）
   - 为什么：在小时线上判断止损时，同一根 K 线里先碰止损还是先碰止盈分不清，结果会偏；用分钟线模拟能解决。
@@ -755,9 +763,9 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `td_stop`、`dt_stop` | **有**（按行数） | D5 |
 | `stop_ladder` | 部分（`uniform`、`weighted`） | D5 |
 | `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | **有**（名字沿用 vectorbt 1.x，没有 PRO 的别名） | D5 |
-| `generate_ohlc_stop_exits` | 无 | D6 |
-| 全部仓位类型、`*100` 变体、`valuepercent` | 部分 | B5、D7 |
-| `order_mode=True` | 无 | D7 |
+| `generate_ohlc_stop_exits` | **有** | D6 |
+| 全部仓位类型、`*100` 变体、`valuepercent` | 部分（`from_signals` 已接受全部现有类型；`*100`、`valuepercent` 无） | B5、D7 |
+| `order_mode=True` | **有** | D7 |
 | 基于风险的仓位 | 无 | E3 |
 | `min_size`、`max_size`、`size_granularity`、`allow_partial`、`raise_reject`、`log` | 有 | — |
 | `cash_limit` | **有** | B9 |

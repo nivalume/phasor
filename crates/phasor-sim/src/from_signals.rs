@@ -60,7 +60,7 @@ use crate::from_orders::updated_value;
 use crate::groups::{CallSeq, Groups, approx_order_value};
 use crate::signals::{
     Signals, from_stop, resolve_dir_conflict, resolve_opposite_entry, resolve_pending_conflict,
-    resolve_signal_conflict, signals_to_size,
+    resolve_signal_conflict, size_signals,
 };
 use crate::state::{ColumnState, LimitOrder, StopState};
 
@@ -182,6 +182,12 @@ pub struct FromSignals<'a> {
     /// signal not trade" rather than "why was this bar quiet".
     pub log: FlexArray<'a, bool>,
 
+    /// Whether `size` is the order, as in `from_orders`, instead of the
+    /// signals: each bar's `size` in `size_type`, on `direction`'s sides, is
+    /// an order, `NaN` or zero none, and the signal arrays are not read.
+    /// Stops, limit orders and the price options apply to it as to a
+    /// signal's order.
+    pub order_mode: bool,
     /// Whether a signal may resize an existing position.
     pub accumulate: FlexArray<'a, AccumulationMode>,
     /// How to resolve a long entry and a long exit on one bar.
@@ -353,6 +359,7 @@ impl Default for FromSignals<'_> {
             allow_partial: FlexArray::Scalar(true),
             raise_reject: FlexArray::Scalar(false),
             log: FlexArray::Scalar(false),
+            order_mode: false,
             accumulate: FlexArray::Scalar(AccumulationMode::Disabled),
             upon_long_conflict: FlexArray::Scalar(ConflictMode::Ignore),
             upon_short_conflict: FlexArray::Scalar(ConflictMode::Ignore),
@@ -517,6 +524,13 @@ impl FromSignals<'_> {
     /// preallocated to that rather than to one fill per cell, which is what
     /// `from_orders` measured as worth +6% to +19% over growing by doubling.
     fn fill_bound(&self, cols: std::ops::Range<usize>) -> usize {
+        if self.order_mode {
+            // An order per sized cell, and a stop exit after each at most.
+            let orders = crate::count_where(&self.size, self.n_rows, cols.clone(), |size| {
+                size != 0.0 && !size.is_nan()
+            });
+            return orders.saturating_mul(2).min(self.n_rows * cols.len());
+        }
         let set = |array| crate::count_where(array, self.n_rows, cols.clone(), |on| on);
         let signals = set(&self.entries)
             + set(&self.exits)
@@ -899,7 +913,7 @@ fn prepare_order<const EXTENDED: bool>(
     // A fired stop replaces it, unless the stop conflict modes say
     // otherwise. `triggered` is only ever set with `use_stops` on.
     if triggered.is_nan() {
-        let user = user_order(
+        let user = user_order::<EXTENDED>(
             args,
             src,
             col,
@@ -931,7 +945,7 @@ fn prepare_order<const EXTENDED: bool>(
         StopExitPrice::Close => (args.close.get(i, col), false),
         StopExitPrice::Price => (price, false),
     };
-    let mut sized = signals_to_size(
+    let mut sized = size_signals(
         position,
         signals,
         args.size.get(i, col),
@@ -973,10 +987,10 @@ fn prepare_order<const EXTENDED: bool>(
         // the side already held, against the flat the stop leaves. Its side
         // is its order's.
         let val = val_price_now * multiplier;
-        let held = user_order(args, src, col, position, val, sizes_checked)?;
+        let held = user_order::<EXTENDED>(args, src, col, position, val, sizes_checked)?;
         let side = match held {
             Some(user) => Some(user),
-            None => user_order(args, src, col, 0.0, val, sizes_checked)?,
+            None => user_order::<EXTENDED>(args, src, col, 0.0, val, sizes_checked)?,
         };
         if let Some(user) = side {
             let (keep, execute) = resolve_pending_conflict(
@@ -1038,7 +1052,7 @@ fn prepare_order<const EXTENDED: bool>(
 ///
 /// `sizes_checked`: see [`prepare_order`].
 #[inline(always)]
-fn user_order(
+fn user_order<const EXTENDED: bool>(
     args: &FromSignals<'_>,
     row: Option<usize>,
     col: usize,
@@ -1050,6 +1064,24 @@ fn user_order(
     let Some(i) = row else {
         return Ok(None);
     };
+    if EXTENDED && args.order_mode {
+        // The order is `size` itself; before the short-only flip a positive
+        // size buys, as for a signal's order.
+        let size = args.size.get(i, col);
+        if size.is_nan() || size == 0.0 {
+            return Ok(None);
+        }
+        let direction = args.direction.get(i, col);
+        return Ok(Some(crate::signals::SizedOrder {
+            size: if direction == Direction::ShortOnly {
+                -size
+            } else {
+                size
+            },
+            size_type: args.size_type.get(i, col),
+            direction,
+        }));
+    }
     let mut s = read_signals(args, i, col);
     if sizes_checked && !s.any() {
         // A quiet bar: nothing to size, and the size parameters were
@@ -1097,7 +1129,7 @@ fn user_order(
         s = resolved;
         accumulate = acc;
     }
-    let sized = signals_to_size(
+    let sized = size_signals(
         position,
         s,
         args.size.get(i, col),
@@ -1146,7 +1178,7 @@ fn follow_up(
     multiplier: f64,
     sizes_checked: bool,
 ) -> Result<Option<Pending>> {
-    let user = user_order(
+    let user = user_order::<true>(
         args,
         crate::prices::source_row(i, args.from_ago),
         col,
@@ -1482,6 +1514,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 }) > 0
             })
         || args.from_ago > 0
+        || args.order_mode
         || args.quotes().on()
         || ext_stops;
     let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
@@ -1493,7 +1526,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     let sizes_checked = !args.size.varies_by_row() && !args.size_type.varies_by_row();
     if sizes_checked {
         for col in cols.clone() {
-            signals_to_size(
+            size_signals(
                 0.0,
                 Signals {
                     long_entry: false,

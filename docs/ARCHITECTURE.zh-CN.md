@@ -481,7 +481,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - 默认值：`init_cash = 100`、`LongOnly`、`size = +inf`、`min_size = 1e-8`、冲突一律 `Ignore`、`upon_opposite_entry = ReverseReduce`、止损关闭、`stop_exit_price = StopLimit`、`upon_stop_update = Override`。
 - 两种信号约定（按或合并）：`entries/exits + direction`（`Both` 下离场信号即开空），或四个显式数组。
 - 冲突解决：`resolve_signal_conflict` → `resolve_dir_conflict` → `resolve_opposite_entry`。
-- `signals_to_size` 只接受 `Amount | Value | Percent`。
+- `signals_to_size` 只接受 `Amount | Value | Percent`，和参考实现一样（`tests/fixtures/signals.tsv` 固定了这种拒绝）。`from_signals` 的目标类仓位改由 `signals_to_target` 处理（§8.14）。
 - `order_type = Limit` 时信号的订单作为限价单挂出（§8.10）。
 - `signals.rs` 中的各阶段是纯函数，单独穷举测试（§14.3）。
 
@@ -620,6 +620,13 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - **状态和开销。** `StopState` 存放新止损、阶梯的级数和布置时的仓位。只有布置了这些止损的账户组才走 `stops::arm`/`stops::update` 和扩展的 `prepare_order`，否则仍是参考实现的止损逻辑。
 
 `crates/phasor-sim/tests/price_options.rs` 和 `stop_extensions.rs` 逐项手算，`prices.rs`、`stops.rs` 里有单元测试。
+
+### 8.14 目标仓位、订单模式和不经模拟的止损出场
+
+- **`from_signals` 的目标类仓位**（`signals::signals_to_target`，由 `size_signals` 分派）：入场把仓位调到 `size`（做多）或 `-size`（做空）：从空仓、从反方向一笔调过去，或在 `accumulate` 允许加仓时从同方向调。出场全部平仓。订单方向是 `Direction::Both`，内核按带符号的目标计算。参考实现在这里拒绝目标类仓位，`signals_to_size` 仍然拒绝，以保持它的 fixture。
+- **订单模式**（`order_mode = true`）：`size`（按 `size_type`、在 `direction` 允许的方向上）就是订单，和 `from_orders` 一样（`NaN` 或 0 表示不下单），不读信号数组；止损、限价单、冲突规则和价格选项照常适用。输入相同且没有止损时，成交和 `from_orders` 完全相同（独立账户和共享账户都测过）。
+- **方向。** 限价单、买卖价和冲突判断需要在内核决定之前知道订单的买卖方向。信号的订单按做空翻转之前数量的正负判断；目标类订单就是目标的正负，所以同方向往更小的目标调整也算在这一方向上。
+- **`generate_ohlc_stop_exits`**（`crates/phasor-sim/src/stop_exits.rs`，Python 在 `phasor.signals`）：每个入场在收盘布置止损，用 `stops::test` 和 `stops::trail` 逐根检查，返回出场、触发价和止损类型。`wait` 推迟第一次检查，`until_next` 到下一个入场就停，`skip_until_exit` 跳过出场之前的入场。`until_next = false`、`skip_until_exit = true` 时，结果就是 `from_signals` 对同样入场的止损出场，多空都是；`crates/phasor-sim/tests/signals_extensions.rs` 在随机行情上用全部止损类型逐笔核对。
 
 ---
 

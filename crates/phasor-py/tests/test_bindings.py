@@ -162,19 +162,21 @@ def test_every_stats_row_matches_the_reference():
 @pytest.mark.parametrize(
     "size_type", ["targetamount", "targetvalue", "targetpercent"]
 )
-def test_a_target_size_is_refused_in_the_signal_path(size_type):
-    """Only three of the six size types mean anything here.
-
-    A target size says where the position should end up; a signal says which
-    way to move. Combining them leaves the size ambiguous on a reversal, so the
-    signal pipeline takes Amount, Value and Percent only — and, deliberately,
-    the group value it would need for TargetPercent is not computed correctly
-    in this loop, because nothing can reach that branch. Accepting one here
-    would quietly reach it.
-    """
-    _, _, _, close, entries, exits = bars(60, 1)
-    with pytest.raises(ValueError, match="Amount, Value and Percent"):
-        phasor.from_signals(close, entries, exits, size=1.0, size_type=size_type)
+def test_a_target_size_sets_where_the_signal_path_ends_up(size_type):
+    """The reference refuses targets in its signal path (pinned below); this
+    one defines them (D7): an entry moves the position to the target, from
+    flat, from the other side in one order, or from the same side where
+    accumulation lets it add, and an exit closes. On a flat price the
+    target's units are the same for all three types."""
+    close = np.full((4, 1), 100.0)
+    entries = np.array([[True], [False], [True], [False]])
+    exits = np.array([[False], [True], [False], [False]])
+    size = {"targetamount": 5.0, "targetvalue": 500.0, "targetpercent": 0.5}[size_type]
+    pf = phasor.from_signals(
+        close, entries, exits, size=size, size_type=size_type, init_cash=1000.0
+    )
+    np.testing.assert_allclose(pf.orders()["size"], [5.0, 5.0, 5.0])
+    np.testing.assert_array_equal(pf.orders()["side"], [0, 1, 0])
 
 
 @needs_reference
@@ -682,19 +684,18 @@ def test_from_orders_with_no_size_is_buy_and_hold():
     np.testing.assert_allclose(pf.total_return(), [0.3])
 
 
-def test_from_orders_accepts_the_target_sizes_that_from_signals_refuses():
-    """The asymmetry is real, not an oversight: a target size says where the
-    position should end up, which is unambiguous per element and ambiguous
-    against a signal that says which way to move."""
+def test_order_mode_takes_target_sizes_as_from_orders_does():
+    """A target size says where the position should end up, which is
+    unambiguous per element: order mode reads ``size`` as from_orders does."""
     close = np.full((5, 1), 100.0)
     weights = np.full((5, 1), 0.5)
     pf = phasor.from_orders(close, weights, size_type="targetpercent", init_cash=1000.0)
+    same = phasor.from_signals(
+        close, size=weights, size_type="targetpercent", order_mode=True, direction="both",
+        init_cash=1000.0,
+    )
     assert pf.n_fills >= 1
-    with pytest.raises(ValueError, match="Amount, Value and Percent"):
-        phasor.from_signals(
-            close, np.ones((5, 1), dtype=bool), np.zeros((5, 1), dtype=bool),
-            size=0.5, size_type="targetpercent",
-        )
+    np.testing.assert_array_equal(same.orders()["size"], pf.orders()["size"])
 
 
 def test_raise_reject_turns_a_refusal_into_an_exception():

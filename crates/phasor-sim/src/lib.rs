@@ -54,6 +54,7 @@ mod prices;
 mod random;
 pub mod signals;
 pub mod state;
+pub mod stop_exits;
 mod stops;
 
 /// How many cells of `array` over `cols` satisfy `pred`, without expanding it.

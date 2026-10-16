@@ -426,6 +426,114 @@ pub fn signals_to_size(
     })
 }
 
+/// Whether a size type sets a target rather than an amount to trade.
+#[must_use]
+pub const fn is_target(size_type: SizeType) -> bool {
+    matches!(
+        size_type,
+        SizeType::TargetAmount | SizeType::TargetValue | SizeType::TargetPercent
+    )
+}
+
+/// [`signals_to_size`] for the target size types, which the reference
+/// rejects.
+///
+/// An entry moves the position to its target — `size` for a long, `-size`
+/// for a short — from flat, from the other side (a reversal is one order to
+/// the opposite target), or, where `accumulate` lets an entry add, from the
+/// same side. An exit closes the position: a target says where to be, not
+/// how much of it to leave. A target of zero asks for nothing. The orders
+/// are on [`Direction::Both`], so the kernel's target arithmetic is signed.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for a negative size.
+#[inline(never)]
+pub fn signals_to_target(
+    position: f64,
+    signals: Signals,
+    size: f64,
+    size_type: SizeType,
+    accumulate: AccumulationMode,
+) -> Result<SizedOrder> {
+    if is_less(size, 0.0) {
+        return Err(Error::Invariant(
+            "a negative size is not allowed: express direction with signals instead".into(),
+        ));
+    }
+    let adds = matches!(
+        accumulate,
+        AccumulationMode::Both | AccumulationMode::AddOnly
+    );
+    let target = |size: f64| SizedOrder {
+        size,
+        size_type,
+        direction: Direction::Both,
+    };
+    let none = SizedOrder {
+        size: 0.0,
+        size_type,
+        direction: Direction::Both,
+    };
+    Ok(if position > 0.0 {
+        if signals.short_entry {
+            target(-size)
+        } else if signals.long_exit {
+            SizedOrder {
+                size: -position,
+                size_type: SizeType::Amount,
+                direction: Direction::LongOnly,
+            }
+        } else if signals.long_entry && adds {
+            target(size)
+        } else {
+            none
+        }
+    } else if position < 0.0 {
+        if signals.long_entry {
+            target(size)
+        } else if signals.short_exit {
+            SizedOrder {
+                size: -position,
+                size_type: SizeType::Amount,
+                direction: Direction::ShortOnly,
+            }
+        } else if signals.short_entry && adds {
+            target(-size)
+        } else {
+            none
+        }
+    } else if signals.long_entry {
+        target(size)
+    } else if signals.short_entry {
+        target(-size)
+    } else {
+        none
+    })
+}
+
+/// Sizes a bar's resolved signals: [`signals_to_target`] for a target size
+/// type, [`signals_to_size`] otherwise.
+///
+/// # Errors
+///
+/// As the one it calls.
+#[inline(always)]
+pub fn size_signals(
+    position: f64,
+    signals: Signals,
+    size: f64,
+    size_type: SizeType,
+    accumulate: AccumulationMode,
+    val_price: f64,
+) -> Result<SizedOrder> {
+    if is_target(size_type) {
+        signals_to_target(position, signals, size, size_type, accumulate)
+    } else {
+        signals_to_size(position, signals, size, size_type, accumulate, val_price)
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::float_cmp,
@@ -468,6 +576,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_target_entry_goes_to_its_target_and_an_exit_closes() {
+        let t = SizeType::TargetPercent;
+        let sig = |le, lx, se, sx| Signals {
+            long_entry: le,
+            long_exit: lx,
+            short_entry: se,
+            short_exit: sx,
+        };
+        let off = AccumulationMode::Disabled;
+        let at = |position, s, acc| signals_to_target(position, s, 0.5, t, acc).unwrap();
+        // From flat, to either side.
+        let o = at(0.0, sig(true, false, false, false), off);
+        assert_eq!(
+            (o.size, o.size_type, o.direction),
+            (0.5, t, Direction::Both)
+        );
+        assert_eq!(at(0.0, sig(false, false, true, false), off).size, -0.5);
+        // A reversal is one order to the other target.
+        assert_eq!(at(3.0, sig(false, false, true, false), off).size, -0.5);
+        assert_eq!(at(-3.0, sig(true, false, false, false), off).size, 0.5);
+        // An exit closes, whatever the target.
+        let o = at(3.0, sig(false, true, false, false), off);
+        assert_eq!(
+            (o.size, o.size_type, o.direction),
+            (-3.0, SizeType::Amount, Direction::LongOnly)
+        );
+        let o = at(-3.0, sig(false, false, false, true), off);
+        assert_eq!((o.size, o.direction), (3.0, Direction::ShortOnly));
+        // An entry on the side held moves to the target only if it may add.
+        assert_eq!(at(3.0, sig(true, false, false, false), off).size, 0.0);
+        assert_eq!(
+            at(3.0, sig(true, false, false, false), AccumulationMode::Both).size,
+            0.5
+        );
+        assert!(signals_to_target(0.0, sig(true, false, false, false), -1.0, t, off).is_err());
+        // The reference's function still refuses targets.
+        assert!(signals_to_size(0.0, sig(true, false, false, false), 1.0, t, off, 1.0).is_err());
+        assert_eq!(
+            size_signals(0.0, sig(true, false, false, false), 1.0, t, off, 1.0)
+                .unwrap()
+                .size,
+            1.0
+        );
     }
 
     #[test]

@@ -618,7 +618,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Defaults: `init_cash = 100`, `LongOnly`, `size = +inf`, `min_size = 1e-8`, conflicts `Ignore`, `upon_opposite_entry = ReverseReduce`, stops off, `stop_exit_price = StopLimit`, `upon_stop_update = Override`.
 - Signal conventions (OR-merged): `entries/exits + direction` (in `Both`, exit = short entry), or four explicit arrays.
 - Conflicts: `resolve_signal_conflict` → `resolve_dir_conflict` → `resolve_opposite_entry`.
-- `signals_to_size` accepts only `Amount | Value | Percent`.
+- `signals_to_size` accepts only `Amount | Value | Percent`, as the reference does (`tests/fixtures/signals.tsv` pins the refusal). `from_signals` sizes a target through `signals_to_target` instead (§8.14).
 - `order_type = Limit` rests a signal's order as a limit order (§8.10).
 - The stages in `signals.rs` are pure functions, tested exhaustively (§14.3).
 
@@ -921,6 +921,36 @@ decided once per group, so a run without them reads none of their inputs.
 
 `crates/phasor-sim/tests/price_options.rs` and `stop_extensions.rs` work
 each option by hand, with unit tests in `prices.rs` and `stops.rs`.
+
+### 8.14 Targets, order mode and stop exits without a simulation
+
+- **Targets in `from_signals`** (`signals::signals_to_target`, dispatched by
+  `size_signals`): an entry moves the position to `size` (a long) or
+  `-size` (a short) from flat, from the other side in one order, or, where
+  `accumulate` lets an entry add, from the same side; an exit closes. The
+  orders are on `Direction::Both`, so the kernel's signed target arithmetic
+  applies. The reference refuses targets here, and `signals_to_size` still
+  does, to keep its fixture.
+- **Order mode** (`order_mode = true`): `size` in `size_type` on
+  `direction` is the order, as in `from_orders` (`NaN` or 0: none), and the
+  signal arrays are not read; stops, limit orders, conflicts and the price
+  options apply as to a signal's order. With the same inputs and no stops
+  its fills are `from_orders`' (tested on independent and shared accounts).
+- **Sides.** Limit orders, bid and ask, and conflicts need an order's side
+  before the kernel decides it. A signal's order reads it off the sign of
+  its size before the short-only flip; for a target that is the target's
+  sign, so a move towards a smaller target on the same side counts as being
+  on that side.
+- **`generate_ohlc_stop_exits`** (`crates/phasor-sim/src/stop_exits.rs`,
+  `phasor.signals` in Python): each entry's stops armed at its close and
+  walked over the bars with `stops::test` and `stops::trail`, returning the
+  exits, the price each fired at and which stop. `wait` delays the first
+  test, `until_next` ends a search at the next entry, `skip_until_exit`
+  ignores entries before an exit. With `until_next = false` and
+  `skip_until_exit = true` the exits are `from_signals`' stop exits for the
+  same entries, long and short, which `crates/phasor-sim/tests/
+  signals_extensions.rs` checks fill by fill on random bars with every kind
+  of stop.
 
 ---
 
