@@ -344,6 +344,12 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         limit_delay: FlexArray::Scalar(false),
         limit_tif: FlexArray::Scalar(f64::NAN),
         limit_expiry: FlexArray::Scalar(f64::NAN),
+        upon_adj_limit_conflict: FlexArray::Scalar(phasor_model::PendingConflictMode::KeepIgnore),
+        upon_opp_limit_conflict: FlexArray::Scalar(
+            phasor_model::PendingConflictMode::CancelExecute,
+        ),
+        upon_adj_stop_conflict: FlexArray::Scalar(phasor_model::PendingConflictMode::KeepIgnore),
+        upon_opp_stop_conflict: FlexArray::Scalar(phasor_model::PendingConflictMode::KeepIgnore),
         use_stops: boolean(g("use_stops")),
         val_price: val_price.as_flex(n_rows, n_cols),
         // The reference has no cash flows outside fills.

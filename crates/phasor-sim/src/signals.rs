@@ -22,8 +22,8 @@
 use phasor_core::error::{Error, Result};
 use phasor_core::math::is_less;
 use phasor_model::{
-    AccumulationMode, ConflictMode, Direction, DirectionConflictMode, OppositeEntryMode, SizeType,
-    StopExitMode,
+    AccumulationMode, ConflictMode, Direction, DirectionConflictMode, OppositeEntryMode,
+    PendingConflictMode, SizeType, StopExitMode,
 };
 
 /// The four direction-aware signals for one bar.
@@ -204,6 +204,32 @@ pub fn resolve_dir_conflict(
             }
         }
         DirectionConflictMode::Ignore => (false, false),
+    }
+}
+
+/// What becomes of a pending order and a bar's signal that meet: whether
+/// the pending order is kept, and whether the signal executes.
+///
+/// The signal is *adjacent* when it trades on the same side as the pending
+/// order — both buy or both sell — and *opposite* otherwise; each case has
+/// its own mode.
+#[must_use]
+pub const fn resolve_pending_conflict(
+    pending_buys: bool,
+    signal_buys: bool,
+    adjacent: PendingConflictMode,
+    opposite: PendingConflictMode,
+) -> (bool, bool) {
+    let mode = if pending_buys == signal_buys {
+        adjacent
+    } else {
+        opposite
+    };
+    match mode {
+        PendingConflictMode::KeepIgnore => (true, false),
+        PendingConflictMode::KeepExecute => (true, true),
+        PendingConflictMode::CancelIgnore => (false, false),
+        PendingConflictMode::CancelExecute => (false, true),
     }
 }
 
@@ -412,6 +438,35 @@ mod tests {
         Signals {
             long_entry: true,
             ..Signals::default()
+        }
+    }
+
+    #[test]
+    fn a_pending_conflict_follows_the_mode_of_its_side() {
+        use PendingConflictMode::{CancelExecute, CancelIgnore, KeepExecute, KeepIgnore};
+        let modes = [KeepIgnore, KeepExecute, CancelIgnore, CancelExecute];
+        let outcome = |mode| match mode {
+            KeepIgnore => (true, false),
+            KeepExecute => (true, true),
+            CancelIgnore => (false, false),
+            CancelExecute => (false, true),
+        };
+        for pending_buys in [false, true] {
+            for signal_buys in [false, true] {
+                for adjacent in modes {
+                    for opposite in modes {
+                        let expected = if pending_buys == signal_buys {
+                            outcome(adjacent)
+                        } else {
+                            outcome(opposite)
+                        };
+                        assert_eq!(
+                            resolve_pending_conflict(pending_buys, signal_buys, adjacent, opposite),
+                            expected
+                        );
+                    }
+                }
+            }
         }
     }
 

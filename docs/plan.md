@@ -31,7 +31,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | A | 账户模型地基 | 2 | 2 | 0 |
 | B | 现金流、杠杆、合约 | 7 | 0 | 3 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
-| D | 订单与止损 | 1 | 1 | 7 |
+| D | 订单与止损 | 2 | 1 | 6 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
@@ -41,13 +41,14 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **18** | **12** | **49** |
+| **合计** | | **19** | **12** | **48** |
 
 ### 下一步（按优先级）
 
-1. **D3 挂单冲突**：D2 的限价单已按 PRO 的默认规则处理挂单期间的新信号和止损（待决定事项 13），D3 把这些规则做成参数。
-2. **C5 剩下的 NautilusTrader 对照**：手算场景和守恒检查已完成，对照要在外部环境里跑。
+1. **D4 价格选项**：`nextopen` 是避免用到未来数据最常用的写法；买卖价分开能模拟点差。
+2. **D5 止损扩展**：时间止损、分批止盈、移动止盈，以及按限价单出场的止损（复用 D2）。
 3. **B5 `valuepercent` 和 `*100` 仓位类型**：工作量小，换算链各加一级。
+4. **C5 剩下的 NautilusTrader 对照**：要在外部环境里跑。
 
 ---
 
@@ -373,9 +374,16 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
   - 位置：`crates/phasor-sim/src/{limit,state,from_signals,lib}.rs`，`crates/phasor-model/src/enums.rs`（`OrderType`、`LimitOrderPrice`、`DeltaFormat`），`crates/phasor-py/src/{lib,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.8、§8.10。测试 `crates/phasor-sim/tests/limit_orders.rs`、`crates/phasor-py/tests/test_limit_orders.py`。
 
-- [ ] **D3 挂单冲突**（M）
+- [x] **D3 挂单冲突**（M）
   - 为什么：挂单还没成交时又来新信号，保留、重挂还是取消，结果差别很大，必须有明确规则。
-  - 做什么：`upon_adj_limit_conflict`、`upon_opp_limit_conflict`、`upon_adj_stop_conflict`、`upon_opp_stop_conflict`，写成纯函数并穷举测试。
+  - 做了什么：
+    - [x] `PendingConflictMode`：`KeepIgnore`、`KeepExecute`、`CancelIgnore`、`CancelExecute`，前半是挂着的单保留还是撤掉，后半是当根信号执行还是忽略。新信号和挂着的单同为买或同为卖时用 `upon_adj_*`，否则用 `upon_opp_*`。判定写成纯函数 `resolve_pending_conflict`，穷举 64 种组合测试。
+    - [x] `upon_adj_limit_conflict`、`upon_opp_limit_conflict`：默认 `KeepIgnore`、`CancelExecute`，即 D2 的规则。保留的挂单保持挂出时的数量；新信号本身是限价单时取代旧挂单（每列只挂一张）。
+    - [x] `upon_adj_stop_conflict`、`upon_opp_stop_conflict`：当根触发的止损和当根信号。默认 `KeepIgnore`，即原来的行为（止损替换信号），对照 fixture 不变。`KeepExecute` 先按止损成交，再按止损之后的持仓给信号定数量，同一根 K 线执行第二笔（止损出场后反手或重新入场）；`Cancel*` 解除止损。信号按当前持仓不产生订单时（比如已持多头时的多头入场），按平仓后的持仓判断方向。
+    - 默认值和 PRO 的是否一致没有核对。
+  - 性能（功能全关，和 1aea813 比，单线程，指令数几何平均）：`from_orders` +0.00%，`from_signals` −2.19%。没有跑交替计时。
+  - 验收：纯函数穷举测试；模拟测试 2 个，在五根 K 线上手算限价单冲突的四种模式（含保留的挂单在另一笔市价成交后仍按原数量成交、反方向信号被忽略）和止损冲突（同方向的空头入场：止损后再开空、撤止损直接反手、都撤；反方向的多头入场：止损后重新入场；同方向的多头出场撤止损后按收盘价出场）；Python 3 个。
+  - 位置：`crates/phasor-model/src/enums.rs`（`PendingConflictMode`），`crates/phasor-sim/src/{signals,from_signals}.rs`，`crates/phasor-py/src/{lib,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.10。测试在 `crates/phasor-sim/tests/limit_orders.rs`、`crates/phasor-py/tests/test_limit_orders.py`。
 
 - [ ] **D4 价格选项**（M）
   - 为什么：`nextopen` 是避免用到未来数据最常用的写法；买卖价分离能模拟点差。
@@ -704,7 +712,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 9 | 持仓费的参数形式（C3） | `long_financing_rate`、`short_financing_rate` 两个费率序列，正数表示付出；永续用单独的 `funding_rate`（费率为正时多头付、空头收），记录类型不同。C3 按此实现 | 已定 |
 | 10 | 费率怎么对应时间（C3、C4） | 内核只收每根 K 线的费率，覆盖到下一根 K 线为止；年化换算放在 Python（`phasor.rates.per_bar`），按时间索引的实际间隔计天数。C4 按此实现 | 已定 |
 | 11 | 保证金的给法（C1） | 名义价值比例（`NaN` 表示 `1 / leverage`）或每单位固定金额，用 `margin_basis` 选，都可以随时间变化，成交时确定。按仓位大小分档的保证金、跨品种抵扣的组合保证金先不做。C1 按此实现 | 已定 |
-| 13 | 限价单的语义（D1、D2） | 每列每根 K 线只执行一笔：已触发的止损优先，其次是本根被触及的挂单，最后是本根的新信号。挂单按挂出时的持仓定数量，所以本列有其他成交（止损、强平、反向信号）就撤单；挂单期间同方向的新信号忽略（PRO 默认的 `KeepIgnore`），反方向的撤单并执行（`CancelExecute`），D3 再做成可选。挂出时价格已经够到就立即成交；按开盘价挂出（`price=-inf`）且不 `limit_delay` 时，当根剩下的部分也检查。跳空越过限价按开盘价（`Limit`）、限价（`HardLimit`）或收盘价（`Close`）成交，不加滑点。引擎没有时间戳，`limit_tif` 按 K 线根数、`limit_expiry` 按行号 | 按建议实现，待评审 |
+| 13 | 限价单的语义（D1、D2） | 每列每根 K 线只执行一笔：已触发的止损优先，其次是本根被触及的挂单，最后是本根的新信号。挂单按挂出时的持仓定数量，所以本列有其他成交（止损、强平、反向信号）就撤单；挂单期间同方向的新信号忽略（`KeepIgnore`），反方向的撤单并执行（`CancelExecute`）；D3 已做成参数，这是默认值。挂出时价格已经够到就立即成交；按开盘价挂出（`price=-inf`）且不 `limit_delay` 时，当根剩下的部分也检查。跳空越过限价按开盘价（`Limit`）、限价（`HardLimit`）或收盘价（`Close`）成交，不加滑点。引擎没有时间戳，`limit_tif` 按 K 线根数、`limit_expiry` 按行号 | 按建议实现，待评审 |
 | 12 | 换到其他市场还需要、计划里没有的功能 | 多币种账户、币本位（反向）合约、期货换月、A 股的 T+1 和涨跌停、期权。先记在这里，有需要时单独立项 | 未定 |
 
 ---
@@ -723,7 +731,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | `in_outputs` | 无 | E1 |
 | 限价单、突破单（`order_type`、`limit_delta`、`limit_reverse`、`limit_order_price`、`limit_delay`） | **有**（`from_signals`；`limit_tif`、`limit_expiry` 按行数） | D2 |
 | 订单有效期（`limit_tif`、`limit_expiry`、`time_delta_format`） | 部分（按行数；按时间的 `time_delta_format` 无） | D2 |
-| 挂单冲突（`upon_*_conflict`） | 无 | D3 |
+| 挂单冲突（`upon_*_conflict`） | **有** | D3 |
 | `delta_format` | 无 | D2 |
 | `price` 的 `nextopen`/`nextclose`，`from_ago`，`price_area_vio_mode`，买卖价分离 | 部分 | D4 |
 | `call_seq="auto"` 和自定义顺序 | 有（`Explicit` 只在 Rust 里可用） | E |

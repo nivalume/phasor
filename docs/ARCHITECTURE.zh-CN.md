@@ -584,9 +584,10 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - **什么时候检查。** 挂出时先按订单价检查：订单价已经够到限价，当根成交。按开盘价挂出（`price = -inf`）时，还检查当根剩下的部分，即最高价和最低价；按收盘价或其他价格挂出则不检查当根，因为不知道挂出之后这根 K 线怎么走。`limit_delay` 把这些都推到下一根。之后每根 K 线从开盘价开始检查，开盘就越过限价即为跳空。
 - **成交价。** `limit_order_price = Limit` 按最先够到限价的价格成交：订单价或跳空的开盘价，它们不比限价差，否则按限价。`HardLimit` 总按限价成交，`Close` 按收盘价。不加滑点：成交走止损按触发价成交时用的那个不带滑点的请求。
 - **挂多久。** 挂出那根之后的 `limit_tif` 根，并且不能到 `limit_expiry` 那一行或之后；`NaN` 表示不限。按行数算，因为引擎没有时间戳。
-- **每列每根 K 线只执行一笔**，优先级：触发的止损，其次是本根够到的挂单，最后是本根的新信号。挂单按挂出时的持仓定数量，所以本列有其他成交就撤单：止损、强平，或反方向的新信号，后者随即执行（PRO 的 `upon_opp_limit_conflict = CancelExecute`）。挂单期间同方向的新信号忽略（`upon_adj_limit_conflict = KeepIgnore`）。这两种选择留给 D3 做成可选。
+- **优先级**：触发的止损，其次是本根够到的挂单，最后是本根的新信号。挂单按挂出时的持仓定数量，所以本列有止损或强平成交就撤单。
+- **冲突**（`PendingConflictMode`：`KeepIgnore`、`KeepExecute`、`CancelIgnore`、`CancelExecute`，前半是挂着的单怎么办，后半是信号怎么办）。新信号遇到挂单时，同为买或同为卖用 `upon_adj_limit_conflict`（默认 `KeepIgnore`），否则用 `upon_opp_limit_conflict`（默认 `CancelExecute`）。保留的挂单保持原数量；新信号本身是限价单时取代旧挂单，因为每列只挂一张。止损触发的那根 K 线上的信号用 `upon_adj_stop_conflict` / `upon_opp_stop_conflict`，默认 `KeepIgnore`：止损替换信号，和原来一样。`KeepExecute` 先按止损成交，再按止损之后的持仓给信号定数量，同一根执行，即止损出场后反手或重新入场；`Cancel*` 解除止损。按当前持仓不产生订单的信号（已持多头时的多头入场），按平仓后的持仓判断方向。判定是纯函数 `signals::resolve_pending_conflict`。
 - **状态。** 挂单存在列状态里（`phasor_sim::state::LimitOrder`，见下节）；挂出不经过内核、不写日志，成交时和其他订单一样写记录和日志。
-- **开销。** 每个账户组只判断一次有没有列能挂限价单；没有的话，任何一根 K 线都不检查、不挂单。
+- **开销。** 每个账户组只判断一次有没有列能挂限价单、或用了非 `KeepIgnore` 的止损冲突模式；`prepare_order` 按这一点有两份实例（`const PENDING`），没有的那份不含挂单相关的代码。
 
 `crates/phasor-sim/src/limit.rs` 对限价、成交价和到期做单元测试；`crates/phasor-sim/tests/limit_orders.rs` 在五根 K 线上手算每条规则（挂单后成交、跳空时的三种成交价、立即成交和延后、突破、按开盘价挂出、有效期和到期、同方向和反方向信号、止损和强平撤单、日志），并在随机运行上检查：限价等于订单价的限价单就是不加滑点的市价单，线程数不影响结果。
 

@@ -11,8 +11,8 @@
 
 use phasor_model::{
     AccountType, AccumulationMode, CashFlowKind, DeltaFormat, Direction, LeverageMode,
-    LimitOrderPrice, MarginBasis, MarginMode, OrderType, SizeType, StopEntryPrice, StopExitMode,
-    StopExitPrice, StopUpdateMode, TradesType,
+    LimitOrderPrice, MarginBasis, MarginMode, OrderType, PendingConflictMode, SizeType,
+    StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -287,9 +287,48 @@ pub fn delta_format(name: &str) -> Result<DeltaFormat, String> {
     }
 }
 
+/// What a signal does to a pending order it meets, and whether it executes.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn pending_conflict(name: &str) -> Result<PendingConflictMode, String> {
+    match name {
+        "keepignore" => Ok(PendingConflictMode::KeepIgnore),
+        "keepexecute" => Ok(PendingConflictMode::KeepExecute),
+        "cancelignore" => Ok(PendingConflictMode::CancelIgnore),
+        "cancelexecute" => Ok(PendingConflictMode::CancelExecute),
+        other => Err(format!(
+            "a conflict mode must be 'keepignore', 'keepexecute', 'cancelignore' or \
+             'cancelexecute'; got {other:?}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_pending_conflict_mode_maps_to_its_own_variant() {
+        assert_eq!(
+            pending_conflict("keepignore").unwrap(),
+            PendingConflictMode::KeepIgnore
+        );
+        assert_eq!(
+            pending_conflict("keepexecute").unwrap(),
+            PendingConflictMode::KeepExecute
+        );
+        assert_eq!(
+            pending_conflict("cancelignore").unwrap(),
+            PendingConflictMode::CancelIgnore
+        );
+        assert_eq!(
+            pending_conflict("cancelexecute").unwrap(),
+            PendingConflictMode::CancelExecute
+        );
+        assert!(pending_conflict("keep").is_err());
+    }
 
     #[test]
     fn every_limit_option_maps_to_its_own_variant() {

@@ -12,7 +12,7 @@
 //! Every run pays 1% slippage on a market order, which a limit order does
 //! not, so a fill price says which of the two it was.
 use phasor_core::flex::FlexArray;
-use phasor_model::{DeltaFormat, Direction, LimitOrderPrice, OrderType};
+use phasor_model::{DeltaFormat, Direction, LimitOrderPrice, OrderType, PendingConflictMode};
 use phasor_records::OrderRecords;
 use phasor_sim::groups::Groups;
 use phasor_sim::{
@@ -310,6 +310,142 @@ fn bad_limit_inputs_are_refused() {
         let err = simulate_from_signals(&args).unwrap_err().to_string();
         assert!(err.contains(message), "{err}");
     }
+}
+
+const SECOND: [bool; 5] = [false, true, false, false, false];
+
+#[test]
+fn the_limit_conflict_modes_decide_between_the_resting_order_and_the_signal() {
+    use PendingConflictMode::{CancelExecute, CancelIgnore, KeepExecute, KeepIgnore};
+    // A buy rests at 95 from bar 0; a second entry on bar 1 would rest at 92
+    // and fill on bar 3.
+    let twice = [true, true, false, false, false];
+    let adjacent = |mode| {
+        run(&FromSignals {
+            limit_delta: FlexArray::scalar(5.),
+            delta_format: FlexArray::scalar(DeltaFormat::Absolute),
+            upon_adj_limit_conflict: FlexArray::scalar(mode),
+            ..bars(&twice, &NO)
+        })
+    };
+    assert_eq!(adjacent(KeepIgnore), [(2, 95.)]);
+    // A new limit order takes the place of one kept.
+    assert_eq!(adjacent(KeepExecute), [(3, 92.)]);
+    assert_eq!(adjacent(CancelExecute), [(3, 92.)]);
+    assert_eq!(adjacent(CancelIgnore), []);
+
+    // As a market order, the second entry fills on bar 1 and the kept order
+    // still fills on bar 2, with the size it was placed with.
+    let types = [
+        OrderType::Limit,
+        OrderType::Market,
+        OrderType::Market,
+        OrderType::Market,
+        OrderType::Market,
+    ];
+    let args = FromSignals {
+        order_type: FlexArray::per_row(&types, 5).unwrap(),
+        accumulate: FlexArray::scalar(phasor_model::AccumulationMode::Both),
+        limit_delta: FlexArray::scalar(5.),
+        delta_format: FlexArray::scalar(DeltaFormat::Absolute),
+        upon_adj_limit_conflict: FlexArray::scalar(KeepExecute),
+        ..bars(&twice, &NO)
+    };
+    let orders = simulate_from_signals(&args).unwrap();
+    assert_eq!(fills(&orders), [(1, 97. * 1.01), (2, 95.)]);
+    assert_eq!(orders.size, [1., 1.]);
+
+    // An opposite signal kept out: the short entry is ignored.
+    let args = FromSignals {
+        direction: FlexArray::scalar(Direction::Both),
+        order_type: FlexArray::per_row(&types, 5).unwrap(),
+        limit_delta: FlexArray::scalar(5.),
+        delta_format: FlexArray::scalar(DeltaFormat::Absolute),
+        upon_opp_limit_conflict: FlexArray::scalar(KeepIgnore),
+        ..bars(&FIRST, &SECOND)
+    };
+    assert_eq!(run(&args), [(2, 95.)]);
+}
+
+#[test]
+fn the_stop_conflict_modes_decide_between_a_fired_stop_and_the_signal() {
+    use PendingConflictMode::{CancelExecute, CancelIgnore, KeepExecute, KeepIgnore};
+    // Long 1 at 100 with a 5.5% stop, armed at the entry only and hit on
+    // bar 2 at 94.5, the bar a signal also fires. Sides decide adjacency: the
+    // stop sells, so a short entry is adjacent and a long entry opposite.
+    let sl = [0.055, f64::NAN, f64::NAN, f64::NAN, f64::NAN];
+    let third = [false, false, true, false, false];
+    let base = |entries, exits, direction| FromSignals {
+        direction: FlexArray::scalar(direction),
+        order_type: FlexArray::scalar(OrderType::Market),
+        slippage: FlexArray::scalar(0.),
+        sl_stop: FlexArray::per_row(&sl, 5).unwrap(),
+        ..bars(entries, exits)
+    };
+    let outcome = |args: &FromSignals<'_>| {
+        let orders = simulate_from_signals(args).unwrap();
+        (fills(&orders), orders.size, orders.side)
+    };
+    // A short entry: in a two-sided column, an exit.
+    let short_entry = base(&FIRST, &third, Direction::Both);
+    let adjacent = |mode| {
+        outcome(&FromSignals {
+            upon_adj_stop_conflict: FlexArray::scalar(mode),
+            ..short_entry.clone()
+        })
+    };
+    // The stop replaces the signal.
+    assert_eq!(
+        adjacent(KeepIgnore),
+        (vec![(0, 100.), (2, 94.5)], vec![1., 1.], vec![0, 1])
+    );
+    // The stop, then the short entry sized against the flat it left.
+    assert_eq!(
+        adjacent(KeepExecute),
+        (
+            vec![(0, 100.), (2, 94.5), (2, 96.)],
+            vec![1., 1., 1.],
+            vec![0, 1, 1]
+        )
+    );
+    // No stop: the short entry reverses the long at the close.
+    assert_eq!(
+        adjacent(CancelExecute),
+        (vec![(0, 100.), (2, 96.)], vec![1., 2.], vec![0, 1])
+    );
+    assert_eq!(adjacent(CancelIgnore), (vec![(0, 100.)], vec![1.], vec![0]));
+
+    // A long entry on the same bar: stopped out, then back in.
+    let reentry = [true, false, true, false, false];
+    let long_entry = base(&reentry, &NO, Direction::LongOnly);
+    let opposite = |mode| {
+        outcome(&FromSignals {
+            upon_opp_stop_conflict: FlexArray::scalar(mode),
+            ..long_entry.clone()
+        })
+    };
+    assert_eq!(
+        opposite(KeepExecute),
+        (
+            vec![(0, 100.), (2, 94.5), (2, 96.)],
+            vec![1., 1., 1.],
+            vec![0, 1, 0]
+        )
+    );
+    // Cancelled, the entry asks for nothing while long, so there is nothing
+    // left: the position stays, without its stop.
+    assert_eq!(
+        opposite(CancelExecute),
+        (vec![(0, 100.)], vec![1.], vec![0])
+    );
+    assert_eq!(opposite(KeepIgnore), adjacent(KeepIgnore));
+
+    // A long exit is on the stop's side: cancelled, it exits at the close.
+    let long_exit = FromSignals {
+        upon_adj_stop_conflict: FlexArray::scalar(CancelExecute),
+        ..base(&FIRST, &third, Direction::LongOnly)
+    };
+    assert_eq!(run(&long_exit), [(0, 100.), (2, 96.)]);
 }
 
 struct Lcg(u64);

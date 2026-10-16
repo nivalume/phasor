@@ -1140,6 +1140,10 @@ fn deposits_view<'a>(
     limit_delay = None,
     limit_tif = None,
     limit_expiry = None,
+    upon_adj_limit_conflict = None,
+    upon_opp_limit_conflict = None,
+    upon_adj_stop_conflict = None,
+    upon_opp_stop_conflict = None,
     val_price = None,
     cash_deposits = None,
     cash_dividends = None,
@@ -1217,6 +1221,10 @@ fn from_signals(
     limit_delay: Option<&Bound<'_, PyAny>>,
     limit_tif: Option<&Bound<'_, PyAny>>,
     limit_expiry: Option<&Bound<'_, PyAny>>,
+    upon_adj_limit_conflict: Option<&str>,
+    upon_opp_limit_conflict: Option<&str>,
+    upon_adj_stop_conflict: Option<&str>,
+    upon_opp_stop_conflict: Option<&str>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
@@ -1367,6 +1375,16 @@ fn from_signals(
         "'market', 'limit', or one of them per column",
         parse::order_type,
     )?;
+    let conflict = |name: Option<&str>, default| {
+        name.map(parse::pending_conflict)
+            .transpose()
+            .map_err(bad)
+            .map(|mode| mode.map_or(default, FlexArray::Scalar))
+    };
+    let upon_adj_limit_conflict = conflict(upon_adj_limit_conflict, d.upon_adj_limit_conflict)?;
+    let upon_opp_limit_conflict = conflict(upon_opp_limit_conflict, d.upon_opp_limit_conflict)?;
+    let upon_adj_stop_conflict = conflict(upon_adj_stop_conflict, d.upon_adj_stop_conflict)?;
+    let upon_opp_stop_conflict = conflict(upon_opp_stop_conflict, d.upon_opp_stop_conflict)?;
     let delta_format = delta_format
         .map(parse::delta_format)
         .transpose()
@@ -1511,6 +1529,10 @@ fn from_signals(
         limit_delay: flex_or_bool(&limit_delay_b, n_rows, n_cols, d.limit_delay)?,
         limit_tif: flex_or_f64(&limit_tif_b, n_rows, n_cols, per_col, d.limit_tif)?,
         limit_expiry: flex_or_f64(&limit_expiry_b, n_rows, n_cols, per_col, d.limit_expiry)?,
+        upon_adj_limit_conflict,
+        upon_opp_limit_conflict,
+        upon_adj_stop_conflict,
+        upon_opp_stop_conflict,
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,

@@ -820,18 +820,31 @@ instead of executing; stop exits stay market orders.
 - **How long.** `limit_tif` bars after the one it was placed on, and not on
   or after the row `limit_expiry`; `NaN` is no limit. Rows, because the
   engine has no timestamps.
-- **One order per column per bar**, in this priority: a stop that fires, then
-  a resting limit the bar reaches, then the bar's new signal. A resting order
-  was sized against the position held when it was placed, so any other fill
-  in its column cancels it: a stop, a liquidation, or a new signal on the
-  other side, which then executes (PRO's `upon_opp_limit_conflict =
-  CancelExecute`). A new signal on the same side is ignored while it rests
-  (`upon_adj_limit_conflict = KeepIgnore`). D3 is to make both choices.
+- **Priority**: a stop that fires, then a resting limit the bar reaches,
+  then the bar's new signal. A resting order was sized against the position
+  held when it was placed, so a stop or a liquidation filling in its column
+  cancels it.
+- **Conflicts** (`PendingConflictMode`: `KeepIgnore`, `KeepExecute`,
+  `CancelIgnore`, `CancelExecute` — the pending order's fate, then the
+  signal's). A new signal meeting a resting order uses
+  `upon_adj_limit_conflict` when both buy or both sell (default
+  `KeepIgnore`) and `upon_opp_limit_conflict` otherwise (default
+  `CancelExecute`). A kept order keeps its size; a new limit order takes its
+  place, since one rests per column. A signal on the bar a stop fires uses
+  `upon_adj_stop_conflict` / `upon_opp_stop_conflict`, default `KeepIgnore`:
+  the stop replaces the signal, as before. `KeepExecute` fills the stop and
+  then the signal, re-sized against what the stop left, on the same bar — a
+  stop-out and a reversal or re-entry; `Cancel*` disarms the stop. A signal
+  that asks for nothing against the position held (an entry on the side
+  already held) takes its side from what it asks against a flat column. The
+  decision is the pure `signals::resolve_pending_conflict`.
 - **State.** The order lives in the column's state (`phasor_sim::state::
   LimitOrder`, below); placing one reaches no kernel and writes no log row,
   its fill writes both as any order.
-- **Cost.** Whether any column of a group can place one is decided once per
-  group; without one, no bar tests or places any.
+- **Cost.** Whether any column of a group can place one, or uses a stop
+  conflict mode other than `KeepIgnore`, is decided once per group;
+  `prepare_order` has a copy for each (`const PENDING`), and the one without
+  has no code for pending orders.
 
 `crates/phasor-sim/src/limit.rs` unit-tests the level, the fill and the
 expiry; `crates/phasor-sim/tests/limit_orders.rs` works each rule by hand on

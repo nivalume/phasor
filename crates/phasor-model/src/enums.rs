@@ -372,6 +372,22 @@ pub enum DeltaFormat {
     Target = 2,
 }
 
+/// What happens when a bar's signal meets an order already pending in its
+/// column: a resting limit order, or a stop that fired on the bar. The first
+/// half is the pending order's fate, the second the signal's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum PendingConflictMode {
+    /// Keep the pending order; ignore the signal.
+    KeepIgnore = 0,
+    /// Keep the pending order; execute the signal too.
+    KeepExecute = 1,
+    /// Cancel the pending order; ignore the signal.
+    CancelIgnore = 2,
+    /// Cancel the pending order; execute the signal.
+    CancelExecute = 3,
+}
+
 /// Which side a trade was on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -471,6 +487,7 @@ mod tests {
         assert_eq!(OrderType::Limit as i8, 1);
         assert_eq!(LimitOrderPrice::Close as i8, 2);
         assert_eq!(DeltaFormat::Target as i8, 2);
+        assert_eq!(PendingConflictMode::CancelExecute as i8, 3);
     }
 
     #[test]

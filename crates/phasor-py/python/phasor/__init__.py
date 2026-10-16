@@ -370,6 +370,10 @@ def from_signals(
     limit_delay=None,
     limit_tif=None,
     limit_expiry=None,
+    upon_adj_limit_conflict=None,
+    upon_opp_limit_conflict=None,
+    upon_adj_stop_conflict=None,
+    upon_opp_stop_conflict=None,
     val_price=None,
     cash_deposits=None,
     cash_dividends=None,
@@ -487,6 +491,19 @@ def from_signals(
         reaches it. ``limit_tif`` is how many bars after the one it was placed
         on it may fill, and ``limit_expiry`` the row it is cancelled at; NaN
         is no limit. Both count bars: the engine has no timestamps.
+    upon_adj_limit_conflict, upon_opp_limit_conflict
+        What a new signal does to a resting limit order on the same side
+        (``adj``) or the other (``opp``): ``"keepignore"`` (the ``adj``
+        default) keeps it and ignores the signal, ``"cancelexecute"`` (the
+        ``opp`` default) cancels it and executes the signal, and
+        ``"keepexecute"`` and ``"cancelignore"`` the other two. A kept order
+        keeps the size it was placed with; a new limit order takes its place.
+    upon_adj_stop_conflict, upon_opp_stop_conflict
+        The same choice between a stop that fires and the bar's own signal.
+        The default ``"keepignore"`` lets the stop replace the signal.
+        ``"keepexecute"`` fills the stop, then the signal re-sized against
+        what the stop left, on the same bar (a stop-out and a reversal);
+        ``"cancelexecute"`` disarms the stop and executes the signal instead.
     cash_sharing, group_lens
         Share capital across adjacent columns. None groups all columns when
         sharing is enabled; explicit positive lengths must sum to n_cols.
@@ -668,6 +685,10 @@ def from_signals(
         limit_delay=_flag(limit_delay, "limit_delay"),
         limit_tif=_param(limit_tif, "limit_tif"),
         limit_expiry=_param(limit_expiry, "limit_expiry"),
+        upon_adj_limit_conflict=upon_adj_limit_conflict,
+        upon_opp_limit_conflict=upon_opp_limit_conflict,
+        upon_adj_stop_conflict=upon_adj_stop_conflict,
+        upon_opp_stop_conflict=upon_opp_stop_conflict,
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),

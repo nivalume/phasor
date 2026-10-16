@@ -78,6 +78,27 @@ def test_order_type_per_column():
     np.testing.assert_allclose(orders["price"], [95.0, 101.0])
 
 
+def test_the_limit_conflict_modes():
+    twice = np.array([True, True, False, False, False])
+    kwargs = dict(entries=twice, limit_delta=5.0, delta_format="absolute")
+    assert run(**kwargs) == [(2, 95.0)]
+    assert run(**kwargs, upon_adj_limit_conflict="cancelexecute") == [(3, 92.0)]
+    assert run(**kwargs, upon_adj_limit_conflict="cancelignore") == []
+
+
+def test_a_stop_and_a_reversal_on_one_bar():
+    # Long 1 at 100, stopped at 94.5 on bar 2, where a short entry fires.
+    sl = np.array([[0.055], [np.nan], [np.nan], [np.nan], [np.nan]])
+    third = np.array([False, False, True, False, False])
+    kwargs = dict(
+        exits=third, direction="both", order_type="market", slippage=0.0, sl_stop=sl,
+    )
+    assert run(**kwargs) == [(0, 100.0), (2, 94.5)]
+    assert run(**kwargs, upon_adj_stop_conflict="keepexecute") == [
+        (0, 100.0), (2, 94.5), (2, 96.0),
+    ]
+
+
 @pytest.mark.parametrize(
     "kwargs, match",
     [
@@ -88,6 +109,7 @@ def test_order_type_per_column():
         (dict(delta_format="pct"), "delta_format must be"),
         (dict(limit_delta=-1.0), "limit_delta must be"),
         (dict(limit_tif=-1.0), "limit_tif and limit_expiry must be"),
+        (dict(upon_opp_stop_conflict="keep"), "a conflict mode must be"),
     ],
 )
 def test_bad_limit_arguments_are_refused(kwargs, match):
