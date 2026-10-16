@@ -1117,7 +1117,7 @@ fn deposits_view<'a>(
     margin_basis = "notional",
     multiplier = None,
     price_type = None,
-    from_ago = 0,
+    from_ago = None,
     bid_price = None,
     ask_price = None,
     price_area_vio_mode = None,
@@ -1179,7 +1179,7 @@ fn deposits_view<'a>(
     threads = 1,
     cash_sharing = false,
     group_lens = None,
-    call_seq = "default",
+    call_seq = None,
     column_map = None,
 ))]
 #[allow(
@@ -1212,7 +1212,7 @@ fn from_signals(
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
     price_type: Option<&str>,
-    from_ago: usize,
+    from_ago: Option<&Bound<'_, PyAny>>,
     bid_price: Option<&Bound<'_, PyAny>>,
     ask_price: Option<&Bound<'_, PyAny>>,
     price_area_vio_mode: Option<&str>,
@@ -1274,7 +1274,7 @@ fn from_signals(
     threads: usize,
     cash_sharing: bool,
     group_lens: Option<Vec<usize>>,
-    call_seq: &str,
+    call_seq: Option<&Bound<'_, PyAny>>,
     column_map: Option<Vec<usize>>,
 ) -> PyResult<PyPortfolio> {
     // `close` first, so every other parameter can be checked against a known
@@ -1323,6 +1323,9 @@ fn from_signals(
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
     let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
+    let from_ago_b = from_ago
+        .map(|v| array::borrow_count(v, "from_ago"))
+        .transpose()?;
     let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
@@ -1439,11 +1442,8 @@ fn from_signals(
         n_cols,
         d.init_cash,
     )?;
-    let call_seq = match call_seq {
-        "default" => CallSeq::Default,
-        "auto" => CallSeq::Auto,
-        _ => return Err(bad("call_seq must be 'default' or 'auto'".to_owned())),
-    };
+    let call_seq_b = call_seq_arg(call_seq)?;
+    let call_seq = resolve_call_seq(&call_seq_b, n_rows, n_cols)?;
     let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
     let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
@@ -1557,7 +1557,10 @@ fn from_signals(
             d.multiplier,
         )?,
         price_type,
-        from_ago,
+        from_ago: match &from_ago_b {
+            Some(v) => array::flex_count(v, n_rows, n_cols)?,
+            None => d.from_ago,
+        },
         bid_price: bid,
         ask_price: ask,
         price_area_vio_mode,
@@ -1578,7 +1581,11 @@ fn from_signals(
         } else {
             array::ladder_steps(&tp_stop_b, n_cols, "tp_stop", d.tp_stop)?
         },
-        tsl_stop: flex_or_f64(&tsl_stop_b, n_rows, n_cols, per_col, d.tsl_stop)?,
+        tsl_stop: if stop_ladder == phasor_model::StopLadderMode::Disabled {
+            flex_or_f64(&tsl_stop_b, n_rows, n_cols, per_col, d.tsl_stop)?
+        } else {
+            array::ladder_steps(&tsl_stop_b, n_cols, "tsl_stop", d.tsl_stop)?
+        },
         tsl_th: flex_or_f64(&tsl_th_b, n_rows, n_cols, per_col, d.tsl_th)?,
         td_stop: flex_or_f64(&td_stop_b, n_rows, n_cols, per_col, d.td_stop)?,
         dt_stop: flex_or_f64(&dt_stop_b, n_rows, n_cols, per_col, d.dt_stop)?,
@@ -1737,7 +1744,7 @@ fn from_signals(
     margin_basis = "notional",
     multiplier = None,
     price_type = None,
-    from_ago = 0,
+    from_ago = None,
     bid_price = None,
     ask_price = None,
     price_area_vio_mode = None,
@@ -1771,7 +1778,7 @@ fn from_signals(
     threads = 1,
     cash_sharing = false,
     group_lens = None,
-    call_seq = "default",
+    call_seq = None,
     column_map = None,
 ))]
 #[allow(
@@ -1802,7 +1809,7 @@ fn from_orders(
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
     price_type: Option<&str>,
-    from_ago: usize,
+    from_ago: Option<&Bound<'_, PyAny>>,
     bid_price: Option<&Bound<'_, PyAny>>,
     ask_price: Option<&Bound<'_, PyAny>>,
     price_area_vio_mode: Option<&str>,
@@ -1836,7 +1843,7 @@ fn from_orders(
     threads: usize,
     cash_sharing: bool,
     group_lens: Option<Vec<usize>>,
-    call_seq: &str,
+    call_seq: Option<&Bound<'_, PyAny>>,
     column_map: Option<Vec<usize>>,
 ) -> PyResult<PyPortfolio> {
     let close_b = borrow_f64(close, "close")?;
@@ -1869,6 +1876,9 @@ fn from_orders(
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
     let force_exit_b = array::borrow_opt_bool(force_exit, "force_exit")?;
+    let from_ago_b = from_ago
+        .map(|v| array::borrow_count(v, "from_ago"))
+        .transpose()?;
     let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let p = Shared::borrow(
         size,
@@ -1908,11 +1918,8 @@ fn from_orders(
         n_cols,
         d.init_cash,
     )?;
-    let call_seq = match call_seq {
-        "default" => CallSeq::Default,
-        "auto" => CallSeq::Auto,
-        _ => return Err(bad("call_seq must be 'default' or 'auto'".to_owned())),
-    };
+    let call_seq_b = call_seq_arg(call_seq)?;
+    let call_seq = resolve_call_seq(&call_seq_b, n_rows, n_cols)?;
     let group_of: Vec<usize> = (0..n_cols).map(|c| groups.of_column(c)).collect();
     let deposits = deposits_view(&deposits_b, n_rows, n_cols, &groups, &group_of)?;
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
@@ -2000,7 +2007,10 @@ fn from_orders(
             d.multiplier,
         )?,
         price_type,
-        from_ago,
+        from_ago: match &from_ago_b {
+            Some(v) => array::flex_count(v, n_rows, n_cols)?,
+            None => d.from_ago,
+        },
         bid_price: bid,
         ask_price: ask,
         price_area_vio_mode,
@@ -2151,4 +2161,54 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "Rust engine for phasor. Use the `phasor` package, not this.",
     )?;
     Ok(())
+}
+
+/// `call_seq` as Python passed it: a name, or a `(n_rows, n_cols)` `uintp`
+/// matrix of within-group indices, column-major.
+enum CallSeqArg<'py> {
+    Named(String),
+    Explicit(numpy::PyReadonlyArray2<'py, usize>),
+}
+
+fn call_seq_arg<'py>(value: Option<&Bound<'py, PyAny>>) -> PyResult<CallSeqArg<'py>> {
+    let Some(value) = value else {
+        return Ok(CallSeqArg::Named("default".to_owned()));
+    };
+    if let Ok(name) = value.extract::<String>() {
+        return Ok(CallSeqArg::Named(name));
+    }
+    value
+        .extract::<numpy::PyReadonlyArray2<'py, usize>>()
+        .map(CallSeqArg::Explicit)
+        .map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "call_seq must be 'default', 'auto' or a 2-D uintp array of call indices",
+            )
+        })
+}
+
+fn resolve_call_seq<'a>(
+    value: &'a CallSeqArg<'a>,
+    n_rows: usize,
+    n_cols: usize,
+) -> PyResult<CallSeq<'a>> {
+    let bad = pyo3::exceptions::PyValueError::new_err;
+    match value {
+        CallSeqArg::Named(name) => match name.as_str() {
+            "default" => Ok(CallSeq::Default),
+            "auto" => Ok(CallSeq::Auto),
+            _ => Err(bad(
+                "call_seq must be 'default', 'auto' or an array".to_owned()
+            )),
+        },
+        CallSeqArg::Explicit(a) => {
+            let (flat, rows, cols) = array::columns_of(a)?;
+            if rows != n_rows || cols != n_cols {
+                return Err(bad(format!(
+                    "a {rows}x{cols} call_seq against a {n_rows}x{n_cols} run"
+                )));
+            }
+            Ok(CallSeq::Explicit(flat))
+        }
+    }
 }

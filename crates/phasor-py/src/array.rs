@@ -374,3 +374,55 @@ pub fn flex_or_bool<'a>(
 pub fn to_py_err(e: phasor_core::Error) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
+
+/// A count parameter (`from_ago`), borrowed: a number, or a 2-D `uintp`
+/// array in the engine's column-major layout.
+#[derive(Debug)]
+pub enum BorrowedCount<'py> {
+    /// One value for everything.
+    Scalar(usize),
+    /// A borrow of a 2-D NumPy buffer.
+    Slice(PyReadonlyArray2<'py, usize>),
+}
+
+/// Reads a count parameter, keeping the borrow alive.
+///
+/// # Errors
+///
+/// A Python `TypeError` for a value that is neither a nonnegative integer
+/// nor a 2-D `uintp` array.
+pub fn borrow_count<'py>(value: &Bound<'py, PyAny>, name: &str) -> PyResult<BorrowedCount<'py>> {
+    if let Ok(v) = value.extract::<usize>() {
+        return Ok(BorrowedCount::Scalar(v));
+    }
+    if let Ok(a) = value.extract::<PyReadonlyArray2<'py, usize>>() {
+        return Ok(BorrowedCount::Slice(a));
+    }
+    Err(PyTypeError::new_err(format!(
+        "{name} must be a nonnegative integer or a 2-D uintp array"
+    )))
+}
+
+/// The engine's view of a count parameter.
+///
+/// # Errors
+///
+/// As [`flex_bool`].
+pub fn flex_count<'a>(
+    value: &'a BorrowedCount<'a>,
+    n_rows: usize,
+    n_cols: usize,
+) -> PyResult<FlexArray<'a, usize>> {
+    match value {
+        BorrowedCount::Scalar(v) => Ok(FlexArray::Scalar(*v)),
+        BorrowedCount::Slice(a) => {
+            let (flat, rows, cols) = columns_of(a)?;
+            if rows != n_rows || cols != n_cols {
+                return Err(PyValueError::new_err(format!(
+                    "a {rows}x{cols} array against a {n_rows}x{n_cols} run"
+                )));
+            }
+            FlexArray::full(flat, n_rows, n_cols).map_err(|e| PyValueError::new_err(e.to_string()))
+        }
+    }
+}

@@ -14,9 +14,9 @@
 | # | 功能 | 状态 | 已有 | 还缺 |
 |---|---|:-:|---|---|
 | 1 | [模拟入口与回调](#21-模拟入口与回调) | 🟡 | `from_orders`、`from_signals`（含 `order_mode`）；内核、止损判定、记录写入已公开 | `from_order_func`、回调钩子、Python 回调 |
-| 2 | [订单与仓位](#22-订单与仓位) | 🟡 | 全部仓位类型、下单约束、价格选项、买卖价、`call_seq="auto"` | 少量细节（`from_ago` 按列、Python 自定义调用顺序） |
-| 3 | [限价单与挂单](#23-限价单与挂单) | 🟡 | 限价单、突破单、有效期（按行数）、挂单冲突 | 按时间给有效期；`from_orders` 的限价单 |
-| 4 | [止损](#24-止损) | 🟡 | 止损、止盈、移动止损、时间止损、阶梯、止损限价单、不经模拟的止损出场 | 三种自适应阶梯模式、PRO 参数别名 |
+| 2 | [订单与仓位](#22-订单与仓位) | ✅ | 全部仓位类型、下单约束、价格选项（含 `nextvalidopen`、按根的 `from_ago`）、买卖价、`call_seq`（auto 按现金影响、显式顺序） | — |
+| 3 | [限价单与挂单](#23-限价单与挂单) | 🟡 | 限价单、突破单、有效期（按行数或按时间）、挂单冲突 | 语义评审 |
+| 4 | [止损](#24-止损) | 🟡 | 止损、止盈、移动止损、时间止损（按行数或按时间）、四种阶梯、`delta_format`、止损限价单、不经模拟的止损出场 | 动态阶梯（随回调） |
 | 5 | [账户与资金](#25-账户与资金) | 🟡 | 共享现金、入金出金、收支、分红、杠杆、合约乘数 | 初始持仓、`init_cash="auto"`、负价格 |
 | 6 | [保证金、强平、持仓费](#26-保证金强平持仓费) ➕ | 🟡 | 全仓和逐仓保证金、强平、资金费、隔夜融资、借贷利息、标记价格 | 和 NautilusTrader 外部对照；融资融券强平 |
 | 7 | [多周期与交易时段](#27-多周期与交易时段) | ✅ | 粗周期对齐到细周期、聚合回粗周期、交易时段、强制平仓 | `Portfolio.resample`（归在组合分析） |
@@ -60,39 +60,36 @@
 - [x] 成交价：`price_type`（`Price`/`Open`/`Close`），`price="nextopen"`/`"nextclose"`，`from_ago`
 - [x] 买卖价分离 `bid_price`、`ask_price`
 - [x] 超出 K 线范围的价格 `price_area_vio_mode`（`ignore`/`cap`/`error`）
-- [ ] 自定义调用顺序（`CallSeq::Explicit`）接到 Python
-- [ ] `call_seq="auto"` 估值时考虑杠杆、保证金和持仓费
-- [ ] `from_ago` 按列或按行设置（现在整次运行一个值）
-- [ ] 跳过缺失值的价格选项（PRO 的 `NextValidOpen` 一类）
+- [x] 自定义调用顺序：Python 的 `call_seq` 可以是 `(n_bars, n_cols)` 整数数组，每行每组给出组内列的执行顺序；同一行重复的下标报错
+- [x] 带杠杆或保证金列的运行里，`call_seq="auto"` 按订单对可用现金的影响排序（`approx_cash_need`）：减仓部分释放，开仓部分占用（现金列按 `1/leverage`，保证金列按初始保证金）。持仓费在所有订单之后的收盘收取，不影响顺序；其他运行仍按参考实现的订单价值排序
+- [x] `from_ago` 按列或按行设置：在执行那根读取，Python 里可以是整数、每根一个的一维数组或和 `close` 同形状
+- [x] 跳过缺失值的价格选项 `price="nextvalidopen"`/`"nextvalidclose"`：在下一根有价格的 K 线执行上一根有价格的 K 线决定的订单（Python 里换算成按根的 `from_ago`）
 
 ### 2.3 限价单与挂单
 
 目前只在 `from_signals`。每列最多一张挂单，状态在 `ColumnState.limit`。
 
 - [x] `order_type`（`market`/`limit`，可以每列一个）
-- [x] `limit_delta` 和 `delta_format`（`percent`/`absolute`/`target`）；`limit_reverse` 即突破单
+- [x] `limit_delta` 和 `delta_format`（`percent`/`percent100`/`absolute`/`target`）；`limit_reverse` 即突破单
 - [x] `limit_order_price`（`limit`/`hardlimit`/`close`）、`limit_delay`；限价单不加滑点
 - [x] 有效期 `limit_tif`、`limit_expiry`，按行数
 - [x] 挂单冲突：`upon_adj_limit_conflict`、`upon_opp_limit_conflict`、`upon_adj_stop_conflict`、`upon_opp_stop_conflict`
-- [ ] 按时间给有效期（`time_delta_format`）：在 Python 层按时间索引换算成行数，做法同 `phasor.rates.per_bar`
-- [ ] `from_orders` 的限价单
-- [ ] 核对冲突规则的默认值是否和 PRO 一致
+- [x] 按时间给有效期：`time_delta_format="index"` 时 `limit_tif` 是时长、`limit_expiry` 是时刻、周期末或每天的某个时刻，按 `index` 换算成行数（`phasor/_timing.py`）
+- [x] `from_orders` 式的限价单：PRO 的 `from_orders` 也没有限价单，用 `from_signals(order_mode=True)`，`size` 就是订单，限价单照常可用
+- [x] 冲突规则默认值：限价单的两个（同方向 `keepignore`、反方向撤单并执行）和 PRO 文档一致；PRO 文档没写止损冲突的默认值，保持参考实现的行为（止损替换信号）
 - [ ] 限价单语义评审（见 [§4](#4-待决定)）
 
 ### 2.4 止损
 
 - [x] `sl_stop`、`tp_stop`、`sl_trail`
 - [x] 移动止损 `tsl_stop`、`tsl_th`
-- [x] 时间止损 `td_stop`、`dt_stop`（按行数）
-- [x] 止损阶梯 `stop_ladder`：`uniform`、`weighted`
-- [x] 止损限价单 `stop_order_type="limit"`、`stop_limit_delta`
-- [x] `upon_stop_exit`（含反手）、`stop_entry_price`、`stop_exit_price`、`upon_stop_update`（名字沿用 vectorbt 1.x）
-- [x] 不经模拟生成止损出场 `generate_ohlc_stop_exits`，结果和 `from_signals` 逐笔相同
-- [ ] 阶梯模式 `AdaptUniform`、`AdaptWeighted`、`Dynamic`；移动止损的阶梯
-- [ ] 时间止损按限价单出场
-- [ ] 时间止损按时间给（同 2.3）
-- [ ] PRO 参数名的别名（`stop_exit_type` 等，可选）
-- [ ] `generate_ohlc_stop_exits` 支持阶梯和止损限价单
+- [x] 时间止损 `td_stop`、`dt_stop`：按行数，或 `time_delta_format="index"` 时按时间（时长；时刻、周期末如 `"ME"`、每天的某个时刻如 `"18:00"`）
+- [x] 止损距离按 `delta_format` 读：`percent`（默认）、`percent100`、`absolute`（价格差）、`target`（价位本身）；移动止损的门槛 `tsl_th` 同样
+- [x] 止损阶梯 `stop_ladder`：`uniform`、`weighted`、`adaptuniform`、`adaptweighted`（后两种按触发时的持仓分）；`sl_stop`、`tsl_stop`、`tp_stop` 都可以是阶梯
+- [x] 止损限价单 `stop_order_type="limit"`、`stop_limit_delta`，时间止损也可以（限价从开盘价算）
+- [x] `upon_stop_exit`（含反手，PRO 的名字 `stop_exit_type` 也接受）、`stop_entry_price`、`stop_exit_price`、`upon_stop_update`
+- [x] 不经模拟生成止损出场 `generate_ohlc_stop_exits`，支持阶梯（每级一次出场，`out["size"]` 是平掉的份额）、止损限价单和 `delta_format`；随机行情上和 `from_signals` 逐笔相同
+- [ ] 动态阶梯（PRO 的做法是在回调里改止损距离和出场数量），随 2.1 的回调做
 
 ### 2.5 账户与资金
 
@@ -303,6 +300,7 @@ PRO 闭源，没法差分测试，按功能来源对照：
 | 价格选项、止损扩展 | 8d09d8f | +2.04% | −0.03% |
 | 不经模拟的止损出场、目标仓位、订单模式 | ab4674c | +0.00% | +0.29% |
 | 百分比仓位、多周期、交易时段 | e9d8d59 | +1.24% | +0.04% |
+| 按根的 `from_ago`、显式调用顺序、止损的 `delta_format` 和阶梯、按时间的止损和有效期 | e94e740 | +0.14% | −0.37% |
 
 从限价单起只测了指令数，没有跑交替计时。单次都在 3% 以内，但累计起来，和 c0fc6b2 比 `from_orders` 是 +3.47%（`from_signals` −0.90%），超过约束，见 2.17。
 

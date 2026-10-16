@@ -95,7 +95,7 @@ def test_a_stop_limit_order_rests_after_a_gap():
     "kwargs, match",
     [
         (dict(price="tomorrow"), "price must be a number, an array, or 'open'"),
-        (dict(price="nextopen", from_ago=2), "sets from_ago=1"),
+        (dict(price="nextopen", from_ago=2), "sets from_ago"),
         (dict(price_area_vio_mode="clip"), "price_area_vio_mode must be"),
         (dict(stop_ladder="yes"), "stop_ladder must be"),
         (dict(stop_order_type="stop"), "order_type must be 'market' or 'limit'"),

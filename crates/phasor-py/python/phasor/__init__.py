@@ -40,6 +40,7 @@ import numpy as np
 
 from . import (
     _phasor,
+    _timing,
     data,
     events,
     labels,
@@ -270,6 +271,48 @@ def _per_bar(value: Any, close: Any, column_map: Any, name: str) -> Any:
     return _flag(array, name)
 
 
+class _TimeArgs:
+    """Reads the time stops and order expiries as rows or as time."""
+
+    def __init__(self, fmt: Any, index: Any, close: Any, column_map: Any):
+        if fmt not in (None, "rows", "index"):
+            raise ValueError(f"time_delta_format must be 'rows' or 'index'; got {fmt!r}")
+        self.fmt = fmt
+        self.index = index if index is not None else getattr(close, "index", None)
+        self.n_rows = np.shape(close)[0]
+        self.n_cols = 1 if np.ndim(close) == 1 else np.shape(close)[1]
+        self.column_map = column_map
+
+    def rows(self, value: Any, name: str, convert: Any, **kwargs: Any) -> Any:
+        if value is None:
+            return None
+        as_time = self.fmt == "index" or (self.fmt is None and _timing.is_time(value))
+        if not as_time:
+            if _timing.is_time(value):
+                raise ValueError(f"{name} is given as time; pass time_delta_format='index'")
+            return _param(value, name)
+        if self.index is None:
+            raise ValueError(f"{name} as time needs the bars' times: pass index=")
+        if len(self.index) != self.n_rows:
+            raise ValueError(f"index has {len(self.index)} times for {self.n_rows} bars")
+        m = convert(value, self.index, self.n_cols, **kwargs)
+        if self.column_map is not None:
+            m = np.asfortranarray(m[:, np.asarray(self.column_map, dtype=np.intp)])
+        return m
+
+
+def _call_seq(value: Any) -> Any:
+    """``"default"``, ``"auto"``, or an explicit order: a ``(n_rows,
+    n_cols)`` integer array whose row holds, for each group, the order its
+    columns execute in as indices within the group."""
+    if value is None or isinstance(value, str):
+        return value
+    array = np.asarray(value)
+    if array.ndim != 2 or array.dtype.kind not in "iu" or (array.size and array.min() < 0):
+        raise ValueError("call_seq must be 'default', 'auto' or a 2-D array of nonnegative integers")
+    return np.asfortranarray(array.astype(np.uintp))
+
+
 def _accumulate(value: Any) -> str:
     """The accumulation mode, accepting the reference's boolean spelling.
 
@@ -355,24 +398,71 @@ _PRICE_OPTIONS = {
     "close": ("close", 0),
     "nextopen": ("open", 1),
     "nextclose": ("close", 1),
+    "nextvalidopen": ("open", None),
+    "nextvalidclose": ("close", None),
 }
 
 
-def _price_option(price: Any, from_ago: int) -> tuple[Any, Any, int]:
+def _from_ago(value: Any, close: Any, column_map: Any) -> Any:
+    """``from_ago`` as the engine takes it: an integer, or a ``uintp``
+    matrix one value per bar and column. A 1-D array is one value per bar for
+    every column; a 2-D one is shaped like ``close`` and mapped through
+    ``column_map``."""
+    if value is None or isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        if value is not None and value < 0:
+            raise ValueError("from_ago must be 0 or more")
+        return None if value is None else int(value)
+    array = np.asarray(value)
+    if array.dtype.kind not in "iu" or (array.size and array.min() < 0):
+        raise ValueError("from_ago must be nonnegative integers")
+    if array.ndim == 0:
+        return int(array)
+    n_cols = 1 if np.ndim(close) == 1 else np.shape(close)[1]
+    if array.ndim == 1:
+        array = np.repeat(array.reshape(-1, 1), n_cols, axis=1)
+    if array.ndim != 2:
+        raise ValueError("from_ago must be an integer, a 1-D array or a 2-D array")
+    if column_map is not None and array.shape[1] == n_cols:
+        array = array[:, np.asarray(column_map, dtype=np.intp)]
+    return np.asfortranarray(array.astype(np.uintp))
+
+
+def _next_valid(close: Any, open: Any, column_map: Any) -> np.ndarray:
+    """The ``from_ago`` of ``nextvalidopen`` / ``nextvalidclose``: every bar
+    with a price executes the order decided on the last bar before it with a
+    price, however many bars without one lie between. A bar without one
+    executes nothing (its ``from_ago`` reaches before the first row)."""
+    valid = np.isfinite(_matrix(close, "close"))
+    if open is not None:
+        valid &= np.isfinite(_matrix(open, "open"))
+    n = valid.shape[0]
+    rows = np.arange(n).reshape(-1, 1)
+    last = np.maximum.accumulate(np.where(valid, rows, -1), axis=0)
+    before = np.vstack([np.full((1, valid.shape[1]), -1), last[:-1]])
+    ago = np.where(valid & (before >= 0), rows - before, rows + 1)
+    if column_map is not None:
+        ago = ago[:, np.asarray(column_map, dtype=np.intp)]
+    return np.asfortranarray(ago.astype(np.uintp))
+
+
+def _price_option(price: Any, from_ago: Any, close: Any, open: Any, column_map: Any) -> tuple[Any, Any, Any]:
     """``price`` as the engine takes it: an array or number, or one of the
     bar's prices by name. ``nextopen`` and ``nextclose`` are the next bar's,
-    which ``from_ago=1`` reads the order from the bar before."""
+    which ``from_ago=1`` reads the order from the bar before;
+    ``nextvalidopen`` and ``nextvalidclose`` skip bars without a price."""
     if not isinstance(price, str):
-        return _param(price, "price"), None, from_ago
+        return _param(price, "price"), None, _from_ago(from_ago, close, column_map)
     if price not in _PRICE_OPTIONS:
         raise ValueError(
-            "price must be a number, an array, or 'open', 'close', 'nextopen' or 'nextclose'; "
-            f"got {price!r}"
+            "price must be a number, an array, or 'open', 'close', 'nextopen', 'nextclose', "
+            f"'nextvalidopen' or 'nextvalidclose'; got {price!r}"
         )
     price_type, ago = _PRICE_OPTIONS[price]
-    if ago and from_ago:
-        raise ValueError(f"price={price!r} sets from_ago=1; do not pass from_ago with it")
-    return None, price_type, from_ago or ago
+    if ago != 0 and from_ago is not None and not (np.ndim(from_ago) == 0 and from_ago == 0):
+        raise ValueError(f"price={price!r} sets from_ago; do not pass from_ago with it")
+    if ago is None:
+        return None, price_type, _next_valid(close, open if price_type == "open" else None, column_map)
+    return None, price_type, _from_ago(ago if ago else from_ago, close, column_map)
 
 
 def from_signals(
@@ -400,7 +490,7 @@ def from_signals(
     initial_margin=None,
     margin_basis="notional",
     multiplier=None,
-    from_ago=0,
+    from_ago=None,
     bid_price=None,
     ask_price=None,
     price_area_vio_mode=None,
@@ -440,6 +530,9 @@ def from_signals(
     stop_ladder=None,
     stop_order_type=None,
     stop_limit_delta=None,
+    stop_exit_type=None,
+    time_delta_format=None,
+    index=None,
     val_price=None,
     cash_deposits=None,
     cash_dividends=None,
@@ -549,10 +642,13 @@ def from_signals(
     limit_delta, delta_format, limit_reverse
         Where it rests: ``limit_delta`` below the order price for a buy and
         above for a sell, as a fraction (``delta_format="percent"``, the
-        default), an amount of price (``"absolute"``) or the limit price
-        itself (``"target"``); NaN is at the order price. ``limit_reverse``
-        turns both round, so a buy fills at or above its price: a breakout
-        entry.
+        default), a percentage (``"percent100"``), an amount of price
+        (``"absolute"``) or the limit price itself (``"target"``); NaN is at
+        the order price. ``limit_reverse`` turns both round, so a buy fills at
+        or above its price: a breakout entry. ``delta_format`` reads the stop
+        distances too (``sl_stop``, ``tsl_stop``, ``tsl_th``, ``tp_stop``):
+        ``"absolute"`` makes them amounts of price from the entry,
+        ``"target"`` the stop levels themselves.
     limit_order_price
         What it fills at once reached: ``"limit"`` (the default; the open
         instead when a bar opens beyond the limit), ``"hardlimit"`` (the
@@ -561,7 +657,8 @@ def from_signals(
         ``limit_delay`` tests it from the next bar even when the price already
         reaches it. ``limit_tif`` is how many bars after the one it was placed
         on it may fill, and ``limit_expiry`` the row it is cancelled at; NaN
-        is no limit. Both count bars: the engine has no timestamps.
+        is no limit. Either may be given as time instead: see
+        ``time_delta_format``.
     upon_adj_limit_conflict, upon_opp_limit_conflict
         What a new signal does to a resting limit order on the same side
         (``adj``) or the other (``opp``): ``"keepignore"`` (the ``adj``
@@ -581,17 +678,39 @@ def from_signals(
         position's favour (NaN or 0: at once).
     td_stop, dt_stop
         Time stops: exit at the open ``td_stop`` bars after the entry bar, or
-        at the open of row ``dt_stop``. Rows, not times.
+        at the open of row ``dt_stop``; or, as time, see
+        ``time_delta_format``.
+    time_delta_format, index
+        How ``td_stop``, ``dt_stop``, ``limit_tif`` and ``limit_expiry`` are
+        read. ``"rows"`` counts bars and rows, as above. ``"index"`` reads
+        them against the bars' times, ``index`` (a ``DatetimeIndex`` or a
+        ``datetime64`` array; ``close.index`` when ``close`` has one): a
+        duration (``"7D"``, ``"90min"``, a ``timedelta``) for ``td_stop`` and
+        ``limit_tif`` — exit at the first bar that long after the entry bar's
+        time, fill on the bars before that long has passed — and for
+        ``dt_stop`` and ``limit_expiry`` a moment (``"2024-03-01"``), the end
+        of the period a bar is in (``"D"``, ``"W"``, ``"ME"``) or the next
+        time of day (``"18:00"``, in the index's time zone). ``None`` (the
+        default) is ``"index"`` for such values and ``"rows"`` for numbers.
+        Each may be one value for every column or a list of one per column.
     stop_ladder
-        ``"uniform"`` or ``"weighted"`` makes ``sl_stop`` and ``tp_stop``
+        ``"uniform"``, ``"weighted"``, ``"adaptuniform"`` or
+        ``"adaptweighted"`` makes ``sl_stop``, ``tsl_stop`` and ``tp_stop``
         ladders: a 1-D array of increasing steps for every column, or
         ``(n_steps, n_cols)``, NaN after the last. Each step closes an equal
-        share of the position (``uniform``) or a share proportional to its
-        distance from the step before (``weighted``); the last closes the rest.
+        share of the position the ladder was armed on (``uniform``), or a
+        share proportional to its distance from the step before
+        (``weighted``); the ``adapt`` modes take the share of what is held
+        when the step fires instead (an equal share over the steps left, or
+        the step's distance over the distance left). The last step closes the
+        rest.
     stop_order_type, stop_limit_delta
-        ``"limit"`` turns a fired price stop into a limit order at its level,
-        ``stop_limit_delta`` (in ``delta_format``) worse: a stop-limit order,
-        which a gap past the limit leaves resting. A string or one per column.
+        ``"limit"`` turns a fired stop into a limit order at its level (a
+        time stop's: the open), ``stop_limit_delta`` (in ``delta_format``)
+        worse: a stop-limit order, which a gap past the limit leaves resting.
+        A string or one per column.
+    stop_exit_type
+        PRO's name for ``upon_stop_exit``; pass one or the other.
     from_ago, bid_price, ask_price, price_area_vio_mode
         ``price`` may also name one of the bar's prices: ``"open"``,
         ``"close"``, or ``"nextopen"``/``"nextclose"``, the next bar's, which
@@ -599,7 +718,11 @@ def from_signals(
         decision at one close executed at the following open uses nothing it
         could not have known. ``from_ago=n`` reads the order (its signals or
         size, size type and an explicit price) ``n`` bars back; a named price
-        is still the executing bar's. ``bid_price`` and ``ask_price``, shaped
+        is still the executing bar's. ``from_ago`` may also be one value per
+        bar (1-D) or shaped like ``close``. ``"nextvalidopen"`` and
+        ``"nextvalidclose"`` skip bars without a price (``NaN`` close, or
+        open): the order decided on the last bar with one executes on the
+        next bar with one. ``bid_price`` and ``ask_price``, shaped
         like ``close``, are what a sell and a buy execute at where given.
         ``price_area_vio_mode`` decides what an order price outside the bar's
         low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
@@ -623,6 +746,9 @@ def from_signals(
     call_seq
         "default" uses column order; "auto" stably sorts approximate order
         values, selling before buying. Neither mode allocates equal weights.
+        An integer array shaped ``(n_bars, n_cols)`` gives the order itself:
+        on each bar, each group's columns hold the indices within the group
+        of the columns to execute first, second, and so on.
     val_price, ffill_val_price, update_value
         Valuation price (default: execution price), whether missing valuation
         prices retain the previous value, and whether each fill updates the
@@ -750,7 +876,12 @@ def from_signals(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
-    price, price_type, from_ago = _price_option(price, from_ago)
+    price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
+    if stop_exit_type is not None:
+        if upon_stop_exit is not None:
+            raise ValueError("stop_exit_type is upon_stop_exit's other name; pass one of them")
+        upon_stop_exit = stop_exit_type
+    when = _TimeArgs(time_delta_format, index, close, column_map)
     return _phasor.from_signals(
         _matrix(close, "close"),
         False if entries is None else _signals(entries, "entries"),
@@ -802,8 +933,8 @@ def from_signals(
         limit_reverse=_flag(limit_reverse, "limit_reverse"),
         limit_order_price=limit_order_price,
         limit_delay=_flag(limit_delay, "limit_delay"),
-        limit_tif=_param(limit_tif, "limit_tif"),
-        limit_expiry=_param(limit_expiry, "limit_expiry"),
+        limit_tif=when.rows(limit_tif, "limit_tif", _timing.duration_rows, inclusive=True),
+        limit_expiry=when.rows(limit_expiry, "limit_expiry", _timing.deadline_rows),
         upon_adj_limit_conflict=upon_adj_limit_conflict,
         upon_opp_limit_conflict=upon_opp_limit_conflict,
         upon_adj_stop_conflict=upon_adj_stop_conflict,
@@ -811,8 +942,8 @@ def from_signals(
         order_mode=bool(order_mode),
         tsl_stop=_param(tsl_stop, "tsl_stop"),
         tsl_th=_param(tsl_th, "tsl_th"),
-        td_stop=_param(td_stop, "td_stop"),
-        dt_stop=_param(dt_stop, "dt_stop"),
+        td_stop=when.rows(td_stop, "td_stop", _timing.duration_rows, inclusive=False),
+        dt_stop=when.rows(dt_stop, "dt_stop", _timing.deadline_rows),
         stop_ladder=stop_ladder,
         stop_order_type=stop_order_type,
         stop_limit_delta=_param(stop_limit_delta, "stop_limit_delta"),
@@ -838,7 +969,7 @@ def from_signals(
         threads=threads,
         cash_sharing=cash_sharing,
         group_lens=_group_lens(group_lens),
-        call_seq=call_seq,
+        call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
     )
 
@@ -866,7 +997,7 @@ def from_orders(
     initial_margin=None,
     margin_basis="notional",
     multiplier=None,
-    from_ago=0,
+    from_ago=None,
     bid_price=None,
     ask_price=None,
     price_area_vio_mode=None,
@@ -946,7 +1077,11 @@ def from_orders(
         decision at one close executed at the following open uses nothing it
         could not have known. ``from_ago=n`` reads the order (its signals or
         size, size type and an explicit price) ``n`` bars back; a named price
-        is still the executing bar's. ``bid_price`` and ``ask_price``, shaped
+        is still the executing bar's. ``from_ago`` may also be one value per
+        bar (1-D) or shaped like ``close``. ``"nextvalidopen"`` and
+        ``"nextvalidclose"`` skip bars without a price (``NaN`` close, or
+        open): the order decided on the last bar with one executes on the
+        next bar with one. ``bid_price`` and ``ask_price``, shaped
         like ``close``, are what a sell and a buy execute at where given.
         ``price_area_vio_mode`` decides what an order price outside the bar's
         low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
@@ -974,6 +1109,9 @@ def from_orders(
     call_seq
         "default" uses column order; "auto" stably sorts approximate order
         values, selling before buying. Neither mode allocates equal weights.
+        An integer array shaped ``(n_bars, n_cols)`` gives the order itself:
+        on each bar, each group's columns hold the indices within the group
+        of the columns to execute first, second, and so on.
     threads
         Splits account groups, which are independent.
     cash_deposits
@@ -1097,7 +1235,7 @@ def from_orders(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
-    price, price_type, from_ago = _price_option(price, from_ago)
+    price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
     return _phasor.from_orders(
         _matrix(close, "close"),
         size=_param(size, "size"),
@@ -1155,7 +1293,7 @@ def from_orders(
         threads=threads,
         cash_sharing=cash_sharing,
         group_lens=_group_lens(group_lens),
-        call_seq=call_seq,
+        call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
     )
 

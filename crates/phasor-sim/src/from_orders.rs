@@ -26,7 +26,7 @@ use phasor_exec::{
 use phasor_model::{PriceAreaVioMode, PriceType};
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
-use crate::groups::{CallSeq, Groups, approx_order_value};
+use crate::groups::{CallSeq, Groups, approx_cash_need, approx_order_value};
 use crate::state::ColumnState;
 
 /// Inputs to [`simulate_from_orders`].
@@ -62,7 +62,9 @@ pub struct FromOrders<'a> {
     pub price_type: FlexArray<'a, PriceType>,
     /// How many bars before the one an order executes on it was decided:
     /// its size, size type, direction and an explicit price are read there.
-    pub from_ago: usize,
+    /// Read on the executing bar, per column or per bar: a bar whose
+    /// `from_ago` reaches before the first row executes nothing.
+    pub from_ago: FlexArray<'a, usize>,
     /// Where given, what a sell executes at in place of the order price.
     pub bid_price: FlexArray<'a, f64>,
     /// Where given, what a buy executes at in place of the order price.
@@ -373,7 +375,7 @@ impl Default for FromOrders<'_> {
             size: FlexArray::Scalar(f64::INFINITY),
             price: FlexArray::Scalar(f64::INFINITY),
             price_type: FlexArray::Scalar(PriceType::Price),
-            from_ago: 0,
+            from_ago: FlexArray::Scalar(0),
             bid_price: FlexArray::Scalar(f64::NAN),
             ask_price: FlexArray::Scalar(f64::NAN),
             price_area_vio_mode: FlexArray::Scalar(PriceAreaVioMode::Ignore),
@@ -587,10 +589,11 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     // back: see `crate::prices`.
     let quotes = args.quotes();
     let quotes_on = quotes.on();
-    let ago = args.from_ago;
     // Neither: the order is this bar's and its price is `price`'s, read as
     // the loop always did.
-    let plain = ago == 0 && !quotes_on && matches!(args.force_exit, FlexArray::Scalar(false));
+    let plain = matches!(args.from_ago, FlexArray::Scalar(0))
+        && !quotes_on
+        && matches!(args.force_exit, FlexArray::Scalar(false));
     let mut raw_price = if quotes_on {
         vec![f64::NAN; group_len]
     } else {
@@ -632,7 +635,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             let mut p = if plain {
                 args.price.get(i, col)
             } else {
-                requested_price(args, i, col, ago, quotes_on)
+                requested_price(args, i, col, args.from_ago.get(i, col), quotes_on)
             };
             if p.is_infinite() {
                 p = if p > 0.0 {
@@ -727,7 +730,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                             args.direction.get(i, col),
                         )
                     } else {
-                        order_at(args, i, col, ago)
+                        order_at(args, i, col, args.from_ago.get(i, col))
+                    };
+                    let val_price = if LEV {
+                        state[k].last_val_price * mult[k]
+                    } else {
+                        state[k].last_val_price
                     };
                     order_value[k] = approx_order_value(
                         size,
@@ -736,9 +744,17 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                         cash,
                         state[k].position,
                         free_cash,
-                        state[k].last_val_price,
+                        val_price,
                         group_value,
                     );
+                    if LEV {
+                        order_value[k] = approx_cash_need(
+                            order_value[k],
+                            state[k].position * val_price,
+                            val_price,
+                            orders[k].order(),
+                        );
+                    }
                 }
             }
             args.call_seq
@@ -776,7 +792,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     args.direction.get(i, col),
                 )
             } else {
-                order_at(args, i, col, ago)
+                order_at(args, i, col, args.from_ago.get(i, col))
             };
             let mut order_price = price[k];
             if quotes_on {

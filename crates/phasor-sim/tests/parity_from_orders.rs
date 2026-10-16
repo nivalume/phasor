@@ -231,7 +231,7 @@ fn matches_the_reference_loop() {
             margin_basis: FlexArray::Scalar(phasor_model::MarginBasis::Notional),
             multiplier: FlexArray::Scalar(1.0),
             price_type: FlexArray::Scalar(phasor_model::PriceType::Price),
-            from_ago: 0,
+            from_ago: FlexArray::Scalar(0),
             bid_price: FlexArray::Scalar(f64::NAN),
             ask_price: FlexArray::Scalar(f64::NAN),
             price_area_vio_mode: FlexArray::Scalar(phasor_model::PriceAreaVioMode::Ignore),

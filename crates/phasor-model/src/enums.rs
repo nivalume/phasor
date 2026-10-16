@@ -379,6 +379,8 @@ pub enum DeltaFormat {
     Absolute = 1,
     /// The limit price itself.
     Target = 2,
+    /// A percentage of the order price: `Percent` written in percent.
+    Percent100 = 3,
 }
 
 /// What happens when a bar's signal meets an order already pending in its
@@ -431,6 +433,12 @@ pub enum StopLadderMode {
     Uniform = 1,
     /// Each step closes a share proportional to its distance from the last.
     Weighted = 2,
+    /// Each step closes an equal share of what is left: the position when
+    /// it fires over the steps still to fire.
+    AdaptUniform = 3,
+    /// Each step closes a share of what is left proportional to its
+    /// distance from the last over the distance still to go.
+    AdaptWeighted = 4,
 }
 
 /// Which side a trade was on.
@@ -534,10 +542,12 @@ mod tests {
         assert_eq!(OrderType::Limit as i8, 1);
         assert_eq!(LimitOrderPrice::Close as i8, 2);
         assert_eq!(DeltaFormat::Target as i8, 2);
+        assert_eq!(DeltaFormat::Percent100 as i8, 3);
         assert_eq!(PendingConflictMode::CancelExecute as i8, 3);
         assert_eq!(PriceType::Close as i8, 2);
         assert_eq!(PriceAreaVioMode::Error as i8, 2);
         assert_eq!(StopLadderMode::Weighted as i8, 2);
+        assert_eq!(StopLadderMode::AdaptWeighted as i8, 4);
     }
 
     #[test]

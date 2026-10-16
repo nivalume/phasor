@@ -201,7 +201,8 @@ fn a_signal_on_the_resting_side_is_ignored_and_one_on_the_other_cancels_it() {
 #[test]
 fn a_stop_that_fills_cancels_the_resting_order() {
     // Long 1 at 100, a sell limit 5 above bar 1's close (102, reached on
-    // bar 4) and a 5.5% stop-loss at 94.5, hit on bar 2 first.
+    // bar 4) and a stop-loss 5.5 below the entry at 94.5, hit on bar 2
+    // first. `delta_format` reads both distances.
     let types = [
         OrderType::Market,
         OrderType::Limit,
@@ -215,7 +216,7 @@ fn a_stop_that_fills_cancels_the_resting_order() {
         slippage: FlexArray::scalar(0.),
         limit_delta: FlexArray::scalar(5.),
         delta_format: FlexArray::scalar(DeltaFormat::Absolute),
-        sl_stop: FlexArray::scalar(0.055),
+        sl_stop: FlexArray::scalar(5.5),
         ..bars(&FIRST, &exit)
     };
     assert_eq!(run(&args), [(0, 100.), (2, 94.5)]);

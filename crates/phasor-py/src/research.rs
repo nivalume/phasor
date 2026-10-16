@@ -234,14 +234,25 @@ pub fn pivot_labels<'py>(
     columns_out(py, out, n_rows, n_cols)
 }
 
+/// The exits, the price each fired at, which stop and the share closed.
+type StopExitArrays<'py> = (
+    Columns<'py, bool>,
+    Columns<'py, f64>,
+    Columns<'py, i8>,
+    Columns<'py, f64>,
+);
+
 /// Where the stops of each entry would fire, without a simulation: the
-/// exits, the price each fired at and which stop (0 stop-loss, 1 trailing,
-/// 2 take-profit, 3 time, -1 none). See `phasor_sim::stop_exits`.
+/// exits, the price each fired at, which stop (0 stop-loss, 1 trailing,
+/// 2 take-profit, 3 time, -1 none) and the share of the entry's position
+/// each exit closes. See `phasor_sim::stop_exits`.
 #[pyfunction]
 #[pyo3(signature = (
     entries, close, *, open = None, high = None, low = None, sl_stop = None,
     sl_trail = false, tsl_stop = None, tsl_th = None, tp_stop = None, td_stop = None,
     dt_stop = None, short = false, wait = 1, until_next = true, skip_until_exit = false,
+    delta_format = "percent", stop_ladder = "disabled", stop_order_type = "market",
+    stop_limit_delta = None, limit_order_price = "limit",
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -265,7 +276,12 @@ pub fn generate_ohlc_stop_exits<'py>(
     wait: usize,
     until_next: bool,
     skip_until_exit: bool,
-) -> PyResult<(Columns<'py, bool>, Columns<'py, f64>, Columns<'py, i8>)> {
+    delta_format: &str,
+    stop_ladder: &str,
+    stop_order_type: &str,
+    stop_limit_delta: Option<&Bound<'py, PyAny>>,
+    limit_order_price: &str,
+) -> PyResult<StopExitArrays<'py>> {
     use crate::array::{OneDim, borrow_opt_f64, flex_or_f64};
     use phasor_core::flex::FlexArray;
     let (close_flat, n_rows, n_cols) = columns_of(&close)?;
@@ -299,6 +315,7 @@ pub fn generate_ohlc_stop_exits<'py>(
         borrow_opt_f64(tp_stop, "tp_stop")?,
         borrow_opt_f64(td_stop, "td_stop")?,
         borrow_opt_f64(dt_stop, "dt_stop")?,
+        borrow_opt_f64(stop_limit_delta, "stop_limit_delta")?,
     ];
     let stop = |k: usize| {
         flex_or_f64(
@@ -309,6 +326,16 @@ pub fn generate_ohlc_stop_exits<'py>(
             FlexArray::Scalar(f64::NAN),
         )
     };
+    let bad = pyo3::exceptions::PyValueError::new_err;
+    let ladder = crate::parse::stop_ladder(stop_ladder).map_err(bad)?;
+    // A ladder's rows are its steps: a 1-D array is every column's steps.
+    let price_stop = |k: usize, name: &str| {
+        if ladder == phasor_model::StopLadderMode::Disabled {
+            stop(k)
+        } else {
+            crate::array::ladder_steps(&stops[k], n_cols, name, FlexArray::Scalar(f64::NAN))
+        }
+    };
     let args = phasor_sim::stop_exits::OhlcStopExits {
         n_rows,
         n_cols,
@@ -317,13 +344,20 @@ pub fn generate_ohlc_stop_exits<'py>(
         high: bar(&high, "high", n_rows, n_cols)?,
         low: bar(&low, "low", n_rows, n_cols)?,
         close: FlexArray::full(close_flat, n_rows, n_cols).map_err(to_py_err)?,
-        sl_stop: stop(0)?,
+        sl_stop: price_stop(0, "sl_stop")?,
         sl_trail: FlexArray::Scalar(sl_trail),
-        tsl_stop: stop(1)?,
+        tsl_stop: price_stop(1, "tsl_stop")?,
         tsl_th: stop(2)?,
-        tp_stop: stop(3)?,
+        tp_stop: price_stop(3, "tp_stop")?,
         td_stop: stop(4)?,
         dt_stop: stop(5)?,
+        delta_format: FlexArray::Scalar(crate::parse::delta_format(delta_format).map_err(bad)?),
+        stop_ladder: ladder,
+        stop_order_type: FlexArray::Scalar(crate::parse::order_type(stop_order_type).map_err(bad)?),
+        stop_limit_delta: stop(6)?,
+        limit_order_price: FlexArray::Scalar(
+            crate::parse::limit_order_price(limit_order_price).map_err(bad)?,
+        ),
         short,
         wait,
         until_next,
@@ -336,6 +370,7 @@ pub fn generate_ohlc_stop_exits<'py>(
         columns_out(py, out.exits, n_rows, n_cols)?,
         columns_out(py, out.price, n_rows, n_cols)?,
         columns_out(py, out.kind, n_rows, n_cols)?,
+        columns_out(py, out.size, n_rows, n_cols)?,
     ))
 }
 

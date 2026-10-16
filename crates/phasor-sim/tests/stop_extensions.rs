@@ -15,7 +15,7 @@
 //! and the falling five bars of `limit_orders.rs` for the stop-loss ladder
 //! and stop-limit orders. Every entry is on bar 0 at its close.
 use phasor_core::flex::FlexArray;
-use phasor_model::{OrderType, StopLadderMode};
+use phasor_model::{DeltaFormat, OrderType, StopLadderMode};
 use phasor_records::OrderRecords;
 use phasor_sim::{FromSignals, simulate_from_signals, simulate_from_signals_parallel};
 
@@ -237,4 +237,61 @@ fn the_extended_stops_do_not_depend_on_the_thread_count() {
             simulate_from_signals_parallel(&args, threads).unwrap()
         );
     }
+}
+
+#[test]
+fn delta_format_reads_the_stop_distances() {
+    // A take-profit 8 above 100 is 108, which bar 1 reaches, however written.
+    for (format, tp) in [
+        (DeltaFormat::Absolute, 8.),
+        (DeltaFormat::Percent100, 8.),
+        (DeltaFormat::Target, 108.),
+    ] {
+        let args = FromSignals {
+            tp_stop: FlexArray::scalar(tp),
+            delta_format: FlexArray::scalar(format),
+            ..up()
+        };
+        assert_eq!(run(&args), [(0, 100., 1.), (1, 108., 1.)], "{format:?}");
+    }
+    // 5 below 100 on the falling bars: bar 2's low of 94 reaches 95.
+    let sl = FromSignals {
+        sl_stop: FlexArray::scalar(5.),
+        delta_format: FlexArray::scalar(DeltaFormat::Absolute),
+        ..down()
+    };
+    assert_eq!(run(&sl), [(0, 100., 1.), (2, 95., 1.)]);
+}
+
+#[test]
+fn a_trailing_stop_ladder_steps_back_from_the_best_price() {
+    // Steps 2% and 5% below the best price. Bar 2 opens at 107, under 2%
+    // below bar 1's 110 (107.8): half goes at the open. 5% below 110 is
+    // 104.5, which nothing after reaches.
+    static STEPS: [f64; 2] = [0.02, 0.05];
+    let args = FromSignals {
+        size: FlexArray::scalar(2.),
+        tsl_stop: FlexArray::PerRow(&STEPS),
+        stop_ladder: StopLadderMode::Uniform,
+        ..up()
+    };
+    assert_eq!(run(&args), [(0, 100., 2.), (2, 107., 1.)]);
+}
+
+#[test]
+fn a_time_stop_can_exit_with_a_limit_order() {
+    // Two bars after the entry: at bar 2's open, 107, at market. As a limit
+    // to sell at 109 or better it rests, and bar 3's open of 112 fills it.
+    let market = FromSignals {
+        td_stop: FlexArray::scalar(2.),
+        ..up()
+    };
+    assert_eq!(run(&market), [(0, 100., 1.), (2, 107., 1.)]);
+    let limit = FromSignals {
+        stop_order_type: FlexArray::scalar(OrderType::Limit),
+        stop_limit_delta: FlexArray::scalar(109.),
+        delta_format: FlexArray::scalar(DeltaFormat::Target),
+        ..market
+    };
+    assert_eq!(run(&limit), [(0, 100., 1.), (3, 112., 1.)]);
 }

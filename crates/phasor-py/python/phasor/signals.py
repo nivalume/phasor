@@ -83,6 +83,12 @@ def generate_ohlc_stop_exits(
     wait: int = 1,
     until_next: bool = True,
     skip_until_exit: bool = False,
+    delta_format: str = "percent",
+    stop_ladder: str = "disabled",
+    stop_order_type: str = "market",
+    stop_limit_delta: Any = None,
+    limit_order_price: str = "limit",
+    out: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Where each entry's stops would fire, without running a simulation.
 
@@ -98,16 +104,31 @@ def generate_ohlc_stop_exits(
     ``skip_until_exit=True`` the exits are the stop exits ``from_signals``
     fills for the same entries when it ignores an entry while holding. ``wait``
     is how many bars after the entry the first test is, at least 1.
+
+    ``delta_format`` reads the stop distances as ``from_signals`` does
+    (``"percent"``, ``"percent100"``, ``"absolute"``, ``"target"``).
+    ``stop_ladder`` makes the rows of ``sl_stop``, ``tsl_stop`` and
+    ``tp_stop`` a ladder's steps: one exit per step, each closing part of the
+    position. ``stop_order_type="limit"`` places a stop-limit order where a
+    stop fires, ``stop_limit_delta`` worse, and the exit is where it fills
+    (``limit_order_price`` as in ``from_signals``); not with a ladder.
+    Pass a dict as ``out`` to receive ``out["size"]``: the share of the
+    entry's position each exit closes (1, or a ladder step's part).
     """
     close_2d, one_d = _columns(close, "close")
     entries_2d, _ = _columns(entries, "entries", dtype=bool)
     bar = lambda a, name: None if a is None else _columns(a, name)[0]  # noqa: E731
-    exits, price, kind = _phasor.generate_ohlc_stop_exits(
+    exits, price, kind, size = _phasor.generate_ohlc_stop_exits(
         entries_2d, close_2d, open=bar(open, "open"), high=bar(high, "high"),
         low=bar(low, "low"), sl_stop=_stop(sl_stop, "sl_stop"), sl_trail=bool(sl_trail),
         tsl_stop=_stop(tsl_stop, "tsl_stop"), tsl_th=_stop(tsl_th, "tsl_th"),
         tp_stop=_stop(tp_stop, "tp_stop"), td_stop=_stop(td_stop, "td_stop"),
         dt_stop=_stop(dt_stop, "dt_stop"), short=bool(short), wait=int(wait),
         until_next=bool(until_next), skip_until_exit=bool(skip_until_exit),
+        delta_format=delta_format, stop_ladder=stop_ladder, stop_order_type=stop_order_type,
+        stop_limit_delta=_stop(stop_limit_delta, "stop_limit_delta"),
+        limit_order_price=limit_order_price,
     )
+    if out is not None:
+        out["size"] = restore(size, one_d)
     return restore(exits, one_d), restore(price, one_d), restore(kind, one_d)

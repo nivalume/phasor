@@ -22,17 +22,33 @@
 //!
 //! # Ladders
 //!
-//! With `stop_ladder` on, the rows of `sl_stop` and `tp_stop` are the steps
-//! of a ladder rather than bars: increasing distances, `NaN` after the last.
-//! A step that fires closes part of the position the ladder was armed on —
-//! an equal share of it (`Uniform`), or a share proportional to how far the
-//! step is beyond the one before (`Weighted`) — and arms the next step; the
-//! last step closes what is left, as a stop without a ladder does. Adding to
-//! the position does not re-arm a ladder.
+//! With `stop_ladder` on, the rows of `sl_stop`, `tsl_stop` and `tp_stop`
+//! are the steps of a ladder rather than bars: increasing distances, `NaN`
+//! after the last. A step that fires closes part of the position and arms
+//! the next step; the last step closes what is left, as a stop without a
+//! ladder does. The part:
+//!
+//! | Mode | Each step closes |
+//! |---|---|
+//! | `Uniform` | an equal share of the position the ladder was armed on |
+//! | `Weighted` | a share of it proportional to how far the step is beyond the one before |
+//! | `AdaptUniform` | an equal share of what is left: the position over the steps still to fire |
+//! | `AdaptWeighted` | a share of what is left proportional to the step's distance from the one before over the distance still to go |
+//!
+//! The first two size against the armed position, so a position cut by
+//! something else closes sooner; the adaptive two size against what is held
+//! when the step fires. Adding to the position does not re-arm a ladder.
+//!
+//! # Distances
+//!
+//! `delta_format` says how a distance reads, from the anchor (or, trailing,
+//! the best price): `Percent` a fraction (the reference's), `Percent100` a
+//! percentage, `Absolute` an amount of price, `Target` the level itself. A
+//! ladder takes distances, not levels.
 
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
-use phasor_model::{StopLadderMode, StopUpdateMode};
+use phasor_model::{DeltaFormat, StopLadderMode, StopUpdateMode};
 
 use crate::from_signals::stop_price;
 use crate::state::StopState;
@@ -47,6 +63,7 @@ pub(crate) struct Inputs<'s, 'a> {
     pub(crate) tsl_th: &'s FlexArray<'a, f64>,
     pub(crate) td_stop: &'s FlexArray<'a, f64>,
     pub(crate) dt_stop: &'s FlexArray<'a, f64>,
+    pub(crate) delta_format: &'s FlexArray<'a, DeltaFormat>,
     pub(crate) ladder: StopLadderMode,
 }
 
@@ -57,6 +74,7 @@ impl Inputs<'_, '_> {
     pub(crate) fn on(&self) -> bool {
         let nan = |a: &FlexArray<'_, f64>| matches!(a, FlexArray::Scalar(v) if v.is_nan());
         self.ladder != StopLadderMode::Disabled
+            || !matches!(self.delta_format, FlexArray::Scalar(DeltaFormat::Percent))
             || !nan(self.tsl_stop)
             || !nan(self.td_stop)
             || !nan(self.dt_stop)
@@ -83,12 +101,31 @@ pub(crate) struct Hit {
 }
 
 /// A stop's level for a position: below the anchor for a long's stop-loss
-/// and a short's take-profit, above it otherwise.
-fn level(position: f64, anchor: f64, stop: f64, loss: bool) -> f64 {
-    if (position > 0.0) == loss {
-        anchor * (1.0 - stop)
+/// and a short's take-profit, above it otherwise, `stop` read by `format`.
+pub(crate) fn level(position: f64, anchor: f64, stop: f64, loss: bool, format: DeltaFormat) -> f64 {
+    let below = (position > 0.0) == loss;
+    match format {
+        DeltaFormat::Percent if below => anchor * (1.0 - stop),
+        DeltaFormat::Percent => anchor * (1.0 + stop),
+        DeltaFormat::Percent100 if below => anchor * (1.0 - stop / 100.0),
+        DeltaFormat::Percent100 => anchor * (1.0 + stop / 100.0),
+        DeltaFormat::Absolute if below => anchor - stop,
+        DeltaFormat::Absolute => anchor + stop,
+        DeltaFormat::Target => stop,
+    }
+}
+
+/// Where a stop at `level` fills on a bar: the open when the bar gaps past
+/// it, the level when the bar reaches it, `NaN` otherwise. `below` is a
+/// level the price falls to.
+pub(crate) fn fill(level: f64, below: bool, open: f64, low: f64, high: f64) -> f64 {
+    let gapped = if below { open <= level } else { level <= open };
+    if gapped {
+        open
+    } else if low <= level && level <= high {
+        level
     } else {
-        anchor * (1.0 + stop)
+        f64::NAN
     }
 }
 
@@ -133,12 +170,22 @@ pub(crate) fn test(
         if stop.is_nan() {
             continue;
         }
-        let price = stop_price(position, anchor, stop, open, low, high, loss)?;
+        let price = if stops.delta_format == DeltaFormat::Percent {
+            stop_price(position, anchor, stop, open, low, high, loss)?
+        } else {
+            if stop < 0.0 {
+                return Err(Error::Invariant(
+                    "a stop distance must be 0 or greater".into(),
+                ));
+            }
+            let at = level(position, anchor, stop, loss, stops.delta_format);
+            fill(at, (position > 0.0) == loss, open, low, high)
+        };
         if !price.is_nan() {
             return Ok(Some(Hit {
                 kind,
                 price,
-                level: level(position, anchor, stop, loss),
+                level: level(position, anchor, stop, loss, stops.delta_format),
             }));
         }
     }
@@ -159,18 +206,26 @@ pub(crate) fn trail(stops: &mut StopState, position: f64, high: f64, low: f64) {
     if stops.tsl_stop.is_nan() || position == 0.0 {
         return;
     }
+    // The threshold is a take-profit-like level, read as the distances are.
+    let activation = level(
+        position,
+        stops.tsl_anchor,
+        stops.tsl_th,
+        false,
+        stops.delta_format,
+    );
     if long {
         if high > stops.tsl_price {
             stops.tsl_price = high;
         }
-        if !stops.tsl_active && high >= stops.tsl_anchor * (1.0 + stops.tsl_th) {
+        if !stops.tsl_active && high >= activation {
             stops.tsl_active = true;
         }
     } else {
         if low < stops.tsl_price {
             stops.tsl_price = low;
         }
-        if !stops.tsl_active && low <= stops.tsl_anchor * (1.0 - stops.tsl_th) {
+        if !stops.tsl_active && low <= activation {
             stops.tsl_active = true;
         }
     }
@@ -234,14 +289,28 @@ pub(crate) fn arm(
     position: f64,
 ) -> Result<StopState> {
     let ladder = inputs.ladder != StopLadderMode::Disabled;
-    let (sl, tp) = if ladder {
+    let delta_format = inputs.delta_format.get(row, col);
+    let (sl, tp, tsl) = if ladder {
+        if delta_format == DeltaFormat::Target {
+            return Err(Error::Invariant(
+                "a stop ladder takes distances; delta_format='target' gives levels".into(),
+            ));
+        }
         check_ladder(inputs.sl_stop, col, "sl_stop")?;
+        check_ladder(inputs.tsl_stop, col, "tsl_stop")?;
         check_ladder(inputs.tp_stop, col, "tp_stop")?;
-        (inputs.sl_stop.get(0, col), inputs.tp_stop.get(0, col))
+        (
+            inputs.sl_stop.get(0, col),
+            inputs.tp_stop.get(0, col),
+            inputs.tsl_stop.get(0, col),
+        )
     } else {
-        (inputs.sl_stop.get(row, col), inputs.tp_stop.get(row, col))
+        (
+            inputs.sl_stop.get(row, col),
+            inputs.tp_stop.get(row, col),
+            inputs.tsl_stop.get(row, col),
+        )
     };
-    let tsl = inputs.tsl_stop.get(row, col);
     let th = inputs.tsl_th.get(row, col);
     let td_row = time_row(inputs.td_stop.get(row, col), row, "td_stop")?;
     let dt_row = time_row(inputs.dt_stop.get(row, col), 0, "dt_stop")?;
@@ -260,6 +329,8 @@ pub(crate) fn arm(
         dt_row,
         sl_step: 0,
         tp_step: 0,
+        tsl_step: 0,
+        delta_format,
         ladder_base: position.abs(),
         extended: true,
     })
@@ -298,7 +369,7 @@ pub(crate) fn update(
         }
     }
     let tsl = inputs.tsl_stop.get(row, col);
-    if replace(tsl) {
+    if inputs.ladder == StopLadderMode::Disabled && replace(tsl) {
         let th = inputs.tsl_th.get(row, col);
         stops.tsl_price = anchor;
         stops.tsl_stop = tsl;
@@ -332,8 +403,9 @@ pub(crate) fn ladder_exit(
     }
     let (steps, step, distance) = match kind {
         Kind::StopLoss => (inputs.sl_stop, &mut stops.sl_step, &mut stops.sl_stop),
+        Kind::Trailing => (inputs.tsl_stop, &mut stops.tsl_step, &mut stops.tsl_stop),
         Kind::TakeProfit => (inputs.tp_stop, &mut stops.tp_step, &mut stops.tp_stop),
-        Kind::Trailing | Kind::Time => return None,
+        Kind::Time => return None,
     };
     let n = ladder_len(steps, col);
     let k = *step;
@@ -341,16 +413,17 @@ pub(crate) fn ladder_exit(
         *distance = f64::NAN;
         return None;
     }
-    let share = match inputs.ladder {
-        StopLadderMode::Weighted => {
-            let before = if k == 0 { 0.0 } else { steps.get(k - 1, col) };
-            (steps.get(k, col) - before) / steps.get(n - 1, col)
-        }
-        _ => 1.0 / n as f64,
+    let before = if k == 0 { 0.0 } else { steps.get(k - 1, col) };
+    let gap = steps.get(k, col) - before;
+    let last = steps.get(n - 1, col);
+    let size = match inputs.ladder {
+        StopLadderMode::Weighted => stops.ladder_base * gap / last,
+        StopLadderMode::AdaptUniform => position.abs() / (n - k) as f64,
+        StopLadderMode::AdaptWeighted => position.abs() * gap / (last - before),
+        _ => stops.ladder_base / n as f64,
     };
     *step = k + 1;
     *distance = steps.get(k + 1, col);
-    let size = stops.ladder_base * share;
     (size < position.abs()).then_some(size)
 }
 
@@ -368,6 +441,7 @@ mod tests {
     ) -> Inputs<'s, 'static> {
         const NAN: FlexArray<'static, f64> = FlexArray::Scalar(f64::NAN);
         const NO: FlexArray<'static, bool> = FlexArray::Scalar(false);
+        const PCT: FlexArray<'static, DeltaFormat> = FlexArray::Scalar(DeltaFormat::Percent);
         Inputs {
             sl_stop: sl,
             sl_trail: &NO,
@@ -376,6 +450,7 @@ mod tests {
             tsl_th: &NAN,
             td_stop: &NAN,
             dt_stop: &NAN,
+            delta_format: &PCT,
             ladder,
         }
     }
@@ -501,5 +576,76 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn the_adaptive_ladders_size_against_what_is_held() {
+        static STEPS: [f64; 3] = [0.1, 0.2, 0.4];
+        let tp = FlexArray::PerRow(&STEPS);
+        let none = FlexArray::Scalar(N);
+        // Armed on 10; the second step fires holding 3 (something else sold
+        // the rest): the fixed modes still close their share of 10, at least
+        // what is left, so the step closes it all.
+        for (mode, first, second) in [
+            (StopLadderMode::AdaptUniform, 10.0 / 3.0, Some(1.5)),
+            (StopLadderMode::AdaptWeighted, 2.5, Some(1.0)),
+            (StopLadderMode::Uniform, 10.0 / 3.0, None),
+        ] {
+            let i = inputs(&none, &tp, mode);
+            let mut s = arm(&i, 0, 0, 100.0, 10.0).unwrap();
+            let got = ladder_exit(&i, 0, Kind::TakeProfit, 10.0, &mut s).unwrap();
+            assert!((got - first).abs() < 1e-12, "{mode:?}");
+            let got = ladder_exit(&i, 0, Kind::TakeProfit, 3.0, &mut s);
+            match (got, second) {
+                (Some(g), Some(w)) => assert!((g - w).abs() < 1e-12, "{mode:?}"),
+                (None, None) => {}
+                other => panic!("{mode:?}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_trailing_stop_can_be_a_ladder() {
+        static STEPS: [f64; 2] = [0.1, 0.2];
+        let tsl = FlexArray::PerRow(&STEPS);
+        let none = FlexArray::Scalar(N);
+        let mut i = inputs(&none, &none, StopLadderMode::Uniform);
+        i.tsl_stop = &tsl;
+        let mut s = arm(&i, 0, 0, 100.0, 10.0).unwrap();
+        assert_eq!(s.tsl_stop, 0.1);
+        assert_eq!(ladder_exit(&i, 0, Kind::Trailing, 10.0, &mut s), Some(5.0));
+        assert_eq!((s.tsl_step, s.tsl_stop), (1, 0.2));
+        assert_eq!(ladder_exit(&i, 0, Kind::Trailing, 5.0, &mut s), None);
+    }
+
+    #[test]
+    fn delta_format_reads_a_distance_as_a_fraction_a_percentage_a_price_or_a_level() {
+        for (format, stop, below, above) in [
+            (DeltaFormat::Percent, 0.25, 75.0, 125.0),
+            (DeltaFormat::Percent100, 25.0, 75.0, 125.0),
+            (DeltaFormat::Absolute, 25.0, 75.0, 125.0),
+            (DeltaFormat::Target, 75.0, 75.0, 75.0),
+        ] {
+            // A long's stop-loss is below, its take-profit above.
+            assert_eq!(level(1.0, 100.0, stop, true, format), below, "{format:?}");
+            assert_eq!(level(1.0, 100.0, stop, false, format), above, "{format:?}");
+        }
+        // An absolute stop-loss, tested: 5 below 100 is reached by a low of 94.
+        let s = StopState {
+            sl_price: 100.0,
+            sl_stop: 5.0,
+            delta_format: DeltaFormat::Absolute,
+            ..StopState::cleared()
+        };
+        let hit = test(&s, 1.0, 1, 99.0, 100.0, 94.0).unwrap().unwrap();
+        assert_eq!((hit.price, hit.level), (95.0, 95.0));
+        // A ladder takes distances, not levels.
+        static STEPS: [f64; 2] = [90.0, 80.0];
+        let sl = FlexArray::PerRow(&STEPS);
+        let none = FlexArray::Scalar(N);
+        let target = FlexArray::Scalar(DeltaFormat::Target);
+        let mut i = inputs(&sl, &none, StopLadderMode::Uniform);
+        i.delta_format = &target;
+        assert!(arm(&i, 0, 0, 100.0, 1.0).is_err());
     }
 }

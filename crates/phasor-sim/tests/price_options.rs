@@ -90,7 +90,7 @@ fn the_next_open_executes_the_bar_before_s_order() {
     let size = [1., N, -1., N, N];
     let next_open = FromOrders {
         price_type: FlexArray::scalar(PriceType::Open),
-        from_ago: 1,
+        from_ago: FlexArray::Scalar(1),
         ..orders(&size)
     };
     assert_eq!(
@@ -101,7 +101,7 @@ fn the_next_open_executes_the_bar_before_s_order() {
     let exits = [false, false, true, false, false];
     let next_open = FromSignals {
         price_type: FlexArray::scalar(PriceType::Open),
-        from_ago: 1,
+        from_ago: FlexArray::Scalar(1),
         ..signals(&entries, &exits)
     };
     assert_eq!(
@@ -112,7 +112,7 @@ fn the_next_open_executes_the_bar_before_s_order() {
     let price = [98., N, N, 97.5, N];
     let shifted = FromOrders {
         price: FlexArray::per_row(&price, 5).unwrap(),
-        from_ago: 1,
+        from_ago: FlexArray::Scalar(1),
         ..orders(&[1., N, N, -1., N])
     };
     assert_eq!(

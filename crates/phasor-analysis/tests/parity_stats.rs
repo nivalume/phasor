@@ -156,7 +156,7 @@ fn matches_the_reference_stats_table() {
             margin_basis: FlexArray::scalar(phasor_model::MarginBasis::Notional),
             multiplier: FlexArray::scalar(1.0),
             price_type: FlexArray::scalar(phasor_model::PriceType::Price),
-            from_ago: 0,
+            from_ago: FlexArray::Scalar(0),
             bid_price: FlexArray::scalar(f64::NAN),
             ask_price: FlexArray::scalar(f64::NAN),
             price_area_vio_mode: FlexArray::scalar(phasor_model::PriceAreaVioMode::Ignore),

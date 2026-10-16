@@ -364,3 +364,105 @@ fn a_forced_exit_closes_the_position_in_place_of_the_bar_s_orders() {
         [(0, 100., 1., 0), (2, 95., 1., 1), (3, 103., 1., 0)]
     );
 }
+
+#[test]
+fn the_generated_ladder_and_absolute_exits_are_the_simulation_s() {
+    use phasor_model::{DeltaFormat, StopLadderMode};
+    let mut rng = Lcg(5);
+    let b = bars(&mut rng, 400, 4);
+    let (n_rows, n_cols) = (b.n_rows, b.n_cols);
+    let entries: Vec<bool> = (0..n_rows * n_cols).map(|_| rng.next() < 0.06).collect();
+    let full = |v| matrix(v, n_rows, n_cols);
+    static SL: [f64; 2] = [0.02, 0.04];
+    static TP: [f64; 3] = [0.03, 0.06, 0.09];
+    let configs = [
+        (
+            StopLadderMode::Uniform,
+            DeltaFormat::Percent,
+            &SL[..],
+            &TP[..],
+        ),
+        (
+            StopLadderMode::AdaptWeighted,
+            DeltaFormat::Percent,
+            &SL[..],
+            &TP[..],
+        ),
+        (
+            StopLadderMode::Disabled,
+            DeltaFormat::Absolute,
+            &[2.0][..],
+            &[3.5][..],
+        ),
+    ];
+    for (ladder, format, sl, tp) in configs {
+        let steps = |v: &'static [f64]| FlexArray::PerRow(v);
+        let generated = generate_ohlc_stop_exits(&OhlcStopExits {
+            n_rows,
+            n_cols,
+            entries: FlexArray::full(&entries, n_rows, n_cols).unwrap(),
+            open: full(&b.open),
+            high: full(&b.high),
+            low: full(&b.low),
+            close: full(&b.close),
+            sl_stop: if sl.len() > 1 {
+                steps(sl)
+            } else {
+                FlexArray::scalar(sl[0])
+            },
+            tp_stop: if tp.len() > 1 {
+                steps(tp)
+            } else {
+                FlexArray::scalar(tp[0])
+            },
+            delta_format: FlexArray::scalar(format),
+            stop_ladder: ladder,
+            until_next: false,
+            skip_until_exit: true,
+            ..OhlcStopExits::default()
+        })
+        .unwrap();
+        let simulated = simulate_from_signals(&FromSignals {
+            n_rows,
+            n_cols,
+            init_cash: FlexArray::scalar(1e9),
+            open: full(&b.open),
+            high: full(&b.high),
+            low: full(&b.low),
+            close: full(&b.close),
+            entries: FlexArray::full(&entries, n_rows, n_cols).unwrap(),
+            size: FlexArray::scalar(4.),
+            sl_stop: if sl.len() > 1 {
+                steps(sl)
+            } else {
+                FlexArray::scalar(sl[0])
+            },
+            tp_stop: if tp.len() > 1 {
+                steps(tp)
+            } else {
+                FlexArray::scalar(tp[0])
+            },
+            delta_format: FlexArray::scalar(format),
+            stop_ladder: ladder,
+            ..FromSignals::default()
+        })
+        .unwrap();
+        let mut from_sim = vec![];
+        for k in 0..simulated.len() {
+            if simulated.side[k] == OrderSide::Sell as i8 {
+                let at = simulated.col[k] as usize * n_rows + simulated.idx[k] as usize;
+                from_sim.push((at, simulated.price[k], simulated.size[k]));
+            }
+        }
+        let from_gen: Vec<(usize, f64, f64)> = (0..n_rows * n_cols)
+            .filter(|&k| generated.exits[k])
+            .map(|k| (k, generated.price[k], generated.size[k] * 4.))
+            .collect();
+        assert!(from_gen.len() > 30, "too few exits");
+        assert_eq!(from_gen.len(), from_sim.len(), "{ladder:?} {format:?}");
+        for (g, s) in from_gen.iter().zip(&from_sim) {
+            assert_eq!((g.0, g.1), (s.0, s.1), "{ladder:?} {format:?}");
+            assert!((g.2 - s.2).abs() < 1e-9, "{ladder:?}: {g:?} {s:?}");
+        }
+    }
+}

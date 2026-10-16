@@ -36,7 +36,8 @@
 //! single most common surprise in a shared-cash backtest.
 
 use phasor_core::error::{Error, Result};
-use phasor_model::{Direction, SizeType};
+use phasor_exec::Order;
+use phasor_model::{AccountType, Direction, MarginBasis, SizeType};
 
 /// How columns are partitioned into cash-sharing groups.
 ///
@@ -234,6 +235,8 @@ impl CallSeq<'_> {
                         seq.len()
                     )));
                 }
+                // `values` is scratch here: it marks the columns already called.
+                values[..group_len].fill(0.0);
                 for (k, slot) in out.iter_mut().enumerate() {
                     let idx = seq[(group.start + k) * n_rows + row];
                     if idx >= group_len {
@@ -241,6 +244,12 @@ impl CallSeq<'_> {
                             "call index {idx} is outside a group of {group_len}"
                         )));
                     }
+                    if values[idx] > 0.5 {
+                        return Err(Error::Invariant(format!(
+                            "call index {idx} appears twice on row {row}"
+                        )));
+                    }
+                    values[idx] = 1.0;
                     *slot = idx;
                 }
                 Ok(())
@@ -303,6 +312,44 @@ pub fn approx_order_value(
         SizeType::TargetPercent => size * value - asset_value,
         // Rewritten above.
         SizeType::Percent100 | SizeType::ValuePercent100 | SizeType::TargetPercent100 => f64::NAN,
+    }
+}
+
+/// What an order of approximate value `value` ([`approx_order_value`]) does
+/// to the account's free cash: positive spends, negative releases.
+///
+/// `call_seq = "auto"` sorts on this in a run with leverage or margin
+/// columns, where an order's value is not what it costs: a margin column's
+/// new short sells yet takes margin, and its close releases margin rather
+/// than the notional. The part of the order that reduces the position
+/// releases, the part that opens or adds spends:
+///
+/// - a cash column releases what closing frees and spends `1 / leverage`
+///   of what it opens, the least of its own cash a buy or a short puts up;
+/// - a margin column releases and spends the initial margin of each part,
+///   by `margin_basis` (a fraction of the notional, `NaN` meaning
+///   `1 / leverage`, or cash per contract).
+///
+/// The run's holding charges are paid at the bar's close, after every
+/// order, so they do not enter. Runs with neither keep [`approx_order_value`]
+/// itself, the reference's order.
+#[must_use]
+pub fn approx_cash_need(value: f64, position_value: f64, val_price: f64, order: &Order) -> f64 {
+    let closes = if value * position_value < 0.0 {
+        value.abs().min(position_value.abs())
+    } else {
+        0.0
+    };
+    let opens = value.abs() - closes;
+    if order.account_type == AccountType::Margin {
+        let rate = match order.margin_basis {
+            MarginBasis::Notional if order.initial_margin.is_nan() => 1.0 / order.leverage,
+            MarginBasis::Notional => order.initial_margin,
+            MarginBasis::Unit => order.initial_margin / val_price,
+        };
+        (opens - closes) * rate
+    } else {
+        opens / order.leverage - closes
     }
 }
 

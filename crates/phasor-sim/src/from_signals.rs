@@ -57,7 +57,7 @@ use phasor_model::{
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
 use crate::from_orders::updated_value;
-use crate::groups::{CallSeq, Groups, approx_order_value};
+use crate::groups::{CallSeq, Groups, approx_cash_need, approx_order_value};
 use crate::signals::{
     Signals, from_stop, resolve_dir_conflict, resolve_opposite_entry, resolve_pending_conflict,
     resolve_signal_conflict, size_signals,
@@ -116,7 +116,9 @@ pub struct FromSignals<'a> {
     pub price_type: FlexArray<'a, PriceType>,
     /// How many bars before the one an order executes on it was decided:
     /// its signals, size, size type and an explicit price are read there.
-    pub from_ago: usize,
+    /// Read on the executing bar, per column or per bar: a bar whose
+    /// `from_ago` reaches before the first row executes nothing.
+    pub from_ago: FlexArray<'a, usize>,
     /// Where given, what a sell executes at in place of the order price.
     pub bid_price: FlexArray<'a, f64>,
     /// Where given, what a buy executes at in place of the order price.
@@ -226,7 +228,9 @@ pub struct FromSignals<'a> {
     /// How far from the order price a limit order rests, in `delta_format`,
     /// read on the bar it is placed. `NaN` is at the order price.
     pub limit_delta: FlexArray<'a, f64>,
-    /// How `limit_delta` is read.
+    /// How `limit_delta`, `stop_limit_delta` and the stop distances
+    /// (`sl_stop`, `tsl_stop`, `tsl_th`, `tp_stop`) are read, on the bar an
+    /// order is placed or a position opened.
     pub delta_format: FlexArray<'a, DeltaFormat>,
     /// Whether a limit order fills with the market moving through it the
     /// other way: a buy at or above it, a sell at or below. A breakout entry.
@@ -265,10 +269,12 @@ pub struct FromSignals<'a> {
     pub td_stop: FlexArray<'a, f64>,
     /// Exit at the open of this row. `NaN` disables it.
     pub dt_stop: FlexArray<'a, f64>,
-    /// Whether `sl_stop` and `tp_stop` are ladders, their rows steps.
+    /// Whether `sl_stop`, `tsl_stop` and `tp_stop` are ladders, their rows
+    /// steps, and how a step's share is sized. See [`crate::stops`].
     pub stop_ladder: StopLadderMode,
-    /// Whether a fired price stop exits at market or places a limit order at
-    /// its level, `stop_limit_delta` worse (a stop-limit order).
+    /// Whether a fired stop exits at market or places a limit order at its
+    /// level (a time stop's: the open), `stop_limit_delta` worse (a
+    /// stop-limit order).
     pub stop_order_type: FlexArray<'a, OrderType>,
     /// How far beyond a stop's level its limit order rests, in
     /// `delta_format`. `NaN` is at the level.
@@ -342,7 +348,7 @@ impl Default for FromSignals<'_> {
             size_type: FlexArray::Scalar(SizeType::Amount),
             price: FlexArray::Scalar(f64::INFINITY),
             price_type: FlexArray::Scalar(PriceType::Price),
-            from_ago: 0,
+            from_ago: FlexArray::Scalar(0),
             bid_price: FlexArray::Scalar(f64::NAN),
             ask_price: FlexArray::Scalar(f64::NAN),
             price_area_vio_mode: FlexArray::Scalar(PriceAreaVioMode::Ignore),
@@ -618,6 +624,7 @@ impl FromSignals<'_> {
             tsl_th: &self.tsl_th,
             td_stop: &self.td_stop,
             dt_stop: &self.dt_stop,
+            delta_format: &self.delta_format,
             ladder: self.stop_ladder,
         }
     }
@@ -806,7 +813,7 @@ fn prepare_order<const EXTENDED: bool>(
     // to reach for and falls back to the previous close.
     // The row the bar's order was decided on (`from_ago`), if it exists.
     let src = if EXTENDED {
-        crate::prices::source_row(i, args.from_ago)
+        crate::prices::source_row(i, args.from_ago.get(i, col))
     } else {
         Some(i)
     };
@@ -1047,17 +1054,17 @@ fn prepare_order<const EXTENDED: bool>(
         // The stop fills in the column, which cancels a resting order.
         state.limit = LimitOrder::none();
         if let Some(h) = hit {
-            if h.kind != crate::stops::Kind::Time
-                && sized.size != 0.0
-                && args.stop_order_type.get(i, col) == OrderType::Limit
-            {
+            if sized.size != 0.0 && args.stop_order_type.get(i, col) == OrderType::Limit {
                 if !partial {
                     // The stop has fired; its order now does its work.
                     match h.kind {
                         crate::stops::Kind::StopLoss => state.stops.sl_stop = f64::NAN,
                         crate::stops::Kind::Trailing => state.stops.tsl_stop = f64::NAN,
                         crate::stops::Kind::TakeProfit => state.stops.tp_stop = f64::NAN,
-                        crate::stops::Kind::Time => {}
+                        crate::stops::Kind::Time => {
+                            state.stops.td_row = usize::MAX;
+                            state.stops.dt_row = usize::MAX;
+                        }
                     }
                 }
                 return stop_limit_order(args, i, col, state, h, sized);
@@ -1211,7 +1218,7 @@ fn follow_up(
 ) -> Result<Option<Pending>> {
     let user = user_order::<true>(
         args,
-        crate::prices::source_row(i, args.from_ago),
+        crate::prices::source_row(i, args.from_ago.get(i, col)),
         col,
         state.position,
         state.last_val_price * multiplier,
@@ -1544,7 +1551,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     m != PendingConflictMode::KeepIgnore
                 }) > 0
             })
-        || args.from_ago > 0
+        || !matches!(args.from_ago, FlexArray::Scalar(0))
         || !matches!(args.force_exit, FlexArray::Scalar(false))
         || args.order_mode
         || args.quotes().on()
@@ -1710,20 +1717,31 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             if args.call_seq == CallSeq::Auto {
                 for (k, p) in pending.iter().enumerate() {
                     order_values[k] = p.as_ref().map_or(0.0, |p| {
-                        approx_order_value(
+                        let val_price = if LEV {
+                            states[k].last_val_price * mult[k]
+                        } else {
+                            states[k].last_val_price
+                        };
+                        let value = approx_order_value(
                             p.size,
                             p.size_type,
                             p.direction,
                             cash,
                             states[k].position,
                             free_cash,
-                            if LEV {
-                                states[k].last_val_price * mult[k]
-                            } else {
-                                states[k].last_val_price
-                            },
+                            val_price,
                             group_value,
-                        )
+                        );
+                        if LEV {
+                            approx_cash_need(
+                                value,
+                                states[k].position * val_price,
+                                val_price,
+                                orders[k].order(),
+                            )
+                        } else {
+                            value
+                        }
                     });
                 }
             }

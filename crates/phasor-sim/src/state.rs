@@ -7,7 +7,7 @@
 //! are still locals of the loops; they join it when something reads them.
 
 use phasor_exec::{Direction, SizeType};
-use phasor_model::LimitOrderPrice;
+use phasor_model::{DeltaFormat, LimitOrderPrice};
 
 /// One column's state between bars.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,6 +98,10 @@ pub struct StopState {
     pub sl_step: usize,
     /// The take-profit ladder's current step.
     pub tp_step: usize,
+    /// The trailing stop ladder's current step.
+    pub tsl_step: usize,
+    /// How the distances read: fractions, percentages, prices or levels.
+    pub delta_format: DeltaFormat,
     /// The size of the position the ladders were armed on.
     pub ladder_base: f64,
     /// Whether the stops were armed by [`crate::stops`], which a trailing
@@ -124,6 +128,8 @@ impl StopState {
             dt_row: usize::MAX,
             sl_step: 0,
             tp_step: 0,
+            tsl_step: 0,
+            delta_format: DeltaFormat::Percent,
             ladder_base: 0.0,
             extended: false,
         }

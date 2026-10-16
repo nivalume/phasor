@@ -84,6 +84,7 @@ pub(crate) fn limit_price(
         };
         match format {
             DeltaFormat::Percent => price * (1.0 + away),
+            DeltaFormat::Percent100 => price * (1.0 + away / 100.0),
             _ => price + away,
         }
     };

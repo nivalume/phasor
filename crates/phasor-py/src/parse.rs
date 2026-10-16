@@ -287,8 +287,9 @@ pub fn delta_format(name: &str) -> Result<DeltaFormat, String> {
         "percent" => Ok(DeltaFormat::Percent),
         "absolute" => Ok(DeltaFormat::Absolute),
         "target" => Ok(DeltaFormat::Target),
+        "percent100" => Ok(DeltaFormat::Percent100),
         other => Err(format!(
-            "delta_format must be 'percent', 'absolute' or 'target'; got {other:?}"
+            "delta_format must be 'percent', 'percent100', 'absolute' or 'target'; got {other:?}"
         )),
     }
 }
@@ -353,8 +354,11 @@ pub fn stop_ladder(name: &str) -> Result<StopLadderMode, String> {
         "disabled" => Ok(StopLadderMode::Disabled),
         "uniform" => Ok(StopLadderMode::Uniform),
         "weighted" => Ok(StopLadderMode::Weighted),
+        "adaptuniform" => Ok(StopLadderMode::AdaptUniform),
+        "adaptweighted" => Ok(StopLadderMode::AdaptWeighted),
         other => Err(format!(
-            "stop_ladder must be 'disabled', 'uniform' or 'weighted'; got {other:?}"
+            "stop_ladder must be 'disabled', 'uniform', 'weighted', 'adaptuniform' or \
+             'adaptweighted'; got {other:?}"
         )),
     }
 }
@@ -379,6 +383,10 @@ mod tests {
         );
         assert_eq!(stop_ladder("disabled").unwrap(), StopLadderMode::Disabled);
         assert_eq!(stop_ladder("uniform").unwrap(), StopLadderMode::Uniform);
+        assert_eq!(
+            stop_ladder("adaptweighted").unwrap(),
+            StopLadderMode::AdaptWeighted
+        );
         assert_eq!(stop_ladder("weighted").unwrap(), StopLadderMode::Weighted);
         assert!(price_type("nextopen").is_err());
         assert!(price_area_vio_mode("clip").is_err());

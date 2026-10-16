@@ -15,10 +15,16 @@
 //! - `skip_until_exit` ignores the entries before an entry's exit, as a
 //!   simulation holding the position would. Without it each entry searches
 //!   on its own, and a bar two of them exit on keeps the first's exit.
+//! - A ladder (`stop_ladder`) exits once per step, each closing the share
+//!   of the entry's position `size` says; the last step closes the rest.
+//! - `stop_order_type = Limit` places a stop-limit order where a price stop
+//!   fires, `stop_limit_delta` worse than its level; the exit is where that
+//!   order fills, which may be a later bar or none. It cannot be combined
+//!   with a ladder here.
 
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
-use phasor_model::StopLadderMode;
+use phasor_model::{DeltaFormat, LimitOrderPrice, OrderType, StopLadderMode};
 
 use crate::stops::{self, Kind};
 
@@ -55,6 +61,17 @@ pub struct OhlcStopExits<'a> {
     pub td_stop: FlexArray<'a, f64>,
     /// Exit on this row.
     pub dt_stop: FlexArray<'a, f64>,
+    /// How the stop distances read. See [`crate::stops`].
+    pub delta_format: FlexArray<'a, DeltaFormat>,
+    /// Whether the rows of `sl_stop`, `tsl_stop` and `tp_stop` are a
+    /// ladder's steps.
+    pub stop_ladder: StopLadderMode,
+    /// Whether a price stop that fires exits at market or places a limit.
+    pub stop_order_type: FlexArray<'a, OrderType>,
+    /// How much worse than the stop's level its limit is.
+    pub stop_limit_delta: FlexArray<'a, f64>,
+    /// What a stop-limit order fills at. See [`crate::limit`].
+    pub limit_order_price: FlexArray<'a, LimitOrderPrice>,
     /// Whether the positions are short, which mirrors every stop.
     pub short: bool,
     /// Bars after the entry before the first test; at least 1.
@@ -82,6 +99,11 @@ impl Default for OhlcStopExits<'_> {
             tp_stop: FlexArray::Scalar(f64::NAN),
             td_stop: FlexArray::Scalar(f64::NAN),
             dt_stop: FlexArray::Scalar(f64::NAN),
+            delta_format: FlexArray::Scalar(DeltaFormat::Percent),
+            stop_ladder: StopLadderMode::Disabled,
+            stop_order_type: FlexArray::Scalar(OrderType::Market),
+            stop_limit_delta: FlexArray::Scalar(f64::NAN),
+            limit_order_price: FlexArray::Scalar(LimitOrderPrice::Limit),
             short: false,
             wait: 1,
             until_next: true,
@@ -100,6 +122,19 @@ pub struct StopExits {
     /// Which stop: 0 stop-loss, 1 trailing, 2 take-profit, 3 time; `-1`
     /// elsewhere.
     pub kind: Vec<i8>,
+    /// The share of the entry's position the exit closes: 1 but for a
+    /// ladder's steps; `NaN` elsewhere.
+    pub size: Vec<f64>,
+}
+
+/// One exit of an entry: its bar, where it filled, which stop, and the
+/// share of the position it closed.
+#[derive(Debug, Clone, Copy)]
+struct Exit {
+    row: usize,
+    price: f64,
+    kind: Kind,
+    size: f64,
 }
 
 const fn kind_code(kind: Kind) -> i8 {
@@ -128,6 +163,7 @@ pub fn generate_ohlc_stop_exits(args: &OhlcStopExits<'_>) -> Result<StopExits> {
         exits: vec![false; n_rows * n_cols],
         price: vec![f64::NAN; n_rows * n_cols],
         kind: vec![-1; n_rows * n_cols],
+        size: vec![f64::NAN; n_rows * n_cols],
     };
     let inputs = stops::Inputs {
         sl_stop: &args.sl_stop,
@@ -137,9 +173,11 @@ pub fn generate_ohlc_stop_exits(args: &OhlcStopExits<'_>) -> Result<StopExits> {
         tsl_th: &args.tsl_th,
         td_stop: &args.td_stop,
         dt_stop: &args.dt_stop,
-        ladder: StopLadderMode::Disabled,
+        delta_format: &args.delta_format,
+        ladder: args.stop_ladder,
     };
     let position = if args.short { -1.0 } else { 1.0 };
+    let mut exits = Vec::new();
     for col in 0..n_cols {
         let mut row = 0;
         while row < n_rows {
@@ -147,19 +185,21 @@ pub fn generate_ohlc_stop_exits(args: &OhlcStopExits<'_>) -> Result<StopExits> {
                 row += 1;
                 continue;
             }
-            let (exit, stopped) = search(args, &inputs, row, col, position)?;
-            if let Some((at, hit)) = exit {
-                let k = col * n_rows + at;
+            exits.clear();
+            let (closed, stopped) = search(args, &inputs, row, col, position, &mut exits)?;
+            for e in &exits {
+                let k = col * n_rows + e.row;
                 if !out.exits[k] {
                     out.exits[k] = true;
-                    out.price[k] = hit.price;
-                    out.kind[k] = kind_code(hit.kind);
+                    out.price[k] = e.price;
+                    out.kind[k] = kind_code(e.kind);
+                    out.size[k] = e.size;
                 }
             }
             row = if !args.skip_until_exit {
                 row + 1
-            } else if let Some((at, _)) = exit {
-                at + 1
+            } else if closed {
+                exits.last().map_or(stopped, |e| e.row + 1)
             } else {
                 stopped
             };
@@ -168,17 +208,24 @@ pub fn generate_ohlc_stop_exits(args: &OhlcStopExits<'_>) -> Result<StopExits> {
     Ok(out)
 }
 
-/// One entry's search: the bar its stops fire on, if any, and the row the
-/// search stopped at — the next entry under `until_next`, or the last bar.
+/// One entry's search, pushing its exits: whether the position was closed,
+/// and the row the search stopped at — the next entry under `until_next`,
+/// or the last bar.
 fn search(
     args: &OhlcStopExits<'_>,
     inputs: &stops::Inputs<'_, '_>,
     entry: usize,
     col: usize,
     position: f64,
-) -> Result<(Option<(usize, stops::Hit)>, usize)> {
+    exits: &mut Vec<Exit>,
+) -> Result<(bool, usize)> {
     let anchor = args.close.get(entry, col);
     let mut state = stops::arm(inputs, entry, col, anchor, position)?;
+    let mut held = position.abs();
+    // A stop-limit order waiting to fill: its level, and the stop it is for.
+    let mut resting: Option<(f64, Kind, LimitOrderPrice)> = None;
+    // An exit sells a long and buys back a short.
+    let buy = position < 0.0;
     for row in entry + 1..args.n_rows {
         let close = args.close.get(row, col);
         let mut open = args.open.get(row, col);
@@ -194,16 +241,91 @@ fn search(
             low = open.min(close);
         }
         if row >= entry + args.wait {
-            if let Some(hit) = stops::test(&state, position, row, open, high, low)? {
-                return Ok((Some((row, hit)), row));
+            if let Some((level, kind, order_price)) = resting {
+                let price = crate::limit::fill_price(
+                    level,
+                    buy,
+                    false,
+                    order_price,
+                    open,
+                    high,
+                    low,
+                    close,
+                );
+                if !price.is_nan() {
+                    exits.push(Exit {
+                        row,
+                        price,
+                        kind,
+                        size: held,
+                    });
+                    return Ok((true, row));
+                }
+            } else if let Some(hit) = stops::test(&state, position, row, open, high, low)? {
+                if args.stop_order_type.get(row, col) == OrderType::Limit {
+                    if inputs.ladder != StopLadderMode::Disabled {
+                        return Err(Error::Invariant(
+                            "stop exits cannot combine a ladder with stop-limit orders".into(),
+                        ));
+                    }
+                    let level = crate::limit::limit_price(
+                        hit.level,
+                        buy,
+                        true,
+                        args.stop_limit_delta.get(row, col),
+                        args.delta_format.get(row, col),
+                    )?;
+                    let order_price = args.limit_order_price.get(row, col);
+                    let price = crate::limit::fill_price(
+                        level,
+                        buy,
+                        false,
+                        order_price,
+                        hit.price,
+                        f64::NAN,
+                        f64::NAN,
+                        close,
+                    );
+                    if !price.is_nan() {
+                        exits.push(Exit {
+                            row,
+                            price,
+                            kind: hit.kind,
+                            size: held,
+                        });
+                        return Ok((true, row));
+                    }
+                    resting = Some((level, hit.kind, order_price));
+                } else {
+                    match stops::ladder_exit(inputs, col, hit.kind, held * position, &mut state) {
+                        Some(part) => {
+                            exits.push(Exit {
+                                row,
+                                price: hit.price,
+                                kind: hit.kind,
+                                size: part,
+                            });
+                            held -= part;
+                        }
+                        None => {
+                            exits.push(Exit {
+                                row,
+                                price: hit.price,
+                                kind: hit.kind,
+                                size: held,
+                            });
+                            return Ok((true, row));
+                        }
+                    }
+                }
             }
         }
         if args.until_next && args.entries.get(row, col) {
-            return Ok((None, row));
+            return Ok((false, row));
         }
         stops::trail(&mut state, position, high, low);
     }
-    Ok((None, args.n_rows))
+    Ok((false, args.n_rows))
 }
 
 #[cfg(test)]
@@ -290,5 +412,47 @@ mod tests {
         })
         .unwrap();
         assert_eq!((out.exits[2], out.price[2], out.kind[2]), (true, 97., 3));
+    }
+
+    #[test]
+    fn a_ladder_exits_once_per_step() {
+        static STEPS: [f64; 2] = [0.02, 0.05];
+        let entries = [true, false, false, false, false];
+        let out = generate_ohlc_stop_exits(&OhlcStopExits {
+            sl_stop: FlexArray::PerRow(&STEPS),
+            stop_ladder: StopLadderMode::Uniform,
+            ..bars(&entries)
+        })
+        .unwrap();
+        // 98 on bar 1, 95 on bar 2: half each.
+        assert_eq!(out.exits, [false, true, true, false, false]);
+        assert_eq!((out.price[1], out.price[2]), (98., 95.));
+        assert_eq!((out.size[1], out.size[2]), (0.5, 0.5));
+        assert!(out.size[0].is_nan());
+    }
+
+    #[test]
+    fn a_stop_limit_exit_is_where_its_limit_fills() {
+        let entries = [true, false, false, false, false];
+        let out = generate_ohlc_stop_exits(&OhlcStopExits {
+            // 93.5; bar 3 gaps to 93, below the limit 0.1% under the level,
+            // which a sell then waits on: bar 4 opens at 95 and fills it.
+            sl_stop: FlexArray::scalar(0.065),
+            stop_order_type: FlexArray::scalar(OrderType::Limit),
+            stop_limit_delta: FlexArray::scalar(0.001),
+            ..bars(&entries)
+        })
+        .unwrap();
+        assert_eq!(out.exits, [false, false, false, false, true]);
+        assert_eq!((out.price[4], out.kind[4], out.size[4]), (95., 0, 1.));
+        // Without the delta the gap price is the limit's own, and fills.
+        let out = generate_ohlc_stop_exits(&OhlcStopExits {
+            sl_stop: FlexArray::scalar(0.07),
+            stop_order_type: FlexArray::scalar(OrderType::Limit),
+            ..bars(&entries)
+        })
+        .unwrap();
+        assert_eq!(out.exits, [false, false, false, true, false]);
+        assert_eq!(out.price[3], 93.);
     }
 }
