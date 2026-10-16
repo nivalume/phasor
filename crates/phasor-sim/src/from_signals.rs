@@ -320,6 +320,28 @@ pub struct FromSignals<'a> {
     /// A margin column's maintenance margin, in `margin_basis`. `NaN` or zero
     /// carries none. See [`crate::FromOrders::maintenance_margin`].
     pub maintenance_margin: FlexArray<'a, f64>,
+    /// The maintenance margin of a cash column, as a fraction of the
+    /// position's notional below 1: the equity a margin-lending account
+    /// (borrowing cash under `leverage`, or shares to short) must keep. Below
+    /// it the account's cash columns that carry one are liquidated as margin
+    /// columns are. `NaN` or zero, the default, carries none: a cash column
+    /// is then collateral and never closed. See [`crate::liquidation`].
+    pub cash_maintenance_margin: FlexArray<'a, f64>,
+    /// A tier table of maintenance margins by notional, replacing
+    /// `maintenance_margin` where given: the rows are tiers, `NaN` after the
+    /// last; `margin_tier_rate[t]` applies up to `margin_tier_notional[t]`
+    /// (the last tier's bound is ignored). Margin columns with a notional
+    /// basis only. See [`crate::liquidation`].
+    pub margin_tier_notional: FlexArray<'a, f64>,
+    /// The tiers' maintenance margin rates. See `margin_tier_notional`.
+    pub margin_tier_rate: FlexArray<'a, f64>,
+    /// The fraction of a position each breach closes, in `(0, 1]`; `NaN`,
+    /// the default, closes it all. See [`crate::liquidation`].
+    pub liquidation_step: FlexArray<'a, f64>,
+    /// Bars on which an exchange deleverages: a margin column's position is
+    /// closed at the mark price (the close without one), with no fee. See
+    /// [`crate::liquidation`].
+    pub auto_deleverage: FlexArray<'a, bool>,
     /// What a liquidation fill pays, as a fraction of its notional.
     pub liquidation_fee: FlexArray<'a, f64>,
     /// Whether a margin column draws on the account's margin or only its
@@ -427,6 +449,11 @@ impl Default for FromSignals<'_> {
             borrow_rate: FlexArray::Scalar(0.0),
             mark_price: FlexArray::Scalar(f64::NAN),
             maintenance_margin: FlexArray::Scalar(0.0),
+            cash_maintenance_margin: FlexArray::Scalar(f64::NAN),
+            margin_tier_notional: FlexArray::Scalar(f64::NAN),
+            margin_tier_rate: FlexArray::Scalar(f64::NAN),
+            liquidation_step: FlexArray::Scalar(f64::NAN),
+            auto_deleverage: FlexArray::Scalar(false),
             liquidation_fee: FlexArray::Scalar(0.0),
             margin_mode: FlexArray::Scalar(MarginMode::Cross),
             ffill_val_price: true,
@@ -604,6 +631,10 @@ impl FromSignals<'_> {
     fn liquidation(&self) -> crate::liquidation::Inputs<'_, '_> {
         crate::liquidation::Inputs {
             maintenance_margin: &self.maintenance_margin,
+            cash_maintenance_margin: &self.cash_maintenance_margin,
+            tier_bounds: &self.margin_tier_notional,
+            tier_rates: &self.margin_tier_rate,
+            liquidation_step: &self.liquidation_step,
             liquidation_fee: &self.liquidation_fee,
             mark_price: &self.mark_price,
             open: &self.open,
@@ -650,6 +681,7 @@ impl FromSignals<'_> {
             self.n_rows,
             self.n_cols,
         ) || !self.rates().all_off()
+            || !self.liquidation().cash_off()
     }
 
     /// Resolves the default grouping and validates its width.
@@ -1552,6 +1584,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             margin: &margin,
             isolated: &isolated,
             mult: &mult,
+            scaled_val_price: false,
         };
         crate::initial::open(
             &args.init_position,
@@ -1588,8 +1621,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         || args.order_mode
         || args.quotes().on()
         || ext_stops;
-    let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
-    let mut on_path = Vec::new();
+    let liquidates = LEV && {
+        let inputs = args.liquidation();
+        ((!inputs.off() || !matches!(args.auto_deleverage, FlexArray::Scalar(false)))
+            && margin.contains(&true))
+            || !inputs.cash_off()
+    };
     let mut to_close = Vec::new();
     // The size checks the sizing step makes are column-constant when the size
     // is; doing them here lets a quiet bar skip that step. They are made at
@@ -1620,13 +1657,6 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             || !crate::cash::is_off(&args.cash_dividends));
     let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
     let charges = LEV && !args.rates().all_off();
-    let held = |states: &[ColumnState], k: usize| crate::holding::Held {
-        position: states[k].position,
-        debt: states[k].debt,
-        margin: margin[k],
-        val_price: states[k].last_val_price * mult[k],
-        multiplier: mult[k],
-    };
     for i in 0..args.n_rows {
         if at_open {
             crate::cash::at_open(
@@ -1694,7 +1724,6 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 &mut pending,
                 &mut cash,
                 &mut free_cash,
-                &mut on_path,
                 &mut to_close,
                 sink,
                 fills,
@@ -1718,7 +1747,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     &args.rates(),
                     i,
                     cols.clone(),
-                    |k| held(&states, k),
+                    crate::holding::Columns {
+                        states: &mut states,
+                        margin: &margin,
+                        isolated: &isolated,
+                        mult: &mult,
+                        scaled_val_price: false,
+                    },
                     &mut cash,
                     &mut free_cash,
                     sink,
@@ -2025,7 +2060,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 &args.rates(),
                 i,
                 cols.clone(),
-                |k| held(&states, k),
+                crate::holding::Columns {
+                    states: &mut states,
+                    margin: &margin,
+                    isolated: &isolated,
+                    mult: &mult,
+                    scaled_val_price: false,
+                },
                 &mut cash,
                 &mut free_cash,
                 sink,
@@ -2069,68 +2110,88 @@ fn liquidate<S: RecordSink + LogSink>(
     pending: &mut [Option<Pending>],
     cash: &mut f64,
     free_cash: &mut f64,
-    on_path: &mut Vec<crate::liquidation::Held>,
-    to_close: &mut Vec<(usize, f64)>,
+    to_close: &mut Vec<crate::liquidation::Close>,
     sink: &mut S,
     fills: &mut i64,
 ) -> Result<bool> {
     let (margin, isolated, mult) = (books.margin, books.isolated, books.mult);
     let inputs = args.liquidation();
-    crate::liquidation::test(
-        &inputs,
-        row,
-        cols.clone(),
-        |k| crate::liquidation::Column {
-            position: states[k].position,
-            owed: states[k].owed(margin[k]),
-            locked_cash: states[k].locked_cash,
-            margin: margin[k],
-            isolated: isolated[k],
-            basis: args.margin_basis.get(row, cols.start + k),
-            val_price: states[k].last_val_price * mult[k],
-            stop: pending[k].map_or(f64::NAN, |p| p.stop_hit),
-            multiplier: mult[k],
-        },
-        *cash,
-        on_path,
-        to_close,
-    )?;
+    let start: Vec<f64> = states.iter().map(|st| st.position.abs()).collect();
+    let mut on_path = Vec::new();
+    let mut from = 0.0;
     let mut cross = false;
-    for &(k, price) in to_close.iter() {
-        let st = states[k];
-        let before = ProcessOrderState {
-            cash: *cash,
-            position: st.position,
-            debt: st.debt,
-            locked_cash: st.locked_cash,
-            free_cash: *free_cash,
-            val_price: st.last_val_price * mult[k],
-            value: group_value(*cash, states, margin, mult),
-            oidx: 0,
-            lidx: 0,
-        };
-        let at = crate::liquidation::At {
-            group,
+    for round in 0..crate::liquidation::ROUNDS {
+        crate::liquidation::test(
+            &inputs,
             row,
-            col: cols.start + k,
-            template: books.orders[k].order(),
-            isolated: isolated[k],
-            multiplier: mult[k],
-        };
-        let after = crate::liquidation::fill(&inputs, &at, price, &before, sink, fills)?;
-        let returned = after.free_cash - *free_cash;
-        *cash = after.cash;
-        *free_cash = after.free_cash;
-        states[k].position = after.position;
-        states[k].debt = after.debt;
-        states[k].locked_cash = after.locked_cash;
-        states[k].stops = StopState::cleared();
-        states[k].limit = LimitOrder::none();
-        pending[k] = None;
-        if isolated[k] {
-            crate::liquidation::write_off(returned, row, at.col, cash, free_cash, sink);
-        } else {
-            cross = true;
+            cols.clone(),
+            |k| crate::liquidation::Column {
+                position: states[k].position,
+                owed: states[k].owed(margin[k]),
+                locked_cash: states[k].locked_cash,
+                margin: margin[k],
+                isolated: isolated[k],
+                basis: args.margin_basis.get(row, cols.start + k),
+                val_price: states[k].last_val_price * mult[k],
+                stop: pending[k].map_or(f64::NAN, |p| p.stop_hit),
+                multiplier: mult[k],
+            },
+            *cash,
+            from,
+            &mut on_path,
+            to_close,
+        )?;
+        if to_close.is_empty() {
+            break;
+        }
+        for c in to_close.iter() {
+            let k = c.k;
+            let col = cols.start + k;
+            let st = states[k];
+            let size = crate::liquidation::step_size(
+                inputs.step(row, col)?,
+                st.position,
+                start[k],
+                round + 1 == crate::liquidation::ROUNDS,
+            );
+            let before = ProcessOrderState {
+                cash: *cash,
+                position: st.position,
+                debt: st.debt,
+                locked_cash: st.locked_cash,
+                free_cash: *free_cash,
+                val_price: st.last_val_price * mult[k],
+                value: group_value(*cash, states, margin, mult),
+                oidx: 0,
+                lidx: 0,
+            };
+            let at = crate::liquidation::At {
+                group,
+                row,
+                col,
+                template: books.orders[k].order(),
+                isolated: isolated[k],
+                margin: margin[k],
+                multiplier: mult[k],
+            };
+            let after =
+                crate::liquidation::fill(&inputs, &at, c.price, size, None, &before, sink, fills)?;
+            let returned = after.free_cash - *free_cash;
+            *cash = after.cash;
+            *free_cash = after.free_cash;
+            states[k].position = after.position;
+            states[k].debt = after.debt;
+            states[k].locked_cash = after.locked_cash;
+            // Its orders were sized against what it held.
+            states[k].stops = StopState::cleared();
+            states[k].limit = LimitOrder::none();
+            pending[k] = None;
+            if !isolated[k] {
+                cross = true;
+            } else if after.position == 0.0 {
+                crate::liquidation::write_off(returned, row, col, cash, free_cash, sink);
+            }
+            from = f64::max(from, c.alpha);
         }
     }
     if cross {
@@ -2146,6 +2207,59 @@ fn liquidate<S: RecordSink + LogSink>(
             free_cash,
             sink,
         );
+    }
+    if !matches!(args.auto_deleverage, FlexArray::Scalar(false)) {
+        for (k, col) in cols.clone().enumerate() {
+            let st = states[k];
+            if !margin[k] || st.position == 0.0 || !args.auto_deleverage.get(row, col) {
+                continue;
+            }
+            let mut price = args.mark_price.get(row, col);
+            if price.is_nan() {
+                price = args.close.get(row, col);
+            }
+            if price.is_nan() {
+                continue;
+            }
+            let before = ProcessOrderState {
+                cash: *cash,
+                position: st.position,
+                debt: st.debt,
+                locked_cash: st.locked_cash,
+                free_cash: *free_cash,
+                val_price: st.last_val_price * mult[k],
+                value: group_value(*cash, states, margin, mult),
+                oidx: 0,
+                lidx: 0,
+            };
+            let at = crate::liquidation::At {
+                group,
+                row,
+                col,
+                template: books.orders[k].order(),
+                isolated: isolated[k],
+                margin: true,
+                multiplier: mult[k],
+            };
+            let after = crate::liquidation::fill(
+                &inputs,
+                &at,
+                price * mult[k],
+                f64::NAN,
+                Some(0.0),
+                &before,
+                sink,
+                fills,
+            )?;
+            *cash = after.cash;
+            *free_cash = after.free_cash;
+            states[k].position = after.position;
+            states[k].debt = after.debt;
+            states[k].locked_cash = after.locked_cash;
+            states[k].stops = StopState::cleared();
+            states[k].limit = LimitOrder::none();
+            pending[k] = None;
+        }
     }
     Ok(pending.iter().any(Option::is_some))
 }

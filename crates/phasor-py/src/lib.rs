@@ -1115,7 +1115,7 @@ fn deposits_view<'a>(
     leverage_mode = "lazy",
     account_type = None,
     initial_margin = None,
-    margin_basis = "notional",
+    margin_basis = None,
     multiplier = None,
     init_position = None,
     init_price = None,
@@ -1174,6 +1174,11 @@ fn deposits_view<'a>(
     margin_mode = None,
     maintenance_margin = None,
     liquidation_fee = None,
+    cash_maintenance_margin = None,
+    margin_tier_notional = None,
+    margin_tier_rate = None,
+    liquidation_step = None,
+    auto_deleverage = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1213,7 +1218,7 @@ fn from_signals(
     leverage_mode: &str,
     account_type: Option<&Bound<'_, PyAny>>,
     initial_margin: Option<&Bound<'_, PyAny>>,
-    margin_basis: &str,
+    margin_basis: Option<&Bound<'_, PyAny>>,
     multiplier: Option<&Bound<'_, PyAny>>,
     init_position: Option<&Bound<'_, PyAny>>,
     init_price: Option<&Bound<'_, PyAny>>,
@@ -1272,6 +1277,11 @@ fn from_signals(
     margin_mode: Option<&Bound<'_, PyAny>>,
     maintenance_margin: Option<&Bound<'_, PyAny>>,
     liquidation_fee: Option<&Bound<'_, PyAny>>,
+    cash_maintenance_margin: Option<&Bound<'_, PyAny>>,
+    margin_tier_notional: Option<&Bound<'_, PyAny>>,
+    margin_tier_rate: Option<&Bound<'_, PyAny>>,
+    liquidation_step: Option<&Bound<'_, PyAny>>,
+    auto_deleverage: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1326,7 +1336,15 @@ fn from_signals(
         borrow_rate,
         mark_price,
     )?;
-    let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
+    let lq = Liquidation::borrow(
+        maintenance_margin,
+        liquidation_fee,
+        cash_maintenance_margin,
+        margin_tier_notional,
+        margin_tier_rate,
+        liquidation_step,
+    )?;
+    let adl_b = array::borrow_opt_bool(auto_deleverage, "auto_deleverage")?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let init_position_b = borrow_opt_f64(init_position, "init_position")?;
     let init_price_b = borrow_opt_f64(init_price, "init_price")?;
@@ -1371,7 +1389,13 @@ fn from_signals(
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
-    let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
+    let margin_bases = per_column(
+        margin_basis,
+        n_cols,
+        "margin_basis",
+        "'notional', 'unit', or one of them per column",
+        parse::margin_basis,
+    )?;
     let account_types = account_types(account_type, n_cols)?;
     let margin_modes = margin_modes(margin_mode, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
@@ -1555,7 +1579,9 @@ fn from_signals(
             FlexArray::per_column(types, n_cols).map_err(to_py_err)
         })?,
         initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
-        margin_basis: FlexArray::Scalar(margin_basis),
+        margin_basis: margin_bases.as_ref().map_or(Ok(d.margin_basis), |bases| {
+            FlexArray::per_column(bases, n_cols).map_err(to_py_err)
+        })?,
         // One per column: the wrapper maps a source column's through
         // `column_map`, and the engine refuses one that changes down a column.
         multiplier: flex_or_f64(
@@ -1671,6 +1697,34 @@ fn from_signals(
             OneDim::PerColumn,
             d.liquidation_fee,
         )?,
+        cash_maintenance_margin: flex_or_f64(
+            &lq.cash_maintenance_margin,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.cash_maintenance_margin,
+        )?,
+        // The rows of a tier table are its tiers, as a ladder's are its steps.
+        margin_tier_notional: array::ladder_steps(
+            &lq.tier_notional,
+            n_cols,
+            "margin_tier_notional",
+            d.margin_tier_notional,
+        )?,
+        margin_tier_rate: array::ladder_steps(
+            &lq.tier_rate,
+            n_cols,
+            "margin_tier_rate",
+            d.margin_tier_rate,
+        )?,
+        liquidation_step: flex_or_f64(
+            &lq.liquidation_step,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.liquidation_step,
+        )?,
+        auto_deleverage: flex_or_bool(&adl_b, n_rows, n_cols, d.auto_deleverage)?,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -1765,7 +1819,7 @@ fn from_signals(
     leverage_mode = "lazy",
     account_type = None,
     initial_margin = None,
-    margin_basis = "notional",
+    margin_basis = None,
     multiplier = None,
     init_position = None,
     init_price = None,
@@ -1796,6 +1850,11 @@ fn from_signals(
     margin_mode = None,
     maintenance_margin = None,
     liquidation_fee = None,
+    cash_maintenance_margin = None,
+    margin_tier_notional = None,
+    margin_tier_rate = None,
+    liquidation_step = None,
+    auto_deleverage = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1833,7 +1892,7 @@ fn from_orders(
     leverage_mode: &str,
     account_type: Option<&Bound<'_, PyAny>>,
     initial_margin: Option<&Bound<'_, PyAny>>,
-    margin_basis: &str,
+    margin_basis: Option<&Bound<'_, PyAny>>,
     multiplier: Option<&Bound<'_, PyAny>>,
     init_position: Option<&Bound<'_, PyAny>>,
     init_price: Option<&Bound<'_, PyAny>>,
@@ -1864,6 +1923,11 @@ fn from_orders(
     margin_mode: Option<&Bound<'_, PyAny>>,
     maintenance_margin: Option<&Bound<'_, PyAny>>,
     liquidation_fee: Option<&Bound<'_, PyAny>>,
+    cash_maintenance_margin: Option<&Bound<'_, PyAny>>,
+    margin_tier_notional: Option<&Bound<'_, PyAny>>,
+    margin_tier_rate: Option<&Bound<'_, PyAny>>,
+    liquidation_step: Option<&Bound<'_, PyAny>>,
+    auto_deleverage: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1902,7 +1966,15 @@ fn from_orders(
         borrow_rate,
         mark_price,
     )?;
-    let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
+    let lq = Liquidation::borrow(
+        maintenance_margin,
+        liquidation_fee,
+        cash_maintenance_margin,
+        margin_tier_notional,
+        margin_tier_rate,
+        liquidation_step,
+    )?;
+    let adl_b = array::borrow_opt_bool(auto_deleverage, "auto_deleverage")?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
     let init_position_b = borrow_opt_f64(init_position, "init_position")?;
     let init_price_b = borrow_opt_f64(init_price, "init_price")?;
@@ -1934,7 +2006,13 @@ fn from_orders(
     let bad = pyo3::exceptions::PyValueError::new_err;
     let dir = parse::direction(direction).map_err(bad)?;
     let leverage_mode = parse::leverage_mode(leverage_mode).map_err(bad)?;
-    let margin_basis = parse::margin_basis(margin_basis).map_err(bad)?;
+    let margin_bases = per_column(
+        margin_basis,
+        n_cols,
+        "margin_basis",
+        "'notional', 'unit', or one of them per column",
+        parse::margin_basis,
+    )?;
     let account_types = account_types(account_type, n_cols)?;
     let margin_modes = margin_modes(margin_mode, n_cols)?;
     let st = parse::size_type(size_type).map_err(bad)?;
@@ -2028,7 +2106,9 @@ fn from_orders(
             FlexArray::per_column(types, n_cols).map_err(to_py_err)
         })?,
         initial_margin: flex_or_f64(&p.initial_margin, n_rows, n_cols, per_col, d.initial_margin)?,
-        margin_basis: FlexArray::Scalar(margin_basis),
+        margin_basis: margin_bases.as_ref().map_or(Ok(d.margin_basis), |bases| {
+            FlexArray::per_column(bases, n_cols).map_err(to_py_err)
+        })?,
         // One per column: the wrapper maps a source column's through
         // `column_map`, and the engine refuses one that changes down a column.
         multiplier: flex_or_f64(
@@ -2092,6 +2172,34 @@ fn from_orders(
             OneDim::PerColumn,
             d.liquidation_fee,
         )?,
+        cash_maintenance_margin: flex_or_f64(
+            &lq.cash_maintenance_margin,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.cash_maintenance_margin,
+        )?,
+        // The rows of a tier table are its tiers, as a ladder's are its steps.
+        margin_tier_notional: array::ladder_steps(
+            &lq.tier_notional,
+            n_cols,
+            "margin_tier_notional",
+            d.margin_tier_notional,
+        )?,
+        margin_tier_rate: array::ladder_steps(
+            &lq.tier_rate,
+            n_cols,
+            "margin_tier_rate",
+            d.margin_tier_rate,
+        )?,
+        liquidation_step: flex_or_f64(
+            &lq.liquidation_step,
+            n_rows,
+            n_cols,
+            OneDim::PerColumn,
+            d.liquidation_step,
+        )?,
+        auto_deleverage: flex_or_bool(&adl_b, n_rows, n_cols, d.auto_deleverage)?,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,

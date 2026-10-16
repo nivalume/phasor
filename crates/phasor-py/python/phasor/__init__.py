@@ -412,6 +412,41 @@ def _account_type(value):
     return names
 
 
+def _names(value, name):
+    """A string parameter: one for every column, or a list of one per column."""
+    if value is None or isinstance(value, str):
+        return value
+    try:
+        names = list(value)
+    except TypeError:
+        names = None
+    if names is None or not all(isinstance(n, str) for n in names):
+        raise TypeError(f"{name} must be a string or one per column")
+    return names
+
+
+def _tiers(value: Any) -> dict:
+    """``maintenance_margin_tiers`` as the engine's two tables, rows the
+    tiers: ``margin_tier_notional`` and ``margin_tier_rate``."""
+    if value is None:
+        return {}
+    tables = list(value)
+    nested = tables and not np.isscalar(tables[0][0])
+    columns = tables if nested else [tables]
+    depth = max(len(c) for c in columns)
+    bounds = np.full((depth, len(columns)), np.nan)
+    rates = np.full((depth, len(columns)), np.nan)
+    for j, tiers in enumerate(columns):
+        for t, (bound, rate) in enumerate(tiers):
+            bounds[t, j] = bound if np.isfinite(bound) else np.nan
+            rates[t, j] = rate
+    if not nested:
+        return {"margin_tier_notional": np.ascontiguousarray(bounds[:, 0]),
+                "margin_tier_rate": np.ascontiguousarray(rates[:, 0])}
+    return {"margin_tier_notional": np.asfortranarray(bounds),
+            "margin_tier_rate": np.asfortranarray(rates)}
+
+
 def _margin_mode(value):
     if value is None or isinstance(value, str):
         return value
@@ -550,7 +585,7 @@ def from_signals(
     leverage_mode="lazy",
     account_type=None,
     initial_margin=None,
-    margin_basis="notional",
+    margin_basis=None,
     multiplier=None,
     from_ago=None,
     bid_price=None,
@@ -608,6 +643,10 @@ def from_signals(
     margin_mode=None,
     maintenance_margin=None,
     liquidation_fee=None,
+    cash_maintenance_margin=None,
+    maintenance_margin_tiers=None,
+    liquidation_step=None,
+    auto_deleverage=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -871,8 +910,9 @@ def from_signals(
         every column or one per column, so a spot leg and a perpetual leg can
         share one account with ``cash_sharing``. Opening either side of a
         margin position posts ``initial_margin`` from free cash: a fraction of
-        the notional under ``margin_basis="notional"`` (``None`` means
-        ``1 / leverage``), or cash per unit under ``"unit"``. Every bar the
+        the notional under ``margin_basis="notional"`` (the default; ``None``
+        initial margin means ``1 / leverage``), or cash per unit under
+        ``"unit"``; ``margin_basis`` is a string or one per column. Every bar the
         position's profit since the last bar is settled into cash, so a loss
         shrinks what new orders may post and cash can go below zero. Closing
         realizes against the average entry and releases the margin.
@@ -957,7 +997,33 @@ def from_signals(
         Fills that were liquidations are flagged in ``pf.orders()`` and
         ``pf.logs()`` (``liquidation``). Without ``high`` and ``low`` the test
         uses the close. Each leg of a hedge reaches its own extreme, so a
-        hedged account wants a mark price, if only the close.
+        hedged account wants a mark price, if only the close. An isolated
+        column pays its funding and financing out of its own margin.
+    cash_maintenance_margin
+        The maintenance margin of cash columns that borrow (margin lending:
+        ``leverage`` above 1, or shorting), a fraction of the position's
+        notional below 1. Below it the account's cash columns that carry one
+        are liquidated with its margin columns, as a broker's margin call
+        does. ``None`` (the default) keeps cash columns as collateral that is
+        never closed.
+    maintenance_margin_tiers
+        An exchange's tier table in place of ``maintenance_margin``: a list of
+        ``(notional_up_to, rate)`` pairs, increasing, the last bound ignored
+        (``[(50_000, 0.004), (250_000, 0.005), (float("inf"), 0.01)]``), for
+        every margin column, or one such list per column. The requirement is
+        ``rate × notional − amount`` for the tier the notional falls in, the
+        amount keeping it continuous at the bounds.
+    liquidation_step
+        The fraction of a position each breach closes, above 0 and at most 1;
+        ``None`` (the default) closes it all. Below 1 the test goes on along
+        the rest of the bar after each partial close, closing the same
+        fraction again at each further breach.
+    auto_deleverage
+        A mask of bars on which the exchange auto-deleverages: a margin
+        column's position is closed at ``mark_price`` (the close without one),
+        with no fee, flagged as a liquidation. 1-D is one value per bar for
+        every column. Which bars that hits is the caller's to say: it is the
+        exchange's insurance fund, not the account, that decides.
 
     Returns
     -------
@@ -994,7 +1060,7 @@ def from_signals(
         leverage_mode=leverage_mode,
         account_type=_account_type(account_type),
         initial_margin=_param(initial_margin, "initial_margin"),
-        margin_basis=margin_basis,
+        margin_basis=_names(margin_basis, "margin_basis"),
         multiplier=_multiplier(multiplier, column_map),
         init_position=_multiplier(init_position, column_map, "init_position"),
         init_price=_multiplier(init_price, column_map, "init_price"),
@@ -1053,6 +1119,10 @@ def from_signals(
         margin_mode=_margin_mode(margin_mode),
         maintenance_margin=_param(maintenance_margin, "maintenance_margin"),
         liquidation_fee=_param(liquidation_fee, "liquidation_fee"),
+        cash_maintenance_margin=_param(cash_maintenance_margin, "cash_maintenance_margin"),
+        **_tiers(maintenance_margin_tiers),
+        liquidation_step=_param(liquidation_step, "liquidation_step"),
+        auto_deleverage=_per_bar(auto_deleverage, close, column_map, "auto_deleverage"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,
@@ -1091,7 +1161,7 @@ def from_orders(
     leverage_mode="lazy",
     account_type=None,
     initial_margin=None,
-    margin_basis="notional",
+    margin_basis=None,
     multiplier=None,
     from_ago=None,
     bid_price=None,
@@ -1118,6 +1188,10 @@ def from_orders(
     margin_mode=None,
     maintenance_margin=None,
     liquidation_fee=None,
+    cash_maintenance_margin=None,
+    maintenance_margin_tiers=None,
+    liquidation_step=None,
+    auto_deleverage=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -1264,8 +1338,9 @@ def from_orders(
         every column or one per column, so a spot leg and a perpetual leg can
         share one account with ``cash_sharing``. Opening either side of a
         margin position posts ``initial_margin`` from free cash: a fraction of
-        the notional under ``margin_basis="notional"`` (``None`` means
-        ``1 / leverage``), or cash per unit under ``"unit"``. Every bar the
+        the notional under ``margin_basis="notional"`` (the default; ``None``
+        initial margin means ``1 / leverage``), or cash per unit under
+        ``"unit"``; ``margin_basis`` is a string or one per column. Every bar the
         position's profit since the last bar is settled into cash, so a loss
         shrinks what new orders may post and cash can go below zero. Closing
         realizes against the average entry and releases the margin.
@@ -1350,7 +1425,33 @@ def from_orders(
         Fills that were liquidations are flagged in ``pf.orders()`` and
         ``pf.logs()`` (``liquidation``). Without ``high`` and ``low`` the test
         uses the close. Each leg of a hedge reaches its own extreme, so a
-        hedged account wants a mark price, if only the close.
+        hedged account wants a mark price, if only the close. An isolated
+        column pays its funding and financing out of its own margin.
+    cash_maintenance_margin
+        The maintenance margin of cash columns that borrow (margin lending:
+        ``leverage`` above 1, or shorting), a fraction of the position's
+        notional below 1. Below it the account's cash columns that carry one
+        are liquidated with its margin columns, as a broker's margin call
+        does. ``None`` (the default) keeps cash columns as collateral that is
+        never closed.
+    maintenance_margin_tiers
+        An exchange's tier table in place of ``maintenance_margin``: a list of
+        ``(notional_up_to, rate)`` pairs, increasing, the last bound ignored
+        (``[(50_000, 0.004), (250_000, 0.005), (float("inf"), 0.01)]``), for
+        every margin column, or one such list per column. The requirement is
+        ``rate × notional − amount`` for the tier the notional falls in, the
+        amount keeping it continuous at the bounds.
+    liquidation_step
+        The fraction of a position each breach closes, above 0 and at most 1;
+        ``None`` (the default) closes it all. Below 1 the test goes on along
+        the rest of the bar after each partial close, closing the same
+        fraction again at each further breach.
+    auto_deleverage
+        A mask of bars on which the exchange auto-deleverages: a margin
+        column's position is closed at ``mark_price`` (the close without one),
+        with no fee, flagged as a liquidation. 1-D is one value per bar for
+        every column. Which bars that hits is the caller's to say: it is the
+        exchange's insurance fund, not the account, that decides.
 
     Returns
     -------
@@ -1380,7 +1481,7 @@ def from_orders(
         leverage_mode=leverage_mode,
         account_type=_account_type(account_type),
         initial_margin=_param(initial_margin, "initial_margin"),
-        margin_basis=margin_basis,
+        margin_basis=_names(margin_basis, "margin_basis"),
         multiplier=_multiplier(multiplier, column_map),
         init_position=_multiplier(init_position, column_map, "init_position"),
         init_price=_multiplier(init_price, column_map, "init_price"),
@@ -1411,6 +1512,10 @@ def from_orders(
         margin_mode=_margin_mode(margin_mode),
         maintenance_margin=_param(maintenance_margin, "maintenance_margin"),
         liquidation_fee=_param(liquidation_fee, "liquidation_fee"),
+        cash_maintenance_margin=_param(cash_maintenance_margin, "cash_maintenance_margin"),
+        **_tiers(maintenance_margin_tiers),
+        liquidation_step=_param(liquidation_step, "liquidation_step"),
+        auto_deleverage=_per_bar(auto_deleverage, close, column_map, "auto_deleverage"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,

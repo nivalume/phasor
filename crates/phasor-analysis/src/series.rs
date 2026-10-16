@@ -252,8 +252,18 @@ pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Re
     let map = ColMap::build(&orders.col, n_cols)?;
     let mut out = Matrix::zeros(n_rows, n_cols);
     if !orders.debt.is_empty() {
-        levered_free_cash_flow(orders, &map, &mut out);
-        add_cash_records(&mut out, orders);
+        let charges = isolated_charges(orders, n_cols);
+        levered_free_cash_flow(orders, &map, &charges, &mut out);
+        let cash = &orders.cash;
+        for i in 0..cash.len() {
+            let col = cash.col[i] as usize;
+            if charges[col].is_some() && is_holding_charge(cash.kind[i]) {
+                // Out of the column's own margin, not the free cash.
+                continue;
+            }
+            let cell = &mut out.column_mut(col)[cash.idx[i] as usize];
+            *cell = add(*cell, cash.amount[i]);
+        }
         return Ok(out);
     }
     for col in 0..n_cols {
@@ -306,17 +316,59 @@ pub fn free_cash_flow(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Re
     Ok(out)
 }
 
+/// Whether a cash record of `kind` is a holding charge a margin column pays.
+fn is_holding_charge(kind: i8) -> bool {
+    kind == CashFlowKind::Funding as i8 || kind == CashFlowKind::Financing as i8
+}
+
+/// Each isolated column's holding charges as `(row, amount)`, by row; `None`
+/// for a column that is not isolated. An isolated column pays them out of
+/// the margin it posted, so they move its reserve, not the free cash.
+fn isolated_charges(orders: &OrderRecords, n_cols: usize) -> Vec<Option<Vec<(i64, f64)>>> {
+    let mut out: Vec<Option<Vec<(i64, f64)>>> = vec![None; n_cols];
+    for (r, &on) in orders.isolated.iter().enumerate() {
+        if on {
+            out[orders.col[r] as usize].get_or_insert_with(Vec::new);
+        }
+    }
+    let cash = &orders.cash;
+    for i in 0..cash.len() {
+        if let Some(list) = out[cash.col[i] as usize].as_mut() {
+            if is_holding_charge(cash.kind[i]) {
+                list.push((cash.idx[i], cash.amount[i]));
+            }
+        }
+    }
+    for list in out.iter_mut().flatten() {
+        list.sort_by_key(|&(row, _)| row);
+    }
+    out
+}
+
 /// [`free_cash_flow`] for a run that recorded its balances.
 ///
 /// A short's reserve is the `debt` plus `locked_cash` its last fill left
 /// behind, and a margin column's is its `locked_cash`, the initial margin, on
 /// either side; anything else reserves nothing. Each fill moves free cash by
 /// its cash flow less the change in that reserve.
-fn levered_free_cash_flow(orders: &OrderRecords, map: &ColMap, out: &mut Matrix) {
-    for col in 0..out.n_cols() {
+fn levered_free_cash_flow(
+    orders: &OrderRecords,
+    map: &ColMap,
+    charges: &[Option<Vec<(i64, f64)>>],
+    out: &mut Matrix,
+) {
+    for (col, own) in charges.iter().enumerate().take(out.n_cols()) {
         let mut position = 0.0_f64;
         let mut reserve = 0.0_f64;
+        let own = own.as_deref().unwrap_or(&[]);
+        let mut next = 0;
         for &r in map.column(col) {
+            // An isolated column's charges since its last fill came out of
+            // its margin: the reserve the fill starts from is smaller.
+            while next < own.len() && own[next].0 < orders.idx[r] {
+                reserve += own[next].1;
+                next += 1;
+            }
             let size = signed_size(orders.size[r], orders.side[r]);
             position = add(position, size);
             // Records built without margin flags have no margin columns.

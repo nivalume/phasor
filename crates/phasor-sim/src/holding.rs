@@ -9,6 +9,7 @@
 //! | `long_financing_rate`, `short_financing_rate` | any position | `−|position| × price × rate`, the rate for the position's side | [`CashFlowKind::Financing`] |
 //! | `debt_rate` | a cash column's long | `−debt × rate`: what the long borrowed | [`CashFlowKind::Interest`] |
 //! | `borrow_rate` | a cash column's short | `−|position| × price × rate` | [`CashFlowKind::BorrowFee`] |
+//! | `debt_rate` (the account's first column's) | an account's cash below zero, beyond what its leveraged longs borrowed | `−overdraft × rate` | [`CashFlowKind::Interest`], to the first column |
 //!
 //! `price` is `mark_price`, or the close where it is `NaN`, or the column's
 //! last valuation price where both are; with none of them the charge is
@@ -34,6 +35,12 @@
 //! — so cash may go below zero, after which the account can close but not
 //! open. That also keeps their code out of a run that uses none of them.
 //!
+//! An **isolated** margin column pays its charges out of its own margin, as
+//! an exchange takes funding from an isolated position: the margin it posted
+//! and the account's cash both change, its free cash does not. A margin
+//! worn below the maintenance margin by charges is liquidated as one worn
+//! by the price.
+//!
 //! Like every flow that is not a fill, a charge is recorded with the amount
 //! applied, so the analysis layer rebuilds the balance from records alone.
 
@@ -44,6 +51,7 @@ use phasor_model::CashFlowKind;
 use phasor_records::RecordSink;
 
 use crate::cash::{is_off, read};
+use crate::state::ColumnState;
 
 /// The inputs of the charges, borrowed from a loop's arguments.
 #[derive(Clone, Copy)]
@@ -68,20 +76,26 @@ impl Rates<'_, '_> {
     }
 }
 
-/// What a column holds after the bar's orders, as the charges read it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Held {
-    pub(crate) position: f64,
-    pub(crate) debt: f64,
-    pub(crate) margin: bool,
-    /// Already multiplied by `multiplier`.
-    pub(crate) val_price: f64,
-    /// The column's contract multiplier, which the charges' price is
+/// The group's columns as the charges read them: their state after the
+/// bar's orders, which an isolated column's charge changes.
+pub(crate) struct Columns<'s> {
+    pub(crate) states: &'s mut [ColumnState],
+    pub(crate) margin: &'s [bool],
+    pub(crate) isolated: &'s [bool],
+    /// Each column's contract multiplier, which the charges' price is
     /// multiplied by.
-    pub(crate) multiplier: f64,
+    pub(crate) mult: &'s [f64],
+    /// Whether the states' valuation prices are already times the
+    /// multiplier (`from_orders`) rather than multiplied where read.
+    pub(crate) scaled_val_price: bool,
 }
 
-/// Applies `amount`, uncapped, and records it.
+/// Applies `amount`, uncapped, and records it: out of the free cash, or out
+/// of an isolated column's own margin.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the charge, where it is booked and the balances it moves"
+)]
 fn book<S: RecordSink>(
     amount: f64,
     row: usize,
@@ -89,6 +103,7 @@ fn book<S: RecordSink>(
     kind: CashFlowKind,
     cash: &mut f64,
     free_cash: &mut f64,
+    own_margin: Option<&mut f64>,
     sink: &mut S,
 ) {
     // `NaN` only when no price was known; zero when the rate was.
@@ -96,14 +111,15 @@ fn book<S: RecordSink>(
         return;
     }
     *cash = add(*cash, amount);
-    *free_cash = add(*free_cash, amount);
+    match own_margin {
+        Some(locked) => *locked = add(*locked, amount),
+        None => *free_cash = add(*free_cash, amount),
+    }
     sink.push_cash(row, col, amount, kind);
 }
 
 /// Books every column's charges for bar `row`, in layout order, and within a
 /// column in the order of the module table.
-///
-/// `held(k)` is the `k`-th column's holding after the bar's orders.
 ///
 /// # Errors
 ///
@@ -113,29 +129,37 @@ pub(crate) fn charge<S: RecordSink>(
     rates: &Rates<'_, '_>,
     row: usize,
     cols: std::ops::Range<usize>,
-    held: impl Fn(usize) -> Held,
+    columns: Columns<'_>,
     cash: &mut f64,
     free_cash: &mut f64,
     sink: &mut S,
 ) -> Result<()> {
+    let first = cols.start;
     for (k, col) in cols.enumerate() {
-        let h = held(k);
-        if h.position == 0.0 {
+        let st = &mut columns.states[k];
+        let (position, debt) = (st.position, st.debt);
+        if position == 0.0 {
             continue;
         }
+        let margin = columns.margin[k];
         let mut price = rates.mark_price.get(row, col);
         if price.is_nan() {
             price = rates.close.get(row, col);
         }
-        price *= h.multiplier;
+        price *= columns.mult[k];
         if price.is_nan() {
-            price = h.val_price;
+            price = if columns.scaled_val_price {
+                st.last_val_price
+            } else {
+                st.last_val_price * columns.mult[k]
+            };
         }
-        let long = h.position > 0.0;
+        let long = position > 0.0;
+        let isolated = columns.isolated[k];
 
         let funding = read(rates.funding, "funding_rate", row, col)?;
         if funding != 0.0 {
-            let amount = -h.position * price * funding;
+            let amount = -position * price * funding;
             book(
                 amount,
                 row,
@@ -143,6 +167,7 @@ pub(crate) fn charge<S: RecordSink>(
                 CashFlowKind::Funding,
                 cash,
                 free_cash,
+                isolated.then_some(&mut st.locked_cash),
                 sink,
             );
         }
@@ -152,7 +177,7 @@ pub(crate) fn charge<S: RecordSink>(
             read(rates.short_financing, "short_financing_rate", row, col)?
         };
         if financing != 0.0 {
-            let amount = -h.position.abs() * price * financing;
+            let amount = -position.abs() * price * financing;
             book(
                 amount,
                 row,
@@ -160,29 +185,31 @@ pub(crate) fn charge<S: RecordSink>(
                 CashFlowKind::Financing,
                 cash,
                 free_cash,
+                isolated.then_some(&mut st.locked_cash),
                 sink,
             );
         }
-        if h.margin {
+        if margin {
             continue;
         }
         if long {
             let rate = read(rates.debt, "debt_rate", row, col)?;
-            if rate != 0.0 && h.debt > 0.0 {
+            if rate != 0.0 && debt > 0.0 {
                 book(
-                    -h.debt * rate,
+                    -debt * rate,
                     row,
                     col,
                     CashFlowKind::Interest,
                     cash,
                     free_cash,
+                    None,
                     sink,
                 );
             }
         } else {
             let rate = read(rates.borrow, "borrow_rate", row, col)?;
             if rate != 0.0 {
-                let amount = -h.position.abs() * price * rate;
+                let amount = -position.abs() * price * rate;
                 book(
                     amount,
                     row,
@@ -190,9 +217,38 @@ pub(crate) fn charge<S: RecordSink>(
                     CashFlowKind::BorrowFee,
                     cash,
                     free_cash,
+                    None,
                     sink,
                 );
             }
+        }
+    }
+    // An account that has lost more than its cash owes the difference, and
+    // pays interest on it as a long pays on what it borrowed. A leveraged
+    // long's borrowing is in the cash too, and pays on its own debt above:
+    // only what is owed beyond it. After every column's charges, so it is on
+    // what the bar leaves owed.
+    let borrowed: f64 = columns
+        .states
+        .iter()
+        .zip(columns.margin)
+        .filter(|(_, margin)| !**margin)
+        .map(|(st, _)| st.long_debt())
+        .sum();
+    let overdraft = -(*cash + borrowed);
+    if overdraft > 0.0 {
+        let rate = read(rates.debt, "debt_rate", row, first)?;
+        if rate != 0.0 {
+            book(
+                -overdraft * rate,
+                row,
+                first,
+                CashFlowKind::Interest,
+                cash,
+                free_cash,
+                None,
+                sink,
+            );
         }
     }
     Ok(())
@@ -209,6 +265,49 @@ mod tests {
 
     const ZERO: FlexArray<'static, f64> = FlexArray::Scalar(0.0);
     const NAN: FlexArray<'static, f64> = FlexArray::Scalar(f64::NAN);
+
+    /// A column as these tests give it.
+    #[derive(Debug, Clone, Copy)]
+    struct Held {
+        position: f64,
+        debt: f64,
+        margin: bool,
+        val_price: f64,
+        multiplier: f64,
+    }
+
+    /// [`charge`] on columns given as [`Held`], none isolated.
+    fn charge_held<S: RecordSink>(
+        rates: &Rates<'_, '_>,
+        row: usize,
+        cols: std::ops::Range<usize>,
+        held: impl Fn(usize) -> Held,
+        cash: &mut f64,
+        free_cash: &mut f64,
+        sink: &mut S,
+    ) -> Result<()> {
+        let hs: Vec<Held> = (0..cols.len()).map(held).collect();
+        let mut states: Vec<ColumnState> = hs
+            .iter()
+            .map(|h| ColumnState {
+                position: h.position,
+                debt: h.debt,
+                last_val_price: h.val_price,
+                ..ColumnState::new()
+            })
+            .collect();
+        let margin: Vec<bool> = hs.iter().map(|h| h.margin).collect();
+        let isolated = vec![false; hs.len()];
+        let mult: Vec<f64> = hs.iter().map(|h| h.multiplier).collect();
+        let columns = Columns {
+            states: &mut states,
+            margin: &margin,
+            isolated: &isolated,
+            mult: &mult,
+            scaled_val_price: true,
+        };
+        charge(rates, row, cols, columns, cash, free_cash, sink)
+    }
 
     fn held(position: f64, debt: f64, margin: bool) -> Held {
         Held {
@@ -237,7 +336,7 @@ mod tests {
         let mut sink = OrderRecords::new();
         let (mut cash, mut free) = (100.0, 50.0);
         let pos = [2.0, -4.0];
-        charge(
+        charge_held(
             &rates,
             3,
             0..2,
@@ -272,7 +371,7 @@ mod tests {
         let mut sink = OrderRecords::new();
         let (mut cash, mut free) = (0.0, 0.0);
         let pos = [2.0, -2.0];
-        charge(
+        charge_held(
             &rates,
             0,
             0..2,
@@ -312,7 +411,7 @@ mod tests {
             held(3.0, 40.0, true),
             held(-1.0, 8.0, true),
         ];
-        charge(
+        charge_held(
             &rates,
             0,
             0..4,
@@ -355,7 +454,7 @@ mod tests {
                 multiplier: 1.0,
             },
         ];
-        charge(
+        charge_held(
             &rates,
             0,
             0..2,
@@ -384,7 +483,7 @@ mod tests {
         };
         let mut sink = OrderRecords::new();
         let (mut cash, mut free) = (1.0, 1.0);
-        let err = charge(
+        let err = charge_held(
             &rates,
             0,
             0..1,
@@ -399,5 +498,76 @@ mod tests {
             ..rates
         };
         assert!(off.all_off());
+    }
+
+    #[test]
+    fn an_isolated_column_pays_out_of_its_own_margin() {
+        let rate = FlexArray::Scalar(0.25);
+        let close = FlexArray::Scalar(10.0);
+        let rates = Rates {
+            funding: &rate,
+            long_financing: &ZERO,
+            short_financing: &ZERO,
+            debt: &ZERO,
+            borrow: &ZERO,
+            mark_price: &NAN,
+            close: &close,
+        };
+        let mut sink = OrderRecords::new();
+        let mut states = vec![ColumnState {
+            position: 2.0,
+            debt: 20.0,
+            locked_cash: 8.0,
+            last_val_price: 10.0,
+            ..ColumnState::new()
+        }];
+        let (mut cash, mut free) = (100.0, 92.0);
+        let columns = Columns {
+            states: &mut states,
+            margin: &[true],
+            isolated: &[true],
+            mult: &[1.0],
+            scaled_val_price: true,
+        };
+        charge(&rates, 0, 0..1, columns, &mut cash, &mut free, &mut sink).unwrap();
+        // 2 × 10 × 0.25 out of the cash and the margin; the free cash is
+        // untouched.
+        assert_eq!((cash, free, states[0].locked_cash), (95.0, 92.0, 3.0));
+        assert_eq!(sink.cash.amount, [-5.0]);
+    }
+
+    #[test]
+    fn cash_below_zero_pays_interest_at_the_first_column_s_rate() {
+        let debt = FlexArray::Scalar(0.1);
+        let rates = Rates {
+            funding: &ZERO,
+            long_financing: &ZERO,
+            short_financing: &ZERO,
+            debt: &debt,
+            borrow: &ZERO,
+            mark_price: &NAN,
+            close: &NAN,
+        };
+        let mut sink = OrderRecords::new();
+        let (mut cash, mut free) = (-50.0, -60.0);
+        charge_held(
+            &rates,
+            2,
+            3..5,
+            |_| Held {
+                position: 0.0,
+                debt: 0.0,
+                margin: true,
+                val_price: 1.0,
+                multiplier: 1.0,
+            },
+            &mut cash,
+            &mut free,
+            &mut sink,
+        )
+        .unwrap();
+        assert_eq!((cash, free), (-55.0, -65.0));
+        assert_eq!(sink.cash.col, [3]);
+        assert_eq!(sink.cash.kind, [CashFlowKind::Interest as i8]);
     }
 }

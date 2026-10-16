@@ -53,6 +53,38 @@
 //! all it can lose. The account's test leaves it out, margin and position
 //! both.
 //!
+//! # Tiers
+//!
+//! An exchange's maintenance margin rises with the position's size. With
+//! `maintenance_margin_tiers`, a column's requirement is read from a table of
+//! notional bounds and rates instead of `maintenance_margin`: the rate of the
+//! tier the notional falls in, less the amount that keeps the requirement
+//! continuous at the bounds,
+//!
+//! ```text
+//! M = rate_t × notional − amount_t,   amount_t = amount_{t−1} + bound_{t−1} × (rate_t − rate_{t−1})
+//! ```
+//!
+//! which is piecewise linear along the path, so the breach is found by
+//! bisection rather than the closed form.
+//!
+//! # Partial liquidation
+//!
+//! With `liquidation_step` below 1, a breach closes that fraction of each
+//! position that carries a maintenance margin, at the breach, and the test
+//! goes on along the rest of the bar's path with what is left; each later
+//! breach closes the same fraction again. After 64 steps, or once a position
+//! is smaller than a millionth of where it started, what is left is closed
+//! in full.
+//!
+//! # Auto-deleveraging
+//!
+//! An exchange whose insurance fund cannot cover a bankrupt account closes
+//! profitable positions on the other side. That is not something one account's
+//! own prices decide, so it is given: `auto_deleverage` marks the bars on which
+//! a margin column's position, if it is in profit at the mark price (the close
+//! without one), is closed there with no fee, flagged as a liquidation.
+//!
 //! # What a liquidation leaves behind
 //!
 //! The fill is an order record like any other, with `fees` at
@@ -80,6 +112,10 @@ use crate::cash::is_off;
 #[derive(Clone, Copy)]
 pub(crate) struct Inputs<'s, 'a> {
     pub(crate) maintenance_margin: &'s FlexArray<'a, f64>,
+    pub(crate) cash_maintenance_margin: &'s FlexArray<'a, f64>,
+    pub(crate) tier_bounds: &'s FlexArray<'a, f64>,
+    pub(crate) tier_rates: &'s FlexArray<'a, f64>,
+    pub(crate) liquidation_step: &'s FlexArray<'a, f64>,
     pub(crate) liquidation_fee: &'s FlexArray<'a, f64>,
     pub(crate) mark_price: &'s FlexArray<'a, f64>,
     pub(crate) open: &'s FlexArray<'a, f64>,
@@ -91,7 +127,38 @@ pub(crate) struct Inputs<'s, 'a> {
 impl Inputs<'_, '_> {
     /// Whether no column can ever carry a maintenance margin.
     pub(crate) fn off(&self) -> bool {
-        is_off(self.maintenance_margin)
+        is_off(self.maintenance_margin) && self.untiered()
+    }
+
+    /// Whether no cash column can ever carry a maintenance margin.
+    pub(crate) fn cash_off(&self) -> bool {
+        is_off(self.cash_maintenance_margin)
+    }
+
+    /// Whether no column has a tier table.
+    pub(crate) fn untiered(&self) -> bool {
+        is_off(self.tier_rates)
+    }
+
+    /// The fraction of a position one breach closes on bar `row`: 1 for all
+    /// of it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Invariant`] for a step that is not `NaN` or in
+    /// `(0, 1]`.
+    pub(crate) fn step(&self, row: usize, col: usize) -> Result<f64> {
+        let step = self.liquidation_step.get(row, col);
+        if step.is_nan() {
+            return Ok(1.0);
+        }
+        if !(step > 0.0 && step <= 1.0) {
+            return Err(Error::Invariant(format!(
+                "liquidation_step must be NaN, or above 0 and at most 1; got {step} at row {row}, \
+                 column {col}"
+            )));
+        }
+        Ok(step)
     }
 }
 
@@ -121,24 +188,54 @@ pub(crate) struct Column {
     pub(crate) multiplier: f64,
 }
 
+/// A column's tier table: its maintenance margin by notional.
+#[derive(Debug, Clone, Copy)]
+struct Tiers<'s, 'a> {
+    bounds: &'s FlexArray<'a, f64>,
+    rates: &'s FlexArray<'a, f64>,
+    col: usize,
+    len: usize,
+}
+
+impl Tiers<'_, '_> {
+    /// The requirement on `notional`. See the module docs.
+    fn requirement(&self, notional: f64) -> f64 {
+        let (mut amount, mut last_rate, mut last_bound) = (0.0, 0.0, 0.0);
+        for t in 0..self.len {
+            let rate = self.rates.get(t, self.col);
+            amount += last_bound * (rate - last_rate);
+            let bound = self.bounds.get(t, self.col);
+            if t + 1 == self.len || bound.is_nan() || notional <= bound {
+                return rate * notional - amount;
+            }
+            last_rate = rate;
+            last_bound = bound;
+        }
+        0.0
+    }
+}
+
 /// A column's path through the bar and what it owes the maintenance margin.
 #[derive(Debug, Clone, Copy)]
-struct Path {
+struct Path<'s, 'a> {
     start: f64,
     check: f64,
     /// The maintenance margin per unit of notional, or per unit of size;
     /// zero for a column that carries none.
     rate: f64,
     unit: bool,
+    tiers: Option<Tiers<'s, 'a>>,
 }
 
-impl Path {
+impl Path<'_, '_> {
     fn price(&self, alpha: f64) -> f64 {
         self.start + alpha * (self.check - self.start)
     }
 
     fn requirement(&self, position: f64, price: f64) -> f64 {
-        if self.rate == 0.0 {
+        if let Some(tiers) = self.tiers {
+            tiers.requirement(position.abs() * price.abs())
+        } else if self.rate == 0.0 {
             0.0
         } else if self.unit {
             self.rate * position.abs()
@@ -148,26 +245,103 @@ impl Path {
     }
 }
 
+/// A column's tier table, or `None` without one.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for a table that is not increasing bounds
+/// and rates in `[0, 1)`, or one on a column whose margin is per unit.
+fn tiers<'s, 'a>(
+    inputs: &Inputs<'s, 'a>,
+    col: usize,
+    basis: MarginBasis,
+) -> Result<Option<Tiers<'s, 'a>>> {
+    let rows = match *inputs.tier_rates {
+        FlexArray::Scalar(v) if v.is_nan() => return Ok(None),
+        FlexArray::Scalar(_) | FlexArray::PerColumn(_) => 1,
+        FlexArray::PerRow(v) => v.len(),
+        FlexArray::Full { n_rows, .. } | FlexArray::MappedColumns { n_rows, .. } => n_rows,
+    };
+    let len = (0..rows)
+        .take_while(|&t| !inputs.tier_rates.get(t, col).is_nan())
+        .count();
+    if len == 0 {
+        return Ok(None);
+    }
+    if basis == MarginBasis::Unit {
+        return Err(Error::Invariant(format!(
+            "column {col}: maintenance_margin_tiers are by notional; its margin_basis is 'unit'"
+        )));
+    }
+    let (mut last_rate, mut last_bound) = (0.0, 0.0);
+    for t in 0..len {
+        let rate = inputs.tier_rates.get(t, col);
+        let bound = inputs.tier_bounds.get(t, col);
+        let last = t + 1 == len;
+        let bad_rate = !(0.0..1.0).contains(&rate) || rate < last_rate;
+        let bad_bound = !last && !(bound.is_finite() && bound > last_bound);
+        if bad_rate || bad_bound {
+            return Err(Error::Invariant(format!(
+                "maintenance_margin_tiers of column {col} must have increasing rates in [0, 1) \
+                 and increasing bounds above 0; tier {t} is {rate} up to {bound}"
+            )));
+        }
+        last_rate = rate;
+        last_bound = bound;
+    }
+    Ok(Some(Tiers {
+        bounds: inputs.tier_bounds,
+        rates: inputs.tier_rates,
+        col,
+        len,
+    }))
+}
+
 /// Reads one column's maintenance margin and rejects what no account can
 /// meet. `NaN` and zero carry none.
 fn rate(inputs: &Inputs<'_, '_>, row: usize, col: usize, basis: MarginBasis) -> Result<f64> {
-    let rate = inputs.maintenance_margin.get(row, col);
+    rate_of(
+        inputs.maintenance_margin,
+        "maintenance_margin",
+        row,
+        col,
+        basis,
+    )
+}
+
+/// [`rate`] of any maintenance margin input.
+fn rate_of(
+    input: &FlexArray<'_, f64>,
+    name: &str,
+    row: usize,
+    col: usize,
+    basis: MarginBasis,
+) -> Result<f64> {
+    let rate = input.get(row, col);
     if rate.is_nan() {
         return Ok(0.0);
     }
     let bad = !rate.is_finite() || rate < 0.0 || (basis == MarginBasis::Notional && rate >= 1.0);
     if bad {
         return Err(Error::Invariant(format!(
-            "maintenance_margin must be NaN, or finite, 0 or greater and below 1 of the \
-             notional; got {rate} at row {row}, column {col}"
+            "{name} must be NaN, or finite, 0 or greater and below 1 of the notional; got \
+             {rate} at row {row}, column {col}"
         )));
     }
     Ok(rate)
 }
 
 /// The path of a column holding a position through bar `row`, in prices
-/// times the column's multiplier.
-fn path(inputs: &Inputs<'_, '_>, row: usize, col: usize, c: &Column, rate: f64) -> Path {
+/// times the column's multiplier, from `from` of the way along it.
+fn path<'s, 'a>(
+    inputs: &Inputs<'s, 'a>,
+    row: usize,
+    col: usize,
+    c: &Column,
+    rate: f64,
+    tiers: Option<Tiers<'s, 'a>>,
+    from: f64,
+) -> Path<'s, 'a> {
     let close = inputs.close.get(row, col);
     let mut open = inputs.open.get(row, col);
     if open.is_nan() {
@@ -198,12 +372,16 @@ fn path(inputs: &Inputs<'_, '_>, row: usize, col: usize, c: &Column, rate: f64) 
             check.min(stop)
         };
     }
-    let start = if open.is_nan() { check } else { open };
+    let mut start = if open.is_nan() { check } else { open };
+    if from > 0.0 {
+        start += from * (check - start);
+    }
     Path {
         start,
         check,
         rate,
         unit: c.basis == MarginBasis::Unit,
+        tiers,
     }
 }
 
@@ -212,7 +390,7 @@ fn path(inputs: &Inputs<'_, '_>, row: usize, col: usize, c: &Column, rate: f64) 
 ///
 /// `base` is what the account holds besides the positions in `held`: its
 /// cash, or an isolated column's margin.
-fn breach(base: f64, held: &[Held]) -> Option<f64> {
+fn breach(base: f64, held: &[Held<'_, '_>]) -> Option<f64> {
     let surplus = |alpha: f64| {
         let (mut equity, mut required) = (base, 0.0);
         for h in held {
@@ -228,20 +406,48 @@ fn breach(base: f64, held: &[Held]) -> Option<f64> {
     }
     let (e0, m0) = surplus(0.0);
     let (g0, g1) = (e0 - m0, e1 - m1);
-    Some(if g0 <= 0.0 { 0.0 } else { g0 / (g0 - g1) })
+    if g0 <= 0.0 {
+        return Some(0.0);
+    }
+    if held.iter().all(|h| h.path.tiers.is_none()) {
+        return Some(g0 / (g0 - g1));
+    }
+    // Piecewise linear: the crossing by bisection, to the last bit.
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        let (e, m) = surplus(mid);
+        // Strictly: the tolerant comparison would stop a tolerance short.
+        if e < m {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
 }
 
 /// A column holding a position, on its path through the bar.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Held {
+pub(crate) struct Held<'s, 'a> {
     k: usize,
     position: f64,
     owed: f64,
-    path: Path,
+    path: Path<'s, 'a>,
 }
 
-/// Tests the account of `cols` at bar `row`, writing each column to close and
-/// the price it closes at into `out`, in layout order.
+/// A column the test closes: which, at what price, and how far along the
+/// bar's path.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Close {
+    pub(crate) k: usize,
+    pub(crate) price: f64,
+    pub(crate) alpha: f64,
+}
+
+/// Tests the account of `cols` at bar `row` along the rest of the bar's path
+/// from `from` (0 at the open), writing each column to close and where into
+/// `out`, in layout order.
 ///
 /// `column(k)` reads the `k`-th column after the bar's settlement. A cross
 /// account with a held column that has no price at all is not tested: its
@@ -250,14 +456,19 @@ pub(crate) struct Held {
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] for a maintenance margin no account can meet.
-pub(crate) fn test(
-    inputs: &Inputs<'_, '_>,
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the bar, the account, where along the bar, and the scratch it reuses"
+)]
+pub(crate) fn test<'s, 'a>(
+    inputs: &Inputs<'s, 'a>,
     row: usize,
     cols: std::ops::Range<usize>,
     column: impl Fn(usize) -> Column,
     cash: f64,
-    held: &mut Vec<Held>,
-    out: &mut Vec<(usize, f64)>,
+    from: f64,
+    held: &mut Vec<Held<'s, 'a>>,
+    out: &mut Vec<Close>,
 ) -> Result<()> {
     out.clear();
     held.clear();
@@ -272,13 +483,25 @@ pub(crate) fn test(
         let rate = if c.margin {
             rate(inputs, row, col, c.basis)?
         } else {
-            0.0
+            rate_of(
+                inputs.cash_maintenance_margin,
+                "cash_maintenance_margin",
+                row,
+                col,
+                MarginBasis::Notional,
+            )?
         };
+        let tiers = if c.margin && !inputs.untiered() {
+            tiers(inputs, col, c.basis)?
+        } else {
+            None
+        };
+        let rate = if tiers.is_some() { 1.0 } else { rate };
         let h = Held {
             k,
             position: c.position,
             owed: c.owed,
-            path: path(inputs, row, col, &c, rate),
+            path: path(inputs, row, col, &c, rate, tiers, from),
         };
         if c.isolated {
             // Its margin sits in the account's cash but is not the account's
@@ -286,7 +509,11 @@ pub(crate) fn test(
             base -= c.locked_cash;
             if rate > 0.0 && !h.path.check.is_nan() {
                 if let Some(alpha) = breach(c.locked_cash, &[h]) {
-                    out.push((k, h.path.price(alpha)));
+                    out.push(Close {
+                        k,
+                        price: h.path.price(alpha),
+                        alpha: from + alpha * (1.0 - from),
+                    });
                 }
             }
             continue;
@@ -297,15 +524,30 @@ pub(crate) fn test(
     }
     if cross_due && priced {
         if let Some(alpha) = breach(base, held) {
-            out.extend(
-                held.iter()
-                    .filter(|h| h.path.rate > 0.0)
-                    .map(|h| (h.k, h.path.price(alpha))),
-            );
-            out.sort_by_key(|&(k, _)| k);
+            out.extend(held.iter().filter(|h| h.path.rate > 0.0).map(|h| Close {
+                k: h.k,
+                price: h.path.price(alpha),
+                alpha: from + alpha * (1.0 - from),
+            }));
+            out.sort_by_key(|c| c.k);
         }
     }
     Ok(())
+}
+
+/// The most rounds of partial liquidation one bar takes before closing what
+/// is left in full.
+pub(crate) const ROUNDS: usize = 64;
+
+/// The signed size a breach closes of `position`: `step` of it, or `NaN`
+/// (all of it) for a full step, on the last round, or once the position is
+/// a millionth of the `start` it had when the bar's liquidation began.
+pub(crate) fn step_size(step: f64, position: f64, start: f64, last: bool) -> f64 {
+    if step >= 1.0 || last || position.abs() * step <= start * 1e-6 {
+        f64::NAN
+    } else {
+        -position * step
+    }
 }
 
 /// Where a liquidation happens and what it reads.
@@ -317,6 +559,9 @@ pub(crate) struct At<'o> {
     /// flag the liquidation keeps.
     pub(crate) template: &'o Order,
     pub(crate) isolated: bool,
+    /// Whether it is a margin column; otherwise a cash column whose
+    /// `cash_maintenance_margin` it failed.
+    pub(crate) margin: bool,
     /// The column's contract multiplier, which `price` is already
     /// multiplied by.
     pub(crate) multiplier: f64,
@@ -332,25 +577,37 @@ pub(crate) struct At<'o> {
 ///
 /// Returns [`Error::Invariant`] for a fee that is not finite and 0 or greater,
 /// and anything the execution kernel refuses.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "where, at what price and how much, the column before, and the sink"
+)]
 pub(crate) fn fill<S: RecordSink + LogSink>(
     inputs: &Inputs<'_, '_>,
     at: &At<'_>,
     price: f64,
+    size: f64,
+    fee: Option<f64>,
     state: &ProcessOrderState,
     sink: &mut S,
     fills: &mut i64,
 ) -> Result<ExecuteOrderState> {
-    let fee = inputs.liquidation_fee.get(at.row, at.col);
+    let fee = fee.unwrap_or_else(|| inputs.liquidation_fee.get(at.row, at.col));
     if !fee.is_finite() || fee < 0.0 {
         return Err(Error::Invariant(format!(
             "liquidation_fee must be finite and 0 or greater; got {fee} at row {}, column {}",
             at.row, at.col
         )));
     }
+    // `NaN`: all of it.
+    let (size, size_type) = if size.is_nan() {
+        (0.0, SizeType::TargetAmount)
+    } else {
+        (size, SizeType::Amount)
+    };
     let request = Order {
-        size: 0.0,
+        size,
         price,
-        size_type: SizeType::TargetAmount,
+        size_type,
         direction: Direction::Both,
         fees: fee,
         fixed_fees: 0.0,
@@ -381,7 +638,7 @@ pub(crate) fn fill<S: RecordSink + LogSink>(
         sink.push_balances(Balances {
             debt: after.debt,
             locked_cash: after.locked_cash,
-            margin: true,
+            margin: at.margin,
             isolated: at.isolated,
             liquidation: true,
             multiplier: at.multiplier,
@@ -509,6 +766,10 @@ mod tests {
         fn inputs(&self) -> Inputs<'_, 'static> {
             Inputs {
                 maintenance_margin: &self.mm,
+                cash_maintenance_margin: &NAN,
+                tier_bounds: &NAN,
+                tier_rates: &NAN,
+                liquidation_step: &NAN,
                 liquidation_fee: &self.fee,
                 mark_price: &self.mark,
                 open: &self.open,
@@ -536,17 +797,19 @@ mod tests {
 
     fn run(bar: &Bar, cash: f64, cols: &[Column]) -> Vec<(usize, f64)> {
         let (mut held, mut out) = (Vec::new(), Vec::new());
+        let inputs = bar.inputs();
         test(
-            &bar.inputs(),
+            &inputs,
             0,
             0..cols.len(),
             |k| cols[k],
             cash,
+            0.0,
             &mut held,
             &mut out,
         )
         .unwrap();
-        out
+        out.iter().map(|c| (c.k, c.price)).collect()
     }
 
     // Long 4 against a basis of 400 with 100 of cash: E(p) = 4p − 300 and,
@@ -698,7 +961,8 @@ mod tests {
                 ..bar(128.0, 130.0, 64.0, 70.0)
             };
             let (mut held, mut out) = (Vec::new(), Vec::new());
-            let err = test(&b.inputs(), 0, 0..1, |_| long, 100.0, &mut held, &mut out);
+            let inputs = b.inputs();
+            let err = test(&inputs, 0, 0..1, |_| long, 100.0, 0.0, &mut held, &mut out);
             assert!(err.is_err(), "{bad}");
         }
         let none = Bar {
@@ -726,6 +990,7 @@ mod tests {
             col: 0,
             template: &template,
             isolated: false,
+            margin: true,
             multiplier: 1.0,
         };
         // Long 4 settled at 128 with 100 posted.
@@ -742,7 +1007,17 @@ mod tests {
         };
         let mut journal = Journal::default();
         let mut fills = 0;
-        let after = fill(&b.inputs(), &at, 100.0, &before, &mut journal, &mut fills).unwrap();
+        let after = fill(
+            &b.inputs(),
+            &at,
+            100.0,
+            f64::NAN,
+            None,
+            &before,
+            &mut journal,
+            &mut fills,
+        )
+        .unwrap();
         // Sold 4 at 100: −112 realized, 50 in fees, the 100 margin released.
         assert_eq!(after.position, 0.0);
         assert_eq!(after.cash, 100.0 - 112.0 - 50.0);
@@ -768,6 +1043,81 @@ mod tests {
             fee: FlexArray::Scalar(-0.1),
             ..bar(128.0, 130.0, 64.0, 70.0)
         };
-        assert!(fill(&bad.inputs(), &at, 100.0, &before, &mut journal, &mut fills).is_err());
+        assert!(
+            fill(
+                &bad.inputs(),
+                &at,
+                100.0,
+                f64::NAN,
+                None,
+                &before,
+                &mut journal,
+                &mut fills,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_tier_table_is_continuous_at_its_bounds() {
+        // 1% up to 1000, 2% up to 5000, 5% beyond: amounts 0, 10, 160.
+        static BOUNDS: [f64; 3] = [1000.0, 5000.0, f64::NAN];
+        static RATES: [f64; 3] = [0.01, 0.02, 0.05];
+        let (bounds, rates) = (FlexArray::PerRow(&BOUNDS), FlexArray::PerRow(&RATES));
+        let b = bar(1.0, 1.0, 1.0, 1.0);
+        let inputs = Inputs {
+            tier_bounds: &bounds,
+            tier_rates: &rates,
+            ..b.inputs()
+        };
+        let t = tiers(&inputs, 0, MarginBasis::Notional).unwrap().unwrap();
+        assert_eq!(t.requirement(500.0), 5.0);
+        assert_eq!(t.requirement(1000.0), 10.0);
+        assert_eq!(t.requirement(3000.0), 50.0);
+        assert_eq!(t.requirement(5000.0), 90.0);
+        assert_eq!(t.requirement(10000.0), 340.0);
+        assert!(tiers(&inputs, 0, MarginBasis::Unit).is_err());
+        static FALLING: [f64; 2] = [0.02, 0.01];
+        let falling = FlexArray::PerRow(&FALLING);
+        let bad = Inputs {
+            tier_rates: &falling,
+            ..inputs
+        };
+        assert!(tiers(&bad, 0, MarginBasis::Notional).is_err());
+    }
+
+    #[test]
+    fn a_tiered_account_breaches_where_its_piecewise_requirement_says() {
+        // Long 4 against 400 with 100 of cash: E(p) = 4p − 300. Tiers of 25%
+        // up to a notional of 400 and 50% beyond (amount 100): above p = 100
+        // M = 2p − 100, below it M = p. E = M at p = 100 from the right
+        // (400 − 300 = 100 = 2 × 100 − 100), the same level as one flat 25%
+        // rate below 100, reached from 128 by bisection.
+        static BOUNDS: [f64; 2] = [400.0, f64::NAN];
+        static RATES: [f64; 2] = [0.25, 0.5];
+        let (bounds, rates) = (FlexArray::PerRow(&BOUNDS), FlexArray::PerRow(&RATES));
+        let b = Bar {
+            mm: NAN,
+            ..bar(128.0, 130.0, 64.0, 70.0)
+        };
+        let inputs = Inputs {
+            tier_bounds: &bounds,
+            tier_rates: &rates,
+            ..b.inputs()
+        };
+        let (mut held, mut out) = (Vec::new(), Vec::new());
+        let long = margin(4.0, 400.0);
+        test(&inputs, 0, 0..1, |_| long, 100.0, 0.0, &mut held, &mut out).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!((out[0].price - 100.0).abs() < 1e-9, "{}", out[0].price);
+    }
+
+    #[test]
+    fn a_step_closes_its_share_until_little_is_left() {
+        assert!(step_size(1.0, 4.0, 4.0, false).is_nan());
+        assert_eq!(step_size(0.25, 4.0, 4.0, false), -1.0);
+        assert_eq!(step_size(0.25, -4.0, 4.0, false), 1.0);
+        assert!(step_size(0.25, 4.0, 4.0, true).is_nan());
+        assert!(step_size(0.25, 1e-6, 4.0, false).is_nan());
     }
 }

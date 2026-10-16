@@ -133,6 +133,13 @@ pub struct Liquidation<'py> {
     pub maintenance_margin: Option<Borrowed<'py>>,
     /// What a liquidation fill pays, as a fraction of its notional.
     pub liquidation_fee: Option<Borrowed<'py>>,
+    /// A cash column's maintenance margin.
+    pub cash_maintenance_margin: Option<Borrowed<'py>>,
+    /// The tier table's notional bounds and rates, rows the tiers.
+    pub tier_notional: Option<Borrowed<'py>>,
+    pub tier_rate: Option<Borrowed<'py>>,
+    /// The fraction of a position each breach closes.
+    pub liquidation_step: Option<Borrowed<'py>>,
 }
 
 impl<'py> Liquidation<'py> {
@@ -144,10 +151,21 @@ impl<'py> Liquidation<'py> {
     pub fn borrow(
         maintenance_margin: Option<&Bound<'py, PyAny>>,
         liquidation_fee: Option<&Bound<'py, PyAny>>,
+        cash_maintenance_margin: Option<&Bound<'py, PyAny>>,
+        tier_notional: Option<&Bound<'py, PyAny>>,
+        tier_rate: Option<&Bound<'py, PyAny>>,
+        liquidation_step: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Self> {
         Ok(Self {
             maintenance_margin: borrow_opt_f64(maintenance_margin, "maintenance_margin")?,
             liquidation_fee: borrow_opt_f64(liquidation_fee, "liquidation_fee")?,
+            cash_maintenance_margin: borrow_opt_f64(
+                cash_maintenance_margin,
+                "cash_maintenance_margin",
+            )?,
+            tier_notional: borrow_opt_f64(tier_notional, "margin_tier_notional")?,
+            tier_rate: borrow_opt_f64(tier_rate, "margin_tier_rate")?,
+            liquidation_step: borrow_opt_f64(liquidation_step, "liquidation_step")?,
         })
     }
 }

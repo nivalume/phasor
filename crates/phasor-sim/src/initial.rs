@@ -42,6 +42,9 @@ pub(crate) struct Columns<'s> {
     pub(crate) isolated: &'s [bool],
     /// Each column's multiplier; empty in a run without balances.
     pub(crate) mult: &'s [f64],
+    /// Whether the loop keeps valuation prices times the multiplier
+    /// (`from_orders`) rather than multiplying them where read.
+    pub(crate) scaled_val_price: bool,
 }
 
 /// Opens every column's initial position, before the first bar.
@@ -146,7 +149,11 @@ pub(crate) fn open<S: RecordSink>(
         state[k].position = after.position;
         state[k].debt = after.debt;
         state[k].locked_cash = after.locked_cash;
-        state[k].last_val_price = price * m;
+        state[k].last_val_price = if inputs.scaled_val_price {
+            price * m
+        } else {
+            price
+        };
     }
     Ok(())
 }

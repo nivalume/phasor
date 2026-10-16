@@ -94,7 +94,7 @@ impl Lcg {
 /// Checks the rebuilt equity against what the simulation valued each account
 /// at after the bar's liquidations: the bar's orders fill at its close, so
 /// they change the equity only by their fees, and its charges land after.
-fn check(groups: &Groups, seed: u64) {
+fn check(groups: &Groups, seed: u64, partial: bool) {
     let (n_rows, n_cols) = (120, 4);
     let mut rng = Lcg(seed);
     let (mut open, mut high, mut low, mut close) = (vec![], vec![], vec![], vec![]);
@@ -144,6 +144,19 @@ fn check(groups: &Groups, seed: u64) {
         margin_mode: FlexArray::per_column(&modes, n_cols).unwrap(),
         initial_margin: FlexArray::scalar(0.1),
         maintenance_margin: FlexArray::scalar(0.05),
+        cash_maintenance_margin: FlexArray::scalar(if partial { 0.1 } else { f64::NAN }),
+        margin_tier_notional: if partial {
+            FlexArray::PerRow(&TIER_NOTIONAL)
+        } else {
+            FlexArray::scalar(N)
+        },
+        margin_tier_rate: if partial {
+            FlexArray::PerRow(&TIER_RATE)
+        } else {
+            FlexArray::scalar(N)
+        },
+        liquidation_step: FlexArray::scalar(if partial { 0.5 } else { N }),
+        leverage: FlexArray::scalar(if partial { 3.0 } else { 1.0 }),
         liquidation_fee: FlexArray::scalar(0.01),
         funding_rate: FlexArray::scalar(1e-4),
         cash_deposits: FlexArray::scalar(3.),
@@ -156,6 +169,23 @@ fn check(groups: &Groups, seed: u64) {
         journal.orders.liquidation.contains(&true),
         "nothing liquidated"
     );
+    if partial {
+        let o = &journal.orders;
+        let liquidated = |r: usize| o.liquidation[r];
+        assert!(
+            (0..o.len()).any(|r| liquidated(r) && !o.margin[r]),
+            "no cash column liquidated"
+        );
+        // A partial step leaves a position, so a column liquidates twice on
+        // one bar somewhere.
+        assert!(
+            (1..o.len()).any(|r| liquidated(r)
+                && liquidated(r - 1)
+                && o.col[r] == o.col[r - 1]
+                && o.idx[r] == o.idx[r - 1]),
+            "no partial steps"
+        );
+    }
     assert!(
         journal
             .orders
@@ -216,12 +246,106 @@ fn check(groups: &Groups, seed: u64) {
     }
 }
 
+/// A tier table for the partial runs: 4% to a notional of 200, 8% beyond.
+static TIER_NOTIONAL: [f64; 2] = [200.0, N];
+static TIER_RATE: [f64; 2] = [0.04, 0.08];
+
 #[test]
 fn the_rebuilt_equity_is_the_simulations_in_separate_accounts() {
-    check(&Groups::ungrouped(4), 3);
+    check(&Groups::ungrouped(4), 3, false);
 }
 
 #[test]
 fn the_rebuilt_equity_is_the_simulations_in_shared_accounts() {
-    check(&Groups::from_lens(&[2, 2], 4).unwrap(), 17);
+    check(&Groups::from_lens(&[2, 2], 4).unwrap(), 17, false);
+}
+
+#[test]
+fn the_rebuilt_equity_survives_partial_tiered_and_cash_liquidations() {
+    // Partial steps, a tier table, leveraged cash columns with a
+    // maintenance margin of their own.
+    check(&Groups::ungrouped(4), 5, true);
+    check(&Groups::from_lens(&[2, 2], 4).unwrap(), 23, true);
+}
+
+/// The free cash an isolated run rebuilds is the simulation's: at each
+/// bar's first order, what the loop had free is the rebuilt free cash of
+/// the bar before. Funding comes out of each column's margin, not the free
+/// cash, and a column that is never settled moves it only by its fills.
+fn check_isolated_free_cash(groups: &Groups, seed: u64) {
+    let (n_rows, n_cols) = (120, 4);
+    let mut rng = Lcg(seed);
+    let close: Vec<f64> = (0..n_cols)
+        .flat_map(|_| {
+            let mut p = 50.0;
+            (0..n_rows)
+                .map(|_| {
+                    p *= 1.0 + 0.04 * (rng.next() - 0.5);
+                    p
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let size: Vec<f64> = (0..n_rows * n_cols)
+        .map(|_| {
+            let u = rng.next();
+            if u < 0.7 { N } else { (u - 0.85) * 40.0 }
+        })
+        .collect();
+    let args = FromOrders {
+        n_rows,
+        n_cols,
+        close: FlexArray::full(&close, n_rows, n_cols).unwrap(),
+        size: FlexArray::full(&size, n_rows, n_cols).unwrap(),
+        init_cash: FlexArray::scalar(5000.),
+        fees: FlexArray::scalar(0.001),
+        direction: FlexArray::scalar(Direction::Both),
+        account_type: FlexArray::scalar(AccountType::Margin),
+        margin_mode: FlexArray::scalar(MarginMode::Isolated),
+        initial_margin: FlexArray::scalar(0.2),
+        funding_rate: FlexArray::scalar(3e-4),
+        log: FlexArray::scalar(true),
+        groups: groups.clone(),
+        ..FromOrders::default()
+    };
+    let journal = phasor_sim::simulate_from_orders_logged(&args).unwrap();
+    assert!(
+        journal
+            .orders
+            .cash
+            .kind
+            .contains(&(CashFlowKind::Funding as i8)),
+        "no funding"
+    );
+    let pf = Portfolio::from_grouped_records(
+        journal.orders.clone(),
+        args.close,
+        args.init_cash,
+        n_rows,
+        n_cols,
+        Scoring::default(),
+        groups.clone(),
+    )
+    .unwrap();
+    let free = pf.free_cash().unwrap();
+    let logs = &journal.logs;
+    let mut seen = vec![false; n_rows * groups.len()];
+    for r in 0..logs.len() {
+        let (g, row) = (groups.of_column(logs.col[r] as usize), logs.idx[r] as usize);
+        if row == 0 || std::mem::replace(&mut seen[g * n_rows + row], true) {
+            continue;
+        }
+        let rebuilt = free.get(row - 1, g);
+        assert!(
+            (logs.free_cash[r] - rebuilt).abs() < 1e-9,
+            "account {g}, bar {row}: simulated {}, rebuilt {rebuilt}",
+            logs.free_cash[r]
+        );
+    }
+}
+
+#[test]
+fn the_rebuilt_free_cash_of_isolated_columns_is_the_simulations() {
+    check_isolated_free_cash(&Groups::ungrouped(4), 7);
+    check_isolated_free_cash(&Groups::from_lens(&[2, 2], 4).unwrap(), 11);
 }
