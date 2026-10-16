@@ -82,8 +82,9 @@
 //! An exchange whose insurance fund cannot cover a bankrupt account closes
 //! profitable positions on the other side. That is not something one account's
 //! own prices decide, so it is given: `auto_deleverage` marks the bars on which
-//! a margin column's position, if it is in profit at the mark price (the close
-//! without one), is closed there with no fee, flagged as a liquidation.
+//! a margin column's position is closed at the mark price (the close without
+//! one), with no fee, flagged as a liquidation. Which positions an exchange
+//! picks, profitable ones first, is in which bars the caller marks.
 //!
 //! # What a liquidation leaves behind
 //!
