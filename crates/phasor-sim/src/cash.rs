@@ -32,7 +32,7 @@ use phasor_records::RecordSink;
 ///
 /// The defaults are a scalar zero; checking for that once keeps a run that
 /// uses neither input from paying a read per bar.
-pub(crate) fn is_off(array: &FlexArray<'_, f64>) -> bool {
+pub fn is_off(array: &FlexArray<'_, f64>) -> bool {
     matches!(*array, FlexArray::Scalar(v) if v.is_nan() || v == 0.0)
 }
 
@@ -44,7 +44,7 @@ pub(crate) fn is_off(array: &FlexArray<'_, f64>) -> bool {
 /// `from_signals` about 6% (one thread, interleaved rounds). On `from_orders`
 /// it executes about as many instructions, so the cost is not work the
 /// branches do; see `benchmarks/README.md`.
-pub(crate) fn all_off(
+pub fn all_off(
     deposits: &FlexArray<'_, f64>,
     dividends: &FlexArray<'_, f64>,
     earnings: &FlexArray<'_, f64>,
@@ -73,7 +73,7 @@ fn apply(amount: f64, cash: &mut f64, free_cash: &mut f64) -> f64 {
 }
 
 /// Reads one amount and rejects the values no balance can absorb.
-pub(crate) fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usize) -> Result<f64> {
+pub fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usize) -> Result<f64> {
     let amount = array.get(row, col);
     if amount.is_infinite() {
         return Err(Error::Invariant(format!(
@@ -88,7 +88,7 @@ pub(crate) fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usiz
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] for an infinite amount.
-pub(crate) fn deposit<S: RecordSink>(
+pub fn deposit<S: RecordSink>(
     deposits: &FlexArray<'_, f64>,
     row: usize,
     first: usize,
@@ -118,7 +118,7 @@ pub(crate) fn deposit<S: RecordSink>(
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] for an infinite amount.
-pub(crate) fn pay_dividends<S: RecordSink>(
+pub fn pay_dividends<S: RecordSink>(
     dividends: &FlexArray<'_, f64>,
     row: usize,
     cols: std::ops::Range<usize>,
@@ -156,7 +156,7 @@ pub(crate) fn pay_dividends<S: RecordSink>(
     clippy::too_many_arguments,
     reason = "the two inputs, the bar, and the balances they move"
 )]
-pub(crate) fn at_open<S: RecordSink>(
+pub fn at_open<S: RecordSink>(
     deposits: &FlexArray<'_, f64>,
     dividends: &FlexArray<'_, f64>,
     row: usize,
@@ -181,7 +181,7 @@ pub(crate) fn at_open<S: RecordSink>(
 ///
 /// Returns [`Error::Invariant`] for an infinite amount.
 #[inline(never)]
-pub(crate) fn earn<S: RecordSink>(
+pub fn earn<S: RecordSink>(
     earnings: &FlexArray<'_, f64>,
     row: usize,
     cols: std::ops::Range<usize>,
@@ -200,6 +200,40 @@ pub(crate) fn earn<S: RecordSink>(
         }
     }
     Ok(())
+}
+
+/// Books `amount` of `kind` to column `col`'s account on `row` and records
+/// it, as the loops book their cash flows: `NaN` is nothing and an outflow
+/// is capped at the free cash. Returns what was applied.
+///
+/// For a custom loop: any cash that enters or leaves an account outside a
+/// fill has to be a record, or the analysis cannot rebuild the balance.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for an infinite amount.
+pub fn book<S: RecordSink>(
+    amount: f64,
+    kind: CashFlowKind,
+    row: usize,
+    col: usize,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    sink: &mut S,
+) -> Result<f64> {
+    if amount.is_infinite() {
+        return Err(Error::Invariant(format!(
+            "a cash flow is infinite at row {row}, column {col}"
+        )));
+    }
+    if amount.is_nan() || amount == 0.0 {
+        return Ok(0.0);
+    }
+    let applied = apply(amount, cash, free_cash);
+    if applied != 0.0 {
+        sink.push_cash(row, col, applied, kind);
+    }
+    Ok(applied)
 }
 
 #[cfg(test)]

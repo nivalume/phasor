@@ -20,12 +20,13 @@
 use phasor_core::error::{Error, Result};
 use phasor_core::flex::FlexArray;
 use phasor_exec::{
-    AccountType, Direction, LeverageMode, MarginBasis, MarginMode, Order, OrderStatus,
+    AccountType, Direction, LeverageMode, MarginBasis, MarginMode, Order, OrderResult, OrderStatus,
     ProcessOrderState, SizeType, ValidatedOrder, execute_validated,
 };
 use phasor_model::{PriceAreaVioMode, PriceType};
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
+use crate::callbacks::{Context, Flow, NoCallbacks, OrderFunc};
 use crate::groups::{CallSeq, Groups, approx_cash_need, approx_order_value};
 use crate::state::ColumnState;
 
@@ -327,6 +328,15 @@ impl FromOrders<'_> {
         }
     }
 
+    /// Whether the run books any cash flow: see [`crate::cash::all_off`].
+    fn flows(&self) -> bool {
+        !crate::cash::all_off(
+            &self.cash_deposits,
+            &self.cash_dividends,
+            &self.cash_earnings,
+        )
+    }
+
     /// Whether the run's accounts may go below zero cash: whether any column
     /// borrows or trades on margin, or any holding charge is on, which is
     /// owed whatever the balance. Decided once for the run, because the
@@ -531,23 +541,20 @@ pub(crate) fn updated_value(
 /// `levered` says whether any column of the run may borrow, decided once for
 /// the run by [`crate::any_levered`] rather than per group: the records keep
 /// balances for every fill of a run or for none.
-fn simulate_group<S: RecordSink + LogSink>(
+fn simulate_group<S: RecordSink + LogSink, C: OrderFunc>(
     args: &FromOrders<'_>,
     group: usize,
     levered: bool,
+    cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<()> {
-    let flows = !crate::cash::all_off(
-        &args.cash_deposits,
-        &args.cash_dividends,
-        &args.cash_earnings,
-    );
+) -> Result<C::State> {
+    let flows = args.flows();
     match (flows, levered) {
-        (false, false) => group_loop::<S, false, false>(args, group, sink, fills),
-        (true, false) => group_loop::<S, true, false>(args, group, sink, fills),
-        (false, true) => group_loop::<S, false, true>(args, group, sink, fills),
-        (true, true) => group_loop::<S, true, true>(args, group, sink, fills),
+        (false, false) => group_loop::<S, C, false, false>(args, group, cb, sink, fills),
+        (true, false) => group_loop::<S, C, true, false>(args, group, cb, sink, fills),
+        (false, true) => group_loop::<S, C, false, true>(args, group, cb, sink, fills),
+        (true, true) => group_loop::<S, C, true, true>(args, group, cb, sink, fills),
     }
 }
 
@@ -560,237 +567,504 @@ fn simulate_group<S: RecordSink + LogSink>(
 /// leverage 1 owes nothing, so in a leveraged run it still comes out as it
 /// would without one; the copy without leverage exists only so the default
 /// run does not pay for the branches.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the bar's phases read in order: deposit, resolve, execute, earn"
-)]
-fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
+///
+/// The bars themselves are [`Group::run_rows`], so that `row_wise` can run
+/// every group's bar `i` before any group's bar `i + 1`.
+fn group_loop<S: RecordSink + LogSink, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
     args: &FromOrders<'_>,
     group: usize,
+    cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<()> {
-    let cols = args.groups.range(group);
-    let group_len = cols.len();
-    let shared = group_len > 1;
+) -> Result<C::State> {
+    let mut cs = cb.pre_group(group, args.groups.range(group))?;
+    let mut run = Group::new::<S, LEV>(args, group, sink, fills)?;
+    run.run_rows::<S, C, FLOWS, LEV>(args, 0..args.n_rows, cb, &mut cs, sink, fills)?;
+    Ok(cs)
+}
 
-    // One cash balance for the group. Read from the group's first column, so
-    // an ungrouped run still reads per-column starting cash.
-    let mut cash = args.init_cash.get(0, cols.start);
-    let mut free_cash = cash;
-    let mut state = vec![ColumnState::new(); group_len];
+/// One group's account and the scratch its bars reuse, between bars.
+struct Group<'g> {
+    group: usize,
+    cols: std::ops::Range<usize>,
+    shared: bool,
+    cash: f64,
+    free_cash: f64,
+    state: Vec<ColumnState>,
+    price: Vec<f64>,
+    order_value: Vec<f64>,
+    seq: Vec<usize>,
+    params_vary: bool,
+    orders: Vec<ValidatedOrder>,
+    margin: Vec<bool>,
+    isolated: Vec<bool>,
+    mult: Vec<f64>,
+    liquidates: bool,
+    to_close: Vec<crate::liquidation::Close>,
+    at_open: bool,
+    earnings: bool,
+    charges: bool,
+    quotes: crate::prices::Quotes<'g, 'g>,
+    quotes_on: bool,
+    plain: bool,
+    raw_price: Vec<f64>,
+    /// A callback stopped the group: no more orders or callbacks.
+    stopped: bool,
+}
 
-    // Scratch reused across bars rather than reallocated per bar.
-    let mut price = vec![f64::NAN; group_len];
-    let mut order_value = vec![f64::NAN; group_len];
-    let mut seq: Vec<usize> = (0..group_len).collect();
+impl<'g> Group<'g> {
+    /// The group before its first bar, with its initial positions open.
+    fn new<S: RecordSink + LogSink, const LEV: bool>(
+        args: &'g FromOrders<'_>,
+        group: usize,
+        sink: &mut S,
+        fills: &mut i64,
+    ) -> Result<Self> {
+        let cols = args.groups.range(group);
+        let group_len = cols.len();
 
-    // Build each request once per column, not once per bar. That hoists two
-    // things: the eleven flexible-array reads it takes to fill in, and the
-    // nine of the kernel's checks that read only those fields.
-    // Both are constant down a column unless a caller says otherwise, which
-    // `params_vary_by_row` is what asks.
-    //
-    // Measured, interleaved against a build without it: +8% construction and
-    // +20% validation on sparse workloads, +11% and +10% on dense ones — in
-    // total +30% and +22%. Validation dominates on sparse because a bar that
-    // does not fill used to pay all fourteen checks and little else.
-    let params_vary = args.params_vary_by_row();
-    let mut orders: Vec<ValidatedOrder> =
-        cols.clone().map(|c| build_order(args, 0, c, LEV)).collect();
-    // Which columns are margin columns. Only a leveraged run can have any,
-    // because `any_levered` counts them, so the other copies keep none.
-    let margin = if LEV {
-        crate::margin_columns(&args.account_type, args.n_rows, cols.clone())?
-    } else {
-        Vec::new()
-    };
-    // Which are isolated: settled only when they close, and tested alone.
-    let isolated = if LEV {
-        crate::isolated_columns(&args.margin_mode, args.n_rows, cols.clone(), &margin)?
-    } else {
-        Vec::new()
-    };
-    // Each column's contract multiplier. The copy runs a column at its prices
-    // times it, so its state's valuation price is multiplied too, and writes
-    // the prices it records back unscaled.
-    let mult = if LEV {
-        crate::multipliers(&args.multiplier, args.n_rows, cols.clone())?
-    } else {
-        Vec::new()
-    };
-    if crate::initial::any(&args.init_position, cols.clone()) {
-        let inputs = crate::initial::Columns {
-            orders: &orders,
-            margin: &margin,
-            isolated: &isolated,
-            mult: &mult,
-            scaled_val_price: true,
+        // One cash balance for the group. Read from the group's first
+        // column, so an ungrouped run still reads per-column starting cash.
+        let mut cash = args.init_cash.get(0, cols.start);
+        let mut free_cash = cash;
+        let mut state = vec![ColumnState::new(); group_len];
+
+        // Build each request once per column, not once per bar. That hoists
+        // two things: the eleven flexible-array reads it takes to fill in,
+        // and the nine of the kernel's checks that read only those fields.
+        // Both are constant down a column unless a caller says otherwise,
+        // which `params_vary_by_row` is what asks.
+        //
+        // Measured, interleaved against a build without it: +8% construction
+        // and +20% validation on sparse workloads, +11% and +10% on dense
+        // ones — in total +30% and +22%. Validation dominates on sparse
+        // because a bar that does not fill used to pay all fourteen checks
+        // and little else.
+        let params_vary = args.params_vary_by_row();
+        let orders: Vec<ValidatedOrder> =
+            cols.clone().map(|c| build_order(args, 0, c, LEV)).collect();
+        // Which columns are margin columns. Only a leveraged run can have
+        // any, because `any_levered` counts them, so the other copies keep
+        // none.
+        let margin = if LEV {
+            crate::margin_columns(&args.account_type, args.n_rows, cols.clone())?
+        } else {
+            Vec::new()
         };
-        crate::initial::open(
-            &args.init_position,
-            &args.init_price,
-            &args.close,
-            cols.clone(),
-            &inputs,
-            &mut state,
-            &mut cash,
-            &mut free_cash,
-            sink,
-            fills,
-        )?;
-    }
-    // Only an account with a margin column and a maintenance margin can be
-    // liquidated; scratch for the test, reused across bars.
-    let liquidates = LEV && {
-        let inputs = args.liquidation();
-        ((!inputs.off() || !matches!(args.auto_deleverage, FlexArray::Scalar(false)))
-            && margin.contains(&true))
-            || !inputs.cash_off()
-    };
-    let mut to_close = Vec::new();
-    let at_open = FLOWS
-        && (!crate::cash::is_off(&args.cash_deposits)
-            || !crate::cash::is_off(&args.cash_dividends));
-    let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
-    let charges = LEV && !args.rates().all_off();
-    // Prices other than `price`'s, and the order decided `from_ago` bars
-    // back: see `crate::prices`.
-    let quotes = args.quotes();
-    let quotes_on = quotes.on();
-    // Neither: the order is this bar's and its price is `price`'s, read as
-    // the loop always did.
-    let plain = matches!(args.from_ago, FlexArray::Scalar(0))
-        && !quotes_on
-        && matches!(args.force_exit, FlexArray::Scalar(false));
-    let mut raw_price = if quotes_on {
-        vec![f64::NAN; group_len]
-    } else {
-        Vec::new()
-    };
-
-    for i in 0..args.n_rows {
-        if at_open {
-            crate::cash::at_open(
-                &args.cash_deposits,
-                &args.cash_dividends,
-                i,
-                cols.clone(),
-                // A dividend per share is paid on every share a contract
-                // holds.
-                |k| {
-                    if LEV {
-                        state[k].position * mult[k]
-                    } else {
-                        state[k].position
-                    }
-                },
-                &mut cash,
-                &mut free_cash,
-                sink,
-            )?;
-        }
-        if params_vary {
-            for (k, col) in cols.clone().enumerate() {
-                orders[k] = build_order(args, i, col, LEV);
-            }
-        }
-
-        // --- first pass: resolve prices for the whole group ---------------
-        for (k, col) in cols.clone().enumerate() {
-            // Resolve the order price. Infinities are sentinels: +inf means
-            // this bar's close, -inf the previous bar's close (and there is
-            // no previous one on the first bar).
-            let mut p = if plain {
-                args.price.get(i, col)
-            } else {
-                requested_price(args, i, col, args.from_ago.get(i, col), quotes_on)
+        // Which are isolated: settled only when they close, and tested alone.
+        let isolated = if LEV {
+            crate::isolated_columns(&args.margin_mode, args.n_rows, cols.clone(), &margin)?
+        } else {
+            Vec::new()
+        };
+        // Each column's contract multiplier. The copy runs a column at its
+        // prices times it, so its state's valuation price is multiplied too,
+        // and writes the prices it records back unscaled.
+        let mult = if LEV {
+            crate::multipliers(&args.multiplier, args.n_rows, cols.clone())?
+        } else {
+            Vec::new()
+        };
+        if crate::initial::any(&args.init_position, cols.clone()) {
+            let inputs = crate::initial::Columns {
+                orders: &orders,
+                margin: &margin,
+                isolated: &isolated,
+                mult: &mult,
+                scaled_val_price: true,
             };
-            if p.is_infinite() {
-                p = if p > 0.0 {
-                    args.close.get(i, col)
-                } else if i > 0 {
-                    args.close.get(i - 1, col)
-                } else {
-                    f64::NAN
-                };
-            }
-            price[k] = p;
-            if quotes_on {
-                raw_price[k] = p;
-            }
-
-            // Resolve the valuation price, whose +inf means "the order price".
-            let mut val_price = args.val_price.get(i, col);
-            if val_price.is_infinite() {
-                val_price = if val_price > 0.0 {
-                    p
-                } else if i > 0 {
-                    args.close.get(i - 1, col)
-                } else {
-                    f64::NAN
-                };
-            }
-            if LEV {
-                price[k] = p * mult[k];
-                val_price *= mult[k];
-            }
-            if !val_price.is_nan() || !args.ffill_val_price {
-                state[k].last_val_price = val_price;
-            }
-            if LEV && margin[k] && !isolated[k] {
-                let st = &mut state[k];
-                crate::margin::settle(
-                    st.position,
-                    &mut st.debt,
-                    st.last_val_price,
-                    &mut cash,
-                    &mut free_cash,
-                );
-            }
-        }
-
-        // --- liquidation, on the bar's path, before anything is valued -----
-        if liquidates {
-            liquidate(
-                args,
-                group,
-                i,
-                &orders,
-                &margin,
-                &isolated,
-                &mult,
+            crate::initial::open(
+                &args.init_position,
+                &args.init_price,
+                &args.close,
+                cols.clone(),
+                &inputs,
                 &mut state,
                 &mut cash,
                 &mut free_cash,
-                &mut to_close,
                 sink,
                 fills,
             )?;
         }
+        // Only an account with a margin column and a maintenance margin can
+        // be liquidated.
+        let liquidates = LEV && {
+            let inputs = args.liquidation();
+            ((!inputs.off() || !matches!(args.auto_deleverage, FlexArray::Scalar(false)))
+                && margin.contains(&true))
+                || !inputs.cash_off()
+        };
+        let at_open =
+            !crate::cash::is_off(&args.cash_deposits) || !crate::cash::is_off(&args.cash_dividends);
+        let earnings = !crate::cash::is_off(&args.cash_earnings);
+        let charges = LEV && !args.rates().all_off();
+        // Prices other than `price`'s, and the order decided `from_ago` bars
+        // back: see `crate::prices`.
+        let quotes = args.quotes();
+        let quotes_on = quotes.on();
+        // Neither: the order is this bar's and its price is `price`'s, read
+        // as the loop always did.
+        let plain = matches!(args.from_ago, FlexArray::Scalar(0))
+            && !quotes_on
+            && matches!(args.force_exit, FlexArray::Scalar(false));
+        Ok(Self {
+            group,
+            shared: group_len > 1,
+            cash,
+            free_cash,
+            state,
+            // Scratch reused across bars rather than reallocated per bar.
+            price: vec![f64::NAN; group_len],
+            order_value: vec![f64::NAN; group_len],
+            seq: (0..group_len).collect(),
+            params_vary,
+            orders,
+            margin,
+            isolated,
+            mult,
+            liquidates,
+            to_close: Vec::new(),
+            at_open,
+            earnings,
+            charges,
+            quotes,
+            quotes_on,
+            plain,
+            raw_price: if quotes_on {
+                vec![f64::NAN; group_len]
+            } else {
+                Vec::new()
+            },
+            stopped: false,
+            cols,
+        })
+    }
 
-        // --- the group's value, and the order to execute in ---------------
-        //
-        // Computed once per bar for a shared group, because every column's
-        // `TargetPercent` is a fraction of the same number. For a group of
-        // one it is recomputed per column below, which is the same thing.
-        let mut group_value = cash;
-        if shared {
-            for (k, st) in state.iter().enumerate() {
-                if LEV && margin[k] {
-                    group_value +=
-                        crate::margin::unsettled(st.position, st.debt, st.last_val_price);
-                    continue;
-                }
-                if st.position != 0.0 {
-                    group_value += st.position * st.last_val_price;
-                }
-                if LEV {
-                    group_value -= st.long_debt();
+    /// Bars `rows`, each: deposit, resolve, liquidate, execute, earn and
+    /// charge. A range rather than one bar, so that the account and the
+    /// flags are read into locals once per run rather than once per bar,
+    /// which on a bar without a fill is a measurable share of its cost.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the bar's phases read in order: deposit, resolve, execute, earn"
+    )]
+    #[inline(always)]
+    fn run_rows<S: RecordSink + LogSink, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
+        &mut self,
+        args: &FromOrders<'_>,
+        rows: std::ops::Range<usize>,
+        cb: &C,
+        cs: &mut C::State,
+        sink: &mut S,
+        fills: &mut i64,
+    ) -> Result<()> {
+        let group = self.group;
+        let cols = self.cols.clone();
+        let group_len = cols.len();
+        let shared = self.shared;
+        let mut cash = self.cash;
+        let mut free_cash = self.free_cash;
+        let state = &mut self.state;
+        let price = &mut self.price;
+        let order_value = &mut self.order_value;
+        let seq = &mut self.seq;
+        let orders = &mut self.orders;
+        let margin = &self.margin;
+        let isolated = &self.isolated;
+        let mult = &self.mult;
+        let to_close = &mut self.to_close;
+        let quotes = &self.quotes;
+        let quotes_on = self.quotes_on;
+        let plain = self.plain;
+        let raw_price = &mut self.raw_price;
+        let mut stopped = C::ON && self.stopped;
+        let at_open = FLOWS && self.at_open;
+        let earnings = FLOWS && self.earnings;
+        let params_vary = self.params_vary;
+        let liquidates = self.liquidates;
+        let charges = self.charges;
+
+        for i in rows {
+            if at_open {
+                crate::cash::at_open(
+                    &args.cash_deposits,
+                    &args.cash_dividends,
+                    i,
+                    cols.clone(),
+                    // A dividend per share is paid on every share a contract
+                    // holds.
+                    |k| {
+                        if LEV {
+                            state[k].position * mult[k]
+                        } else {
+                            state[k].position
+                        }
+                    },
+                    &mut cash,
+                    &mut free_cash,
+                    sink,
+                )?;
+            }
+            if params_vary {
+                for (k, col) in cols.clone().enumerate() {
+                    orders[k] = build_order(args, i, col, LEV);
                 }
             }
-            if args.call_seq == CallSeq::Auto {
-                for (k, col) in cols.clone().enumerate() {
+
+            // --- first pass: resolve prices for the whole group ---------------
+            for (k, col) in cols.clone().enumerate() {
+                // Resolve the order price. Infinities are sentinels: +inf means
+                // this bar's close, -inf the previous bar's close (and there is
+                // no previous one on the first bar).
+                let mut p = if plain {
+                    args.price.get(i, col)
+                } else {
+                    requested_price(args, i, col, args.from_ago.get(i, col), quotes_on)
+                };
+                if p.is_infinite() {
+                    p = if p > 0.0 {
+                        args.close.get(i, col)
+                    } else if i > 0 {
+                        args.close.get(i - 1, col)
+                    } else {
+                        f64::NAN
+                    };
+                }
+                price[k] = p;
+                if quotes_on {
+                    raw_price[k] = p;
+                }
+
+                // Resolve the valuation price, whose +inf means "the order price".
+                let mut val_price = args.val_price.get(i, col);
+                if val_price.is_infinite() {
+                    val_price = if val_price > 0.0 {
+                        p
+                    } else if i > 0 {
+                        args.close.get(i - 1, col)
+                    } else {
+                        f64::NAN
+                    };
+                }
+                if LEV {
+                    price[k] = p * mult[k];
+                    val_price *= mult[k];
+                }
+                if !val_price.is_nan() || !args.ffill_val_price {
+                    state[k].last_val_price = val_price;
+                }
+                if LEV && margin[k] && !isolated[k] {
+                    let st = &mut state[k];
+                    crate::margin::settle(
+                        st.position,
+                        &mut st.debt,
+                        st.last_val_price,
+                        &mut cash,
+                        &mut free_cash,
+                    );
+                }
+            }
+
+            // --- liquidation, on the bar's path, before anything is valued -----
+            if liquidates {
+                liquidate(
+                    args,
+                    group,
+                    i,
+                    orders,
+                    margin,
+                    isolated,
+                    mult,
+                    state,
+                    &mut cash,
+                    &mut free_cash,
+                    to_close,
+                    sink,
+                    fills,
+                )?;
+            }
+
+            // --- the group's value, and the order to execute in ---------------
+            //
+            // Computed once per bar for a shared group, because every column's
+            // `TargetPercent` is a fraction of the same number. For a group of
+            // one it is recomputed per column below, which is the same thing.
+            let mut group_value = cash;
+            if shared {
+                for (k, st) in state.iter().enumerate() {
+                    if LEV && margin[k] {
+                        group_value +=
+                            crate::margin::unsettled(st.position, st.debt, st.last_val_price);
+                        continue;
+                    }
+                    if st.position != 0.0 {
+                        group_value += st.position * st.last_val_price;
+                    }
+                    if LEV {
+                        group_value -= st.long_debt();
+                    }
+                }
+                if args.call_seq == CallSeq::Auto {
+                    for (k, col) in cols.clone().enumerate() {
+                        let (size, size_type, direction) = if plain {
+                            (
+                                args.size.get(i, col),
+                                args.size_type.get(i, col),
+                                args.direction.get(i, col),
+                            )
+                        } else {
+                            order_at(args, i, col, args.from_ago.get(i, col))
+                        };
+                        // Already times the multiplier in this loop's copy.
+                        let val_price = state[k].last_val_price;
+                        order_value[k] = approx_order_value(
+                            size,
+                            size_type,
+                            direction,
+                            cash,
+                            state[k].position,
+                            free_cash,
+                            val_price,
+                            group_value,
+                        );
+                        if LEV {
+                            order_value[k] = approx_cash_need(
+                                order_value[k],
+                                state[k].position * val_price,
+                                val_price,
+                                orders[k].order(),
+                            );
+                        }
+                    }
+                }
+                args.call_seq
+                    .resolve(cols.clone(), i, args.n_rows, order_value, seq)?;
+            }
+
+            // --- the callbacks' view of the bar -------------------------------
+            let mut skip = false;
+            if C::ON && !stopped {
+                if !shared {
+                    group_value = value_of::<LEV>(cash, state, margin);
+                }
+                let ctx = Context {
+                    group,
+                    row: i,
+                    cols: &cols,
+                    cash,
+                    free_cash,
+                    value: group_value,
+                    columns: state,
+                    mult,
+                    scaled: true,
+                    close: &args.close,
+                    orders,
+                };
+                match cb.pre_segment(&ctx, cs)? {
+                    Flow::Continue => {}
+                    Flow::SkipSegment => skip = true,
+                    Flow::StopGroup => stopped = true,
+                }
+            }
+
+            // --- second pass: execute -----------------------------------------
+            if C::ON && C::FLEX && !skip && !stopped {
+                // Any number of orders, each naming its column. Every column's
+                // request carries the bar's price, to start one from.
+                for (k, order) in orders.iter_mut().enumerate() {
+                    order.set_bar(f64::NAN, price[k], SizeType::Amount, Direction::Both);
+                }
+                let mut call = 0;
+                loop {
+                    let ctx = Context {
+                        group,
+                        row: i,
+                        cols: &cols,
+                        cash,
+                        free_cash,
+                        value: group_value,
+                        columns: state,
+                        mult,
+                        scaled: true,
+                        close: &args.close,
+                        orders,
+                    };
+                    let Some((k, request)) = cb.flex_order(&ctx, call, cs)? else {
+                        break;
+                    };
+                    call += 1;
+                    if k >= group_len {
+                        return Err(Error::Invariant(format!(
+                            "flex_order named column {k} of a group of {group_len} at row {i}"
+                        )));
+                    }
+                    let col = cols.start + k;
+                    let order =
+                        callback_order::<LEV>(args, i, col, request, margin, mult, k, price[k])?;
+                    let (result, new_value) = execute::<S, LEV>(
+                        args,
+                        group,
+                        i,
+                        k,
+                        col,
+                        &order,
+                        group_value,
+                        &mut cash,
+                        &mut free_cash,
+                        state,
+                        margin,
+                        isolated,
+                        mult,
+                        sink,
+                        fills,
+                    )?;
+                    group_value = new_value;
+                    if post_order::<C, LEV>(
+                        args,
+                        cb,
+                        cs,
+                        group,
+                        i,
+                        &cols,
+                        cash,
+                        free_cash,
+                        group_value,
+                        state,
+                        mult,
+                        orders,
+                        k,
+                        &request,
+                        result,
+                    )? {
+                        stopped = true;
+                        break;
+                    }
+                }
+            } else if !C::ON || (!skip && !stopped) {
+                for (slot, &picked) in seq.iter().enumerate().take(group_len) {
+                    let k = if shared { picked } else { slot };
+                    let col = cols.start + k;
+                    // Borrowed, not copied: the state also carries
+                    // `from_signals`' stops and resting order, which this loop
+                    // never reads.
+                    let st = &state[k];
+
+                    // An unshared column values only itself, which is what phase
+                    // 1 did and what a group of one still means.
+                    if !shared {
+                        group_value = if LEV && margin[k] {
+                            cash + crate::margin::unsettled(st.position, st.debt, st.last_val_price)
+                        } else if st.position == 0.0 {
+                            cash
+                        } else {
+                            cash + st.position * st.last_val_price
+                        };
+                        if LEV && !margin[k] {
+                            group_value -= st.long_debt();
+                        }
+                    }
+                    let value = group_value;
+
                     let (size, size_type, direction) = if plain {
                         (
                             args.size.get(i, col),
@@ -800,255 +1074,448 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     } else {
                         order_at(args, i, col, args.from_ago.get(i, col))
                     };
-                    // Already times the multiplier in this loop's copy.
-                    let val_price = state[k].last_val_price;
-                    order_value[k] = approx_order_value(
-                        size,
-                        size_type,
-                        direction,
-                        cash,
-                        state[k].position,
-                        free_cash,
-                        val_price,
-                        group_value,
-                    );
-                    if LEV {
-                        order_value[k] = approx_cash_need(
-                            order_value[k],
-                            state[k].position * val_price,
-                            val_price,
-                            orders[k].order(),
+                    let mut order_price = price[k];
+                    if quotes_on {
+                        let buy = crate::prices::buys(
+                            size,
+                            size_type,
+                            st.position,
+                            st.last_val_price,
+                            value,
                         );
+                        order_price = quotes.order_price(i, col, raw_price[k], buy)?;
+                        if LEV {
+                            order_price *= mult[k];
+                        }
+                    }
+                    orders[k].set_bar(size, order_price, size_type, direction);
+
+                    // The callback's order, as it asked and as validated.
+                    let custom: ValidatedOrder;
+                    let mut request = *orders[k].order();
+                    let order = if C::ON {
+                        if LEV {
+                            request.price /= mult[k];
+                        }
+                        let ctx = Context {
+                            group,
+                            row: i,
+                            cols: &cols,
+                            cash,
+                            free_cash,
+                            value,
+                            columns: state,
+                            mult,
+                            scaled: true,
+                            close: &args.close,
+                            orders,
+                        };
+                        cb.order(&ctx, k, &mut request, cs)?;
+                        custom = callback_order::<LEV>(
+                            args,
+                            i,
+                            col,
+                            request,
+                            margin,
+                            mult,
+                            k,
+                            order_price,
+                        )?;
+                        &custom
+                    } else {
+                        &orders[k]
+                    };
+
+                    let (result, new_value) = execute::<S, LEV>(
+                        args,
+                        group,
+                        i,
+                        k,
+                        col,
+                        order,
+                        value,
+                        &mut cash,
+                        &mut free_cash,
+                        state,
+                        margin,
+                        isolated,
+                        mult,
+                        sink,
+                        fills,
+                    )?;
+                    // The group's value is threaded, not re-derived. **Every
+                    // order in a bar is sized against the value the bar opened
+                    // with**, and a fill moves that value only when
+                    // `update_value` says to. Re-summing the group after each
+                    // fill is the obvious alternative and it is wrong: it makes
+                    // a rebalance's later legs see a book the earlier ones have
+                    // already changed, which is not what the reference models
+                    // and not what "decide the whole bar at once" means.
+                    group_value = new_value;
+                    if C::ON
+                        && post_order::<C, LEV>(
+                            args,
+                            cb,
+                            cs,
+                            group,
+                            i,
+                            &cols,
+                            cash,
+                            free_cash,
+                            group_value,
+                            state,
+                            mult,
+                            orders,
+                            k,
+                            &request,
+                            result,
+                        )?
+                    {
+                        stopped = true;
+                        break;
                     }
                 }
             }
-            args.call_seq
-                .resolve(cols.clone(), i, args.n_rows, &mut order_value, &mut seq)?;
-        }
 
-        // --- second pass: execute -----------------------------------------
-        for (slot, &picked) in seq.iter().enumerate().take(group_len) {
-            let k = if shared { picked } else { slot };
-            let col = cols.start + k;
-            // Borrowed, not copied: the state also carries `from_signals`'
-            // stops and resting order, which this loop never reads.
-            let st = &state[k];
-
-            // An unshared column values only itself, which is what phase 1
-            // did and what a group of one still means.
-            if !shared {
-                group_value = if LEV && margin[k] {
-                    cash + crate::margin::unsettled(st.position, st.debt, st.last_val_price)
-                } else if st.position == 0.0 {
-                    cash
-                } else {
-                    cash + st.position * st.last_val_price
-                };
-                if LEV && !margin[k] {
-                    group_value -= st.long_debt();
-                }
+            if earnings {
+                crate::cash::earn(
+                    &args.cash_earnings,
+                    i,
+                    cols.clone(),
+                    &mut cash,
+                    &mut free_cash,
+                    sink,
+                )?;
             }
-            let value = group_value;
-
-            let (size, size_type, direction) = if plain {
-                (
-                    args.size.get(i, col),
-                    args.size_type.get(i, col),
-                    args.direction.get(i, col),
-                )
-            } else {
-                order_at(args, i, col, args.from_ago.get(i, col))
-            };
-            let mut order_price = price[k];
-            if quotes_on {
-                let buy =
-                    crate::prices::buys(size, size_type, st.position, st.last_val_price, value);
-                order_price = quotes.order_price(i, col, raw_price[k], buy)?;
-                if LEV {
-                    order_price *= mult[k];
-                }
+            if charges {
+                crate::holding::charge(
+                    &args.rates(),
+                    i,
+                    cols.clone(),
+                    crate::holding::Columns {
+                        states: state,
+                        margin,
+                        isolated,
+                        mult,
+                        scaled_val_price: true,
+                    },
+                    &mut cash,
+                    &mut free_cash,
+                    sink,
+                )?;
             }
-            let order = &mut orders[k];
-            order.set_bar(size, order_price, size_type, direction);
-
-            let process = ProcessOrderState {
-                cash,
-                position: st.position,
-                debt: st.debt,
-                locked_cash: st.locked_cash,
-                free_cash,
-                val_price: st.last_val_price,
-                value,
-                oidx: 0,
-                lidx: 0,
-            };
-
-            // Drawn only when asked for, so a run without random rejection
-            // never touches the generator.
-            let draw = (order.order().reject_prob > 0.0)
-                .then(|| crate::random::uniform(args.seed, i, col));
-            let (exec_state, result) = execute_validated(&process, order, draw)?;
-
-            if result.status == OrderStatus::Rejected && order.order().raise_reject {
-                return Err(Error::Invariant(format!(
-                    "order rejected at row {i}, column {col}: {}",
-                    result
-                        .status_info
-                        .map_or("unknown reason", phasor_model::StatusInfo::describe)
-                )));
-            }
-
-            // `update_value` re-marks the valuation price to the price
-            // actually filled at, and moves the value with it. Within a bar
-            // that matters only for a shared group, where the value is
-            // threaded across columns; across bars the re-marked price
-            // survives when the next bar's valuation is unusable and
-            // forward-fill is on, and then changes the size of a target-sized
-            // order.
-            let (new_val_price, new_value) = if result.is_filled() && args.update_value {
-                let (val_price, value) = updated_value(
-                    cash,
-                    exec_state.cash,
-                    st.position,
-                    exec_state.position,
-                    st.last_val_price,
-                    result.price,
-                    value,
-                );
-                if LEV {
-                    // Borrowing moves no value: it adds as much debt as cash.
-                    // A margin fill adds as much cost basis as position value.
-                    let now = ColumnState {
-                        position: exec_state.position,
-                        debt: exec_state.debt,
-                        ..*st
-                    };
-                    let m = margin[k];
-                    (val_price, value - (now.owed(m) - st.owed(m)))
-                } else {
-                    (val_price, value)
-                }
-            } else {
-                (st.last_val_price, value)
-            };
-
-            let mut order_id = -1_i64;
-            if result.is_filled() {
-                let side = result.side.expect("a filled order always carries a side");
-                if LEV {
-                    sink.push_order(
-                        i,
-                        col,
-                        result.size,
-                        result.price / mult[k],
-                        result.fees,
-                        side,
-                    );
-                    sink.push_balances(Balances {
-                        debt: exec_state.debt,
-                        locked_cash: exec_state.locked_cash,
-                        margin: margin[k],
-                        isolated: isolated[k],
-                        liquidation: false,
-                        multiplier: mult[k],
-                    });
-                } else {
-                    sink.push_order(i, col, result.size, result.price, result.fees, side);
-                }
-                // The record's own index, so a log joins back to the fill it
-                // produced. Counted rather than read off the sink, because a
-                // sink need not be an array.
-                order_id = *fills;
-                *fills += 1;
-            }
-
-            if order.order().log {
-                let mut entry = LogEntry {
+            if C::ON && !stopped {
+                let ctx = Context {
                     group,
-                    col,
-                    idx: i,
+                    row: i,
+                    cols: &cols,
                     cash,
-                    position: st.position,
-                    debt: st.debt,
-                    locked_cash: st.locked_cash,
                     free_cash,
-                    val_price: st.last_val_price,
-                    value,
-                    request: *order.order(),
-                    new_cash: exec_state.cash,
-                    new_position: exec_state.position,
-                    new_debt: exec_state.debt,
-                    new_locked_cash: exec_state.locked_cash,
-                    new_free_cash: exec_state.free_cash,
-                    new_val_price,
-                    new_value,
-                    result,
-                    order_id,
-                    liquidation: false,
-                    multiplier: 1.0,
+                    value: value_of::<LEV>(cash, state, margin),
+                    columns: state,
+                    mult,
+                    scaled: true,
+                    close: &args.close,
+                    orders,
                 };
-                if LEV {
-                    crate::unscale_log(&mut entry, mult[k]);
+                if cb.post_segment(&ctx, cs)? == Flow::StopGroup {
+                    stopped = true;
                 }
-                sink.push_log(&entry);
             }
+        }
+        if C::ON {
+            self.stopped = stopped;
+        }
+        self.cash = cash;
+        self.free_cash = free_cash;
+        Ok(())
+    }
+}
 
-            cash = exec_state.cash;
-            free_cash = exec_state.free_cash;
-            state[k].position = exec_state.position;
-            state[k].debt = exec_state.debt;
-            state[k].locked_cash = exec_state.locked_cash;
-            // The reference guards this write with the same NaN/ffill test
-            // used during resolution. Here that guard provably cannot change
-            // anything: `new_val_price` is either the current
-            // `last_val_price`, or a filled order's price, which is finite.
-            // The only skipped case would assign NaN over NaN.
-            //
-            // Written unconditionally rather than carrying a branch no fixture
-            // can reach. Restore the guard when a loop appears where
-            // `new_val_price` can be NaN independently of `last_val_price`.
-            state[k].last_val_price = new_val_price;
-            // The group's value is threaded, not re-derived. **Every order in
-            // a bar is sized against the value the bar opened with**, and a
-            // fill moves that value only when `update_value` says to.
-            // Re-summing the group after each fill is the obvious alternative
-            // and it is wrong: it makes a rebalance's later legs see a book
-            // the earlier ones have already changed, which is not what the
-            // reference models and not what "decide the whole bar at once"
-            // means.
-            group_value = new_value;
-        }
+/// Executes column `k`'s `order` against the group's account and records
+/// it, returning the result and the group's value after it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the bar, the column, the group's account and the sink"
+)]
+#[inline(always)]
+fn execute<S: RecordSink + LogSink, const LEV: bool>(
+    args: &FromOrders<'_>,
+    group: usize,
+    i: usize,
+    k: usize,
+    col: usize,
+    order: &ValidatedOrder,
+    value: f64,
+    cash: &mut f64,
+    free_cash: &mut f64,
+    state: &mut [ColumnState],
+    margin: &[bool],
+    isolated: &[bool],
+    mult: &[f64],
+    sink: &mut S,
+    fills: &mut i64,
+) -> Result<(OrderResult, f64)> {
+    let st = &state[k];
+    let process = ProcessOrderState {
+        cash: *cash,
+        position: st.position,
+        debt: st.debt,
+        locked_cash: st.locked_cash,
+        free_cash: *free_cash,
+        val_price: st.last_val_price,
+        value,
+        oidx: 0,
+        lidx: 0,
+    };
 
-        if earnings {
-            crate::cash::earn(
-                &args.cash_earnings,
-                i,
-                cols.clone(),
-                &mut cash,
-                &mut free_cash,
-                sink,
-            )?;
-        }
-        if charges {
-            crate::holding::charge(
-                &args.rates(),
-                i,
-                cols.clone(),
-                crate::holding::Columns {
-                    states: &mut state,
-                    margin: &margin,
-                    isolated: &isolated,
-                    mult: &mult,
-                    scaled_val_price: true,
-                },
-                &mut cash,
-                &mut free_cash,
-                sink,
-            )?;
-        }
+    // Drawn only when asked for, so a run without random rejection never
+    // touches the generator.
+    let draw = (order.order().reject_prob > 0.0).then(|| crate::random::uniform(args.seed, i, col));
+    let (exec_state, result) = execute_validated(&process, order, draw)?;
+
+    if result.status == OrderStatus::Rejected && order.order().raise_reject {
+        return Err(Error::Invariant(format!(
+            "order rejected at row {i}, column {col}: {}",
+            result
+                .status_info
+                .map_or("unknown reason", phasor_model::StatusInfo::describe)
+        )));
     }
 
-    Ok(())
+    // `update_value` re-marks the valuation price to the price actually
+    // filled at, and moves the value with it. Within a bar that matters only
+    // for a shared group, where the value is threaded across columns; across
+    // bars the re-marked price survives when the next bar's valuation is
+    // unusable and forward-fill is on, and then changes the size of a
+    // target-sized order.
+    let (new_val_price, new_value) = if result.is_filled() && args.update_value {
+        let (val_price, value) = updated_value(
+            *cash,
+            exec_state.cash,
+            st.position,
+            exec_state.position,
+            st.last_val_price,
+            result.price,
+            value,
+        );
+        if LEV {
+            // Borrowing moves no value: it adds as much debt as cash. A
+            // margin fill adds as much cost basis as position value.
+            let now = ColumnState {
+                position: exec_state.position,
+                debt: exec_state.debt,
+                ..*st
+            };
+            let m = margin[k];
+            (val_price, value - (now.owed(m) - st.owed(m)))
+        } else {
+            (val_price, value)
+        }
+    } else {
+        (st.last_val_price, value)
+    };
+
+    let mut order_id = -1_i64;
+    if result.is_filled() {
+        let side = result.side.expect("a filled order always carries a side");
+        if LEV {
+            sink.push_order(
+                i,
+                col,
+                result.size,
+                result.price / mult[k],
+                result.fees,
+                side,
+            );
+            sink.push_balances(Balances {
+                debt: exec_state.debt,
+                locked_cash: exec_state.locked_cash,
+                margin: margin[k],
+                isolated: isolated[k],
+                liquidation: false,
+                multiplier: mult[k],
+            });
+        } else {
+            sink.push_order(i, col, result.size, result.price, result.fees, side);
+        }
+        // The record's own index, so a log joins back to the fill it
+        // produced. Counted rather than read off the sink, because a sink
+        // need not be an array.
+        order_id = *fills;
+        *fills += 1;
+    }
+
+    if order.order().log {
+        let mut entry = LogEntry {
+            group,
+            col,
+            idx: i,
+            cash: *cash,
+            position: st.position,
+            debt: st.debt,
+            locked_cash: st.locked_cash,
+            free_cash: *free_cash,
+            val_price: st.last_val_price,
+            value,
+            request: *order.order(),
+            new_cash: exec_state.cash,
+            new_position: exec_state.position,
+            new_debt: exec_state.debt,
+            new_locked_cash: exec_state.locked_cash,
+            new_free_cash: exec_state.free_cash,
+            new_val_price,
+            new_value,
+            result,
+            order_id,
+            liquidation: false,
+            multiplier: 1.0,
+        };
+        if LEV {
+            crate::unscale_log(&mut entry, mult[k]);
+        }
+        sink.push_log(&entry);
+    }
+
+    *cash = exec_state.cash;
+    *free_cash = exec_state.free_cash;
+    state[k].position = exec_state.position;
+    state[k].debt = exec_state.debt;
+    state[k].locked_cash = exec_state.locked_cash;
+    // The reference guards this write with the same NaN/ffill test used
+    // during resolution. Here that guard provably cannot change anything:
+    // `new_val_price` is either the current `last_val_price`, or a filled
+    // order's price, which is finite. The only skipped case would assign NaN
+    // over NaN.
+    //
+    // Written unconditionally rather than carrying a branch no fixture can
+    // reach. Restore the guard when a loop appears where `new_val_price` can
+    // be NaN independently of `last_val_price`.
+    state[k].last_val_price = new_val_price;
+    Ok((result, new_value))
+}
+
+/// What a group is worth, as [`group_value`] has it, in either copy.
+fn value_of<const LEV: bool>(cash: f64, state: &[ColumnState], margin: &[bool]) -> f64 {
+    if LEV {
+        return group_value(cash, state, margin);
+    }
+    let mut value = cash;
+    for st in state {
+        if st.position != 0.0 {
+            value += st.position * st.last_val_price;
+        }
+    }
+    value
+}
+
+/// A callback's order for column `k`, ready to execute: its `±inf` price
+/// read as the arrays' is, times the column's multiplier, and validated.
+/// `given` is the multiplied price the callback was handed: a price it left
+/// as it was is that, not the division multiplied back.
+///
+/// # Errors
+///
+/// Returns [`Error::Invariant`] for an order that changes what the run's
+/// records were set up for: leverage or a margin account in a run without
+/// either, or a column's account type.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the bar, the column and the order"
+)]
+#[cold]
+#[inline(never)]
+fn callback_order<const LEV: bool>(
+    args: &FromOrders<'_>,
+    i: usize,
+    col: usize,
+    mut order: Order,
+    margin: &[bool],
+    mult: &[f64],
+    k: usize,
+    given: f64,
+) -> Result<ValidatedOrder> {
+    let is_margin = order.account_type == AccountType::Margin;
+    if LEV {
+        if is_margin != margin[k] {
+            return Err(Error::Invariant(format!(
+                "a callback changed column {col}'s account type at row {i}; it is the run's \
+                 `account_type`"
+            )));
+        }
+    } else if is_margin || order.leverage > 1.0 {
+        return Err(Error::Invariant(format!(
+            "a callback asked for leverage or a margin account at row {i}, column {col}; set \
+             `leverage` or `account_type` in the run's arrays so its records keep balances"
+        )));
+    }
+    order.allow_negative_price = args.allow_negative_price;
+    if order.price.is_infinite() {
+        order.price = if order.price > 0.0 {
+            args.close.get(i, col)
+        } else if i > 0 {
+            args.close.get(i - 1, col)
+        } else {
+            f64::NAN
+        };
+    }
+    if LEV {
+        order.price = if order.price.to_bits() == (given / mult[k]).to_bits() {
+            given
+        } else {
+            order.price * mult[k]
+        };
+    }
+    let validated = ValidatedOrder::new(order);
+    Ok(if LEV {
+        validated.in_levered_account()
+    } else {
+        validated
+    })
+}
+
+/// Calls [`OrderFunc::post_order`] with the result at the strategy's
+/// prices; whether it stopped the group.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the context's fields and the order"
+)]
+#[cold]
+#[inline(never)]
+fn post_order<C: OrderFunc, const LEV: bool>(
+    args: &FromOrders<'_>,
+    cb: &C,
+    cs: &mut C::State,
+    group: usize,
+    row: usize,
+    cols: &std::ops::Range<usize>,
+    cash: f64,
+    free_cash: f64,
+    value: f64,
+    state: &[ColumnState],
+    mult: &[f64],
+    orders: &[ValidatedOrder],
+    k: usize,
+    request: &Order,
+    mut result: OrderResult,
+) -> Result<bool> {
+    if LEV {
+        result.price /= mult[k];
+    }
+    let ctx = Context {
+        group,
+        row,
+        cols,
+        cash,
+        free_cash,
+        value,
+        columns: state,
+        mult,
+        scaled: true,
+        close: &args.close,
+        orders,
+    };
+    Ok(cb.post_order(&ctx, k, request, &result, cs)? == Flow::StopGroup)
 }
 
 /// The requested price of the order executing on bar `i`, before its
@@ -1310,24 +1777,30 @@ fn check_groups(args: &FromOrders<'_>) -> Result<()> {
     }
 }
 
-/// Simulates every group on one thread into any sink.
+/// Simulates every group on one thread into any sink, with callbacks.
 ///
 /// Generic so that the plain and the logged variant are one loop rather than
 /// two copies differing in a type. The sink decides whether logs are kept:
 /// [`OrderRecords`] discards them through `LogSink`'s defaulted no-op, so a run
 /// that is not collecting logs pays nothing for the call site existing.
-fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
+fn simulate_into<S: SinkBuffer, C: OrderFunc>(
+    args: &FromOrders<'_>,
+    cb: &C,
+) -> Result<(S, Vec<C::State>)> {
     check_groups(args)?;
     let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
     let levered = args.levered();
+    let mut states = Vec::new();
     for group in 0..args.groups.len() {
-        simulate_group(args, group, levered, &mut sink, &mut fills)?;
+        states.push(simulate_group(
+            args, group, levered, cb, &mut sink, &mut fills,
+        )?);
     }
     sink.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok(sink)
+    Ok((sink, states))
 }
 
 /// Simulates every column on one thread.
@@ -1337,7 +1810,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
 /// Propagates any invariant violation from the execution kernel, and any
 /// rejection on a column whose `raise_reject` is set.
 pub fn simulate_from_orders(args: &FromOrders<'_>) -> Result<OrderRecords> {
-    simulate_into(args)
+    Ok(simulate_into(args, &NoCallbacks)?.0)
 }
 
 /// Simulates every column, keeping the logs of the orders that asked for one.
@@ -1355,7 +1828,7 @@ pub fn simulate_from_orders(args: &FromOrders<'_>) -> Result<OrderRecords> {
 ///
 /// As [`simulate_from_orders`].
 pub fn simulate_from_orders_logged(args: &FromOrders<'_>) -> Result<Journal> {
-    simulate_into(args)
+    Ok(simulate_into(args, &NoCallbacks)?.0)
 }
 
 /// Simulates every group across `n_threads`, producing byte-identical output.
@@ -1381,7 +1854,7 @@ pub fn simulate_from_orders_parallel(
     args: &FromOrders<'_>,
     n_threads: usize,
 ) -> Result<OrderRecords> {
-    simulate_into_parallel(args, n_threads)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
 }
 
 /// Simulates every group across `n_threads`, keeping logs.
@@ -1398,7 +1871,91 @@ pub fn simulate_from_orders_logged_parallel(
     args: &FromOrders<'_>,
     n_threads: usize,
 ) -> Result<Journal> {
-    simulate_into_parallel(args, n_threads)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
+}
+
+/// How [`simulate_from_order_func`] runs its groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Schedule {
+    /// Each group start to finish, groups across `n_threads` (1: serial), as
+    /// without callbacks. A callback sees no other group's bars.
+    Groups {
+        /// Threads to spread the groups over.
+        n_threads: usize,
+    },
+    /// Bar by bar: every group's bar `i`, in group order, before any group's
+    /// bar `i + 1`, on one thread. For a callback that coordinates groups
+    /// through state it shares across them; the records are the same as
+    /// [`Schedule::Groups`]' when it does not.
+    RowWise,
+}
+
+/// `from_orders` with callbacks: each group's orders come from `cb`, which
+/// sees the account bar by bar; see [`crate::callbacks`]. Returns the
+/// records, plain ([`OrderRecords`]) or with logs ([`Journal`]), and each
+/// group's callback state in group order.
+///
+/// `args` gives everything a callback does not: prices, fees, accounts,
+/// cash flows and the rest. Its `size` is each order's size before the
+/// callback sees it, so a run whose orders all come from the callback sets
+/// it to `NaN`.
+///
+/// # Errors
+///
+/// As [`simulate_from_orders`], and any error a callback returns.
+pub fn simulate_from_order_func<S: SinkBuffer, C: OrderFunc + Sync>(
+    args: &FromOrders<'_>,
+    cb: &C,
+    schedule: Schedule,
+) -> Result<(S, Vec<C::State>)> {
+    match schedule {
+        Schedule::Groups { n_threads } => simulate_into_parallel(args, cb, n_threads),
+        Schedule::RowWise => {
+            check_groups(args)?;
+            match (args.flows(), args.levered()) {
+                (false, false) => row_wise::<S, C, false, false>(args, cb),
+                (true, false) => row_wise::<S, C, true, false>(args, cb),
+                (false, true) => row_wise::<S, C, false, true>(args, cb),
+                (true, true) => row_wise::<S, C, true, true>(args, cb),
+            }
+        }
+    }
+}
+
+/// [`Schedule::RowWise`]: every group's bar `i` before any group's next.
+/// Each group writes its own buffer, merged in group order as the parallel
+/// path merges its chunks, so the records do not depend on the schedule.
+fn row_wise<S: SinkBuffer, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
+    args: &FromOrders<'_>,
+    cb: &C,
+) -> Result<(S, Vec<C::State>)> {
+    let n_groups = args.groups.len();
+    let mut sinks = Vec::with_capacity(n_groups);
+    let mut fills = vec![0_i64; n_groups];
+    let mut states = Vec::with_capacity(n_groups);
+    let mut runs = Vec::with_capacity(n_groups);
+    for (group, filled) in fills.iter_mut().enumerate() {
+        let cols = args.groups.range(group);
+        states.push(cb.pre_group(group, cols.clone())?);
+        let mut sink = S::with_capacity(args.fill_bound(cols));
+        runs.push(Group::new::<S, LEV>(args, group, &mut sink, filled)?);
+        sinks.push(sink);
+    }
+    for i in 0..args.n_rows {
+        for (group, run) in runs.iter_mut().enumerate() {
+            run.run_rows::<S, C, FLOWS, LEV>(
+                args,
+                i..i + 1,
+                cb,
+                &mut states[group],
+                &mut sinks[group],
+                &mut fills[group],
+            )?;
+        }
+    }
+    let mut merged = S::merge(sinks);
+    merged.records_mut().allow_negative_price = args.allow_negative_price;
+    Ok((merged, states))
 }
 
 /// Simulates every group across `n_threads` into any sink.
@@ -1406,7 +1963,11 @@ pub fn simulate_from_orders_logged_parallel(
 /// # Errors
 ///
 /// As [`simulate_from_orders`].
-fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize) -> Result<S> {
+fn simulate_into_parallel<S: SinkBuffer, C: OrderFunc + Sync>(
+    args: &FromOrders<'_>,
+    cb: &C,
+    n_threads: usize,
+) -> Result<(S, Vec<C::State>)> {
     // The parallel axis is the group, not the column. With the default
     // grouping the two are the same thing; with one shared portfolio there is
     // a single unit of work and this degrades to the serial path, which is
@@ -1416,7 +1977,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     let n_groups = args.groups.len();
     let n_threads = n_threads.max(1).min(n_groups.max(1));
     if n_threads == 1 {
-        return simulate_into(args);
+        return simulate_into(args, cb);
     }
 
     // Contiguous chunks keep each thread's columns adjacent in memory and
@@ -1424,7 +1985,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     let ranges = args.groups.chunks(n_threads);
     let levered = args.levered();
 
-    let results: Vec<Result<S>> = std::thread::scope(|scope| {
+    let results: Vec<Result<(S, Vec<C::State>)>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .iter()
             .map(|&(start, end)| {
@@ -1439,10 +2000,13 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
                     // re-bases them. A shared counter here would make the
                     // numbering depend on interleaving.
                     let mut fills = 0_i64;
+                    let mut states = Vec::new();
                     for group in start..end {
-                        simulate_group(args, group, levered, &mut sink, &mut fills)?;
+                        states.push(simulate_group(
+                            args, group, levered, cb, &mut sink, &mut fills,
+                        )?);
                     }
-                    Ok(sink)
+                    Ok((sink, states))
                 })
             })
             .collect();
@@ -1457,12 +2021,15 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
 
     // Report the lowest-numbered failure so errors are deterministic.
     let mut parts = Vec::with_capacity(results.len());
+    let mut states = Vec::with_capacity(n_groups);
     for result in results {
-        parts.push(result?);
+        let (sink, part) = result?;
+        parts.push(sink);
+        states.extend(part);
     }
     let mut merged = S::merge(parts);
     merged.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok(merged)
+    Ok((merged, states))
 }
 
 #[cfg(test)]

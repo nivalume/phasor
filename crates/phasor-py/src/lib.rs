@@ -47,6 +47,7 @@
 pub mod array;
 #[allow(unsafe_code)]
 mod arrow;
+mod callbacks;
 pub mod data;
 pub mod expr;
 pub mod params;
@@ -118,6 +119,9 @@ pub struct PyPortfolio {
     risk_free: f64,
     incl_open: bool,
     trades_type: TradesType,
+    /// Each group's callback state, in group order, when the run had
+    /// callbacks.
+    in_outputs: Option<Py<PyAny>>,
 }
 
 impl PyPortfolio {
@@ -195,12 +199,20 @@ impl PyPortfolio {
             risk_free: scoring.risk_free,
             incl_open: scoring.incl_open,
             trades_type: scoring.trades_type,
+            in_outputs: None,
         }
     }
 }
 
 #[pymethods]
 impl PyPortfolio {
+    /// Each group's state from a run with callbacks, in group order, as
+    /// `pre_group_func` made it; `None` for a run without.
+    #[getter]
+    fn in_outputs(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.in_outputs.as_ref().map(|v| v.clone_ref(py))
+    }
+
     /// Bytes retained for source prices, independent of parameter count.
     #[getter]
     fn price_nbytes(&self) -> usize {
@@ -1190,6 +1202,9 @@ fn deposits_view<'a>(
     group_lens = None,
     call_seq = None,
     column_map = None,
+    callbacks = None,
+    flexible = false,
+    row_wise = false,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -1293,6 +1308,9 @@ fn from_signals(
     group_lens: Option<Vec<usize>>,
     call_seq: Option<&Bound<'_, PyAny>>,
     column_map: Option<Vec<usize>>,
+    callbacks: Option<&Bound<'_, PyDict>>,
+    flexible: bool,
+    row_wise: bool,
 ) -> PyResult<PyPortfolio> {
     // `close` first, so every other parameter can be checked against a known
     // shape rather than one inferred from whichever array arrived first.
@@ -1735,7 +1753,39 @@ fn from_signals(
     // not investigating anything should not allocate a journal. The GIL is
     // released for the run: every input is a borrowed slice the guards above
     // keep alive, and nothing in the loop touches Python.
-    let (orders, logs) = if p.wants_logs() {
+    if flexible || row_wise {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "flexible and row_wise are for from_order_func",
+        ));
+    }
+    let mut in_outputs = None;
+    let (orders, logs) = if let Some(funcs) = callbacks {
+        let cbs = callbacks::PyCallbacks::new(funcs)?;
+        let fail = |e| cbs.take_error().unwrap_or_else(|| to_py_err(e));
+        let (journal, states) = if p.wants_logs() {
+            py.detach(|| {
+                phasor_sim::simulate_from_signal_func::<phasor_records::Journal, _>(
+                    &args, &cbs, threads,
+                )
+            })
+            .map_err(fail)?
+        } else {
+            let (orders, states) = py
+                .detach(|| {
+                    phasor_sim::simulate_from_signal_func::<OrderRecords, _>(&args, &cbs, threads)
+                })
+                .map_err(fail)?;
+            (
+                phasor_records::Journal {
+                    orders,
+                    logs: LogRecords::new(),
+                },
+                states,
+            )
+        };
+        in_outputs = Some(pyo3::types::PyList::new(py, states)?.into_any().unbind());
+        (journal.orders, journal.logs)
+    } else if p.wants_logs() {
         let journal = py
             .detach(|| {
                 if threads > 1 {
@@ -1763,7 +1813,7 @@ fn from_signals(
     // rebuilt without keeping Python's array alive.
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
 
-    Ok(PyPortfolio::assemble(
+    let mut pf = PyPortfolio::assemble(
         orders,
         logs,
         close_flat.to_vec(),
@@ -1780,7 +1830,9 @@ fn from_signals(
             trades_type,
             incl_open,
         },
-    ))
+    );
+    pf.in_outputs = in_outputs;
+    Ok(pf)
 }
 
 /// Runs a backtest from one order request per element.
@@ -1866,6 +1918,9 @@ fn from_signals(
     group_lens = None,
     call_seq = None,
     column_map = None,
+    callbacks = None,
+    flexible = false,
+    row_wise = false,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -1939,6 +1994,9 @@ fn from_orders(
     group_lens: Option<Vec<usize>>,
     call_seq: Option<&Bound<'_, PyAny>>,
     column_map: Option<Vec<usize>>,
+    callbacks: Option<&Bound<'_, PyDict>>,
+    flexible: bool,
+    row_wise: bool,
 ) -> PyResult<PyPortfolio> {
     let close_b = borrow_f64(close, "close")?;
     let Borrowed::Slice(close_arr) = &close_b else {
@@ -2207,7 +2265,22 @@ fn from_orders(
         update_value,
     };
 
-    let (orders, logs) = if p.wants_logs() {
+    let mut in_outputs = None;
+    let (orders, logs) = if let Some(funcs) = callbacks {
+        let cbs = callbacks::PyCallbacks::new(funcs)?;
+        let fail = |e| cbs.take_error().unwrap_or_else(|| to_py_err(e));
+        let schedule = if row_wise {
+            phasor_sim::Schedule::RowWise
+        } else {
+            phasor_sim::Schedule::Groups { n_threads: threads }
+        };
+        let logged = p.wants_logs();
+        let (journal, states) = py
+            .detach(|| order_func_run(&args, &cbs, schedule, flexible, logged))
+            .map_err(fail)?;
+        in_outputs = Some(pyo3::types::PyList::new(py, states)?.into_any().unbind());
+        (journal.orders, journal.logs)
+    } else if p.wants_logs() {
         let journal = py
             .detach(|| {
                 if threads > 1 {
@@ -2233,7 +2306,7 @@ fn from_orders(
 
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
 
-    Ok(PyPortfolio::assemble(
+    let mut pf = PyPortfolio::assemble(
         orders,
         logs,
         close_flat.to_vec(),
@@ -2250,7 +2323,36 @@ fn from_orders(
             trades_type,
             incl_open,
         },
-    ))
+    );
+    pf.in_outputs = in_outputs;
+    Ok(pf)
+}
+
+/// `from_orders` with Python callbacks, logged or not, flexible or not.
+fn order_func_run(
+    args: &FromOrders<'_>,
+    cbs: &callbacks::PyCallbacks,
+    schedule: phasor_sim::Schedule,
+    flexible: bool,
+    logged: bool,
+) -> phasor_core::error::Result<(phasor_records::Journal, Vec<Py<PyAny>>)> {
+    use phasor_records::Journal;
+    use phasor_sim::simulate_from_order_func as run;
+    let plain = |(orders, states): (OrderRecords, Vec<Py<PyAny>>)| {
+        (
+            Journal {
+                orders,
+                logs: LogRecords::new(),
+            },
+            states,
+        )
+    };
+    match (flexible, logged) {
+        (false, false) => run(args, &callbacks::PyOrderFunc::<false>(cbs), schedule).map(plain),
+        (true, false) => run(args, &callbacks::PyOrderFunc::<true>(cbs), schedule).map(plain),
+        (false, true) => run(args, &callbacks::PyOrderFunc::<false>(cbs), schedule),
+        (true, true) => run(args, &callbacks::PyOrderFunc::<true>(cbs), schedule),
+    }
 }
 
 fn market_array<'a>(
@@ -2304,6 +2406,7 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(data::catalog_files, m)?)?;
     m.add_function(wrap_pyfunction!(data::load_data, m)?)?;
     m.add_class::<PyPortfolio>()?;
+    m.add_class::<callbacks::PyContext>()?;
     m.add_class::<PyFactorSet>()?;
     m.add_function(wrap_pyfunction!(from_signals, m)?)?;
     m.add_function(wrap_pyfunction!(from_orders, m)?)?;

@@ -56,6 +56,7 @@ use phasor_model::{
 };
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
+use crate::callbacks::{Context, Decision, Flow, NoCallbacks, SignalFunc};
 use crate::from_orders::updated_value;
 use crate::groups::{CallSeq, Groups, approx_cash_need, approx_order_value};
 use crate::signals::{
@@ -848,7 +849,10 @@ fn prepare_order<const EXTENDED: bool>(
     state: &mut ColumnState,
     sizes_checked: bool,
     multiplier: f64,
+    over: Option<&Decision>,
 ) -> Result<Option<Pending>> {
+    // Only the extended copy takes a callback's decision.
+    let over = if EXTENDED { over } else { None };
     let position = state.position;
     let mut stops = state.stops;
     let mut last_val_price = state.last_val_price;
@@ -1002,6 +1006,7 @@ fn prepare_order<const EXTENDED: bool>(
             position,
             val_price_now * multiplier,
             sizes_checked,
+            over,
         )?;
         state.stops = stops;
         state.last_val_price = last_val_price;
@@ -1027,11 +1032,15 @@ fn prepare_order<const EXTENDED: bool>(
         StopExitPrice::Close => (args.close.get(i, col), false),
         StopExitPrice::Price => (price, false),
     };
+    let (size, size_type) = over.map_or_else(
+        || (args.size.get(i, col), args.size_type.get(i, col)),
+        |d| (d.size, d.size_type),
+    );
     let mut sized = size_signals(
         position,
         signals,
-        args.size.get(i, col),
-        args.size_type.get(i, col),
+        size,
+        size_type,
         accumulate,
         // A value reversal is so many contracts' worth.
         val_price_now * multiplier,
@@ -1069,10 +1078,10 @@ fn prepare_order<const EXTENDED: bool>(
         // the side already held, against the flat the stop leaves. Its side
         // is its order's.
         let val = val_price_now * multiplier;
-        let held = user_order::<EXTENDED>(args, src, col, position, val, sizes_checked)?;
+        let held = user_order::<EXTENDED>(args, src, col, position, val, sizes_checked, over)?;
         let side = match held {
             Some(user) => Some(user),
-            None => user_order::<EXTENDED>(args, src, col, 0.0, val, sizes_checked)?,
+            None => user_order::<EXTENDED>(args, src, col, 0.0, val, sizes_checked, over)?,
         };
         if let Some(user) = side {
             let (keep, execute) = resolve_pending_conflict(
@@ -1141,15 +1150,24 @@ fn user_order<const EXTENDED: bool>(
     position: f64,
     val_price: f64,
     sizes_checked: bool,
+    over: Option<&Decision>,
 ) -> Result<Option<crate::signals::SizedOrder>> {
+    let over = if EXTENDED { over } else { None };
     // Read on the row the order was decided on; none before it exists.
     let Some(i) = row else {
         return Ok(None);
     };
+    // A callback's decision in place of the arrays', read only when sized.
+    let sizing = || {
+        over.map_or_else(
+            || (args.size.get(i, col), args.size_type.get(i, col)),
+            |d| (d.size, d.size_type),
+        )
+    };
     if EXTENDED && args.order_mode {
         // The order is `size` itself; before the short-only flip a positive
         // size buys, as for a signal's order.
-        let size = args.size.get(i, col);
+        let (size, size_type) = sizing();
         if size.is_nan() || size == 0.0 {
             return Ok(None);
         }
@@ -1160,11 +1178,11 @@ fn user_order<const EXTENDED: bool>(
             } else {
                 size
             },
-            size_type: args.size_type.get(i, col),
+            size_type,
             direction,
         }));
     }
-    let mut s = read_signals(args, i, col);
+    let mut s = over.map_or_else(|| read_signals(args, i, col), |d| d.signals);
     if sizes_checked && !s.any() {
         // A quiet bar: nothing to size, and the size parameters were
         // already checked, so the sizing step has nothing to report.
@@ -1211,12 +1229,9 @@ fn user_order<const EXTENDED: bool>(
         s = resolved;
         accumulate = acc;
     }
+    let (size, size_type) = sizing();
     let sized = size_signals(
-        position,
-        s,
-        args.size.get(i, col),
-        args.size_type.get(i, col),
-        accumulate,
+        position, s, size, size_type, accumulate,
         // A value reversal is so many contracts' worth.
         val_price,
     )?;
@@ -1259,6 +1274,7 @@ fn follow_up(
     after: &Pending,
     multiplier: f64,
     sizes_checked: bool,
+    over: Option<&Decision>,
 ) -> Result<Option<Pending>> {
     let user = user_order::<true>(
         args,
@@ -1267,6 +1283,7 @@ fn follow_up(
         state.position,
         state.last_val_price * multiplier,
         sizes_checked,
+        over,
     )?;
     let Some(sized) = user else {
         return Ok(None);
@@ -1502,24 +1519,25 @@ fn place_limit(
 /// Executes a group sequentially within each bar; groups are independent.
 ///
 /// `levered` is decided once for the run, as in `from_orders`.
-fn simulate_group<S: RecordSink + LogSink>(
+fn simulate_group<S: RecordSink + LogSink, C: SignalFunc>(
     args: &FromSignals<'_>,
     groups: &Groups,
     group: usize,
     levered: bool,
+    cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<()> {
+) -> Result<C::State> {
     let flows = !crate::cash::all_off(
         &args.cash_deposits,
         &args.cash_dividends,
         &args.cash_earnings,
     );
     match (flows, levered) {
-        (false, false) => group_loop::<S, false, false>(args, groups, group, sink, fills),
-        (true, false) => group_loop::<S, true, false>(args, groups, group, sink, fills),
-        (false, true) => group_loop::<S, false, true>(args, groups, group, sink, fills),
-        (true, true) => group_loop::<S, true, true>(args, groups, group, sink, fills),
+        (false, false) => group_loop::<S, C, false, false>(args, groups, group, cb, sink, fills),
+        (true, false) => group_loop::<S, C, true, false>(args, groups, group, cb, sink, fills),
+        (false, true) => group_loop::<S, C, false, true>(args, groups, group, cb, sink, fills),
+        (true, true) => group_loop::<S, C, true, true>(args, groups, group, cb, sink, fills),
     }
 }
 
@@ -1532,14 +1550,22 @@ fn simulate_group<S: RecordSink + LogSink>(
     clippy::too_many_lines,
     reason = "keep fill, stop state and log updates together"
 )]
-fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
+fn group_loop<S: RecordSink + LogSink, C: SignalFunc, const FLOWS: bool, const LEV: bool>(
     args: &FromSignals<'_>,
     groups: &Groups,
     group: usize,
+    cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<()> {
+) -> Result<C::State> {
     let cols = groups.range(group);
+    let mut cs = cb.pre_group(group, cols.clone())?;
+    if C::ON && !matches!(args.from_ago, FlexArray::Scalar(0)) {
+        return Err(Error::Invariant(
+            "from_ago does not apply to signals a callback decides; lag them in the callback"
+                .into(),
+        ));
+    }
     let len = cols.len();
     let shared = len > 1;
     let mut cash = args.init_cash.get(0, cols.start);
@@ -1620,7 +1646,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         || !matches!(args.force_exit, FlexArray::Scalar(false))
         || args.order_mode
         || args.quotes().on()
-        || ext_stops;
+        || ext_stops
+        // A callback's decision goes through the extended copy.
+        || C::ON;
     let liquidates = LEV && {
         let inputs = args.liquidation();
         ((!inputs.off() || !matches!(args.auto_deleverage, FlexArray::Scalar(false)))
@@ -1631,7 +1659,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     // The size checks the sizing step makes are column-constant when the size
     // is; doing them here lets a quiet bar skip that step. They are made at
     // the same point they would otherwise first be made: before bar 0.
-    let sizes_checked = !args.size.varies_by_row() && !args.size_type.varies_by_row();
+    let sizes_checked = !C::ON && !args.size.varies_by_row() && !args.size_type.varies_by_row();
     if sizes_checked {
         for col in cols.clone() {
             size_signals(
@@ -1657,6 +1685,24 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             || !crate::cash::is_off(&args.cash_dividends));
     let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
     let charges = LEV && !args.rates().all_off();
+    // Each column's decision on the bar, when a callback makes it.
+    let mut decisions: Vec<Decision> = Vec::new();
+    if C::ON {
+        decisions.resize(
+            len,
+            Decision {
+                signals: Signals {
+                    long_entry: false,
+                    long_exit: false,
+                    short_entry: false,
+                    short_exit: false,
+                },
+                size: f64::NAN,
+                size_type: SizeType::Amount,
+            },
+        );
+    }
+    let mut stopped = false;
     for i in 0..args.n_rows {
         if at_open {
             crate::cash::at_open(
@@ -1685,13 +1731,40 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             }
         }
         let mut any = false;
+        let deciding = C::ON && !stopped;
+        let ctx_value = if deciding {
+            signal_value::<LEV>(cash, &states, &margin, &mult)
+        } else {
+            0.0
+        };
         for (k, col) in cols.clone().enumerate() {
             let m = if LEV { mult[k] } else { 1.0 };
+            if deciding {
+                let ctx = Context {
+                    group,
+                    row: i,
+                    cols: &cols,
+                    cash,
+                    free_cash,
+                    value: ctx_value,
+                    columns: &states,
+                    mult: &mult,
+                    scaled: false,
+                    close: &args.close,
+                    orders: &orders,
+                };
+                let (stops, decision) = decide(cb, &mut cs, &ctx, k, args, i, col)?;
+                states[k].stops = stops;
+                decisions[k] = decision;
+            }
+            let over = if C::ON { decisions.get(k) } else { None };
             // Two copies, so a run without limit orders has no code for them.
-            pending[k] = if extended {
-                prepare_order::<true>(args, i, col, &mut states[k], sizes_checked, m)?
+            pending[k] = if C::ON && stopped {
+                None
+            } else if extended {
+                prepare_order::<true>(args, i, col, &mut states[k], sizes_checked, m, over)?
             } else {
-                prepare_order::<false>(args, i, col, &mut states[k], sizes_checked, m)?
+                prepare_order::<false>(args, i, col, &mut states[k], sizes_checked, m, None)?
             };
             any |= pending[k].is_some();
             // Every bar, quiet or not: the profit is the account's whether
@@ -1759,6 +1832,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     sink,
                 )?;
             }
+            if C::ON && !stopped {
+                stopped = segment_end::<C, LEV>(
+                    args, cb, &mut cs, group, i, &cols, cash, free_cash, &states, &margin, &mult,
+                    &orders,
+                )?;
+            }
             continue;
         }
         let mut group_value = cash;
@@ -1815,7 +1894,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             args.call_seq
                 .resolve(cols.clone(), i, args.n_rows, &mut order_values, &mut seq)?;
         }
-        for &k in &seq {
+        'orders: for &k in &seq {
             let Some(mut p) = pending[k] else {
                 continue;
             };
@@ -2034,9 +2113,33 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 }
                 states[k].position = position;
                 states[k].stops = stops;
+                if C::ON {
+                    let mut result = result;
+                    if LEV {
+                        result.price /= m;
+                    }
+                    let ctx = Context {
+                        group,
+                        row: i,
+                        cols: &cols,
+                        cash,
+                        free_cash,
+                        value: group_value,
+                        columns: &states,
+                        mult: &mult,
+                        scaled: false,
+                        close: &args.close,
+                        orders: &orders,
+                    };
+                    if cb.post_order(&ctx, k, &result, &mut cs)? == Flow::StopGroup {
+                        stopped = true;
+                        break 'orders;
+                    }
+                }
                 if p.then {
                     let m = if LEV { mult[k] } else { 1.0 };
-                    let next = follow_up(args, i, col, &mut states[k], &p, m, sizes_checked)?;
+                    let over = if C::ON { decisions.get(k) } else { None };
+                    let next = follow_up(args, i, col, &mut states[k], &p, m, sizes_checked, over)?;
                     if let Some(next) = next {
                         p = next;
                         continue;
@@ -2072,8 +2175,91 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 sink,
             )?;
         }
+        if C::ON && !stopped {
+            stopped = segment_end::<C, LEV>(
+                args, cb, &mut cs, group, i, &cols, cash, free_cash, &states, &margin, &mult,
+                &orders,
+            )?;
+        }
     }
-    Ok(())
+    Ok(cs)
+}
+
+/// Calls [`SignalFunc::adjust`] and [`SignalFunc::signals`] for column `k`:
+/// its stops and its decision on bar `i`.
+#[cold]
+#[inline(never)]
+fn decide<C: SignalFunc>(
+    cb: &C,
+    cs: &mut C::State,
+    ctx: &Context<'_>,
+    k: usize,
+    args: &FromSignals<'_>,
+    i: usize,
+    col: usize,
+) -> Result<(StopState, Decision)> {
+    let mut stops = ctx.columns[k].stops;
+    cb.adjust(ctx, k, &mut stops, cs)?;
+    let mut decision = Decision {
+        signals: read_signals(args, i, col),
+        size: args.size.get(i, col),
+        size_type: args.size_type.get(i, col),
+    };
+    cb.signals(ctx, k, &mut decision, cs)?;
+    Ok((stops, decision))
+}
+
+/// Calls [`SignalFunc::post_segment`]; whether it stopped the group.
+#[allow(clippy::too_many_arguments, reason = "the context's fields")]
+#[cold]
+#[inline(never)]
+fn segment_end<C: SignalFunc, const LEV: bool>(
+    args: &FromSignals<'_>,
+    cb: &C,
+    cs: &mut C::State,
+    group: usize,
+    row: usize,
+    cols: &std::ops::Range<usize>,
+    cash: f64,
+    free_cash: f64,
+    states: &[ColumnState],
+    margin: &[bool],
+    mult: &[f64],
+    orders: &[ValidatedOrder],
+) -> Result<bool> {
+    let ctx = Context {
+        group,
+        row,
+        cols,
+        cash,
+        free_cash,
+        value: signal_value::<LEV>(cash, states, margin, mult),
+        columns: states,
+        mult,
+        scaled: false,
+        close: &args.close,
+        orders,
+    };
+    Ok(cb.post_segment(&ctx, cs)? == Flow::StopGroup)
+}
+
+/// What a group is worth, as [`group_value`] has it, in either copy.
+fn signal_value<const LEV: bool>(
+    cash: f64,
+    states: &[ColumnState],
+    margin: &[bool],
+    mult: &[f64],
+) -> f64 {
+    if LEV {
+        return group_value(cash, states, margin, mult);
+    }
+    let mut value = cash;
+    for st in states {
+        if st.position != 0.0 {
+            value += st.position * st.last_val_price;
+        }
+    }
+    value
 }
 
 /// What a group's columns are, for [`liquidate`]: which trade on margin,
@@ -2282,16 +2468,22 @@ fn group_value(cash: f64, states: &[ColumnState], margin: &[bool], mult: &[f64])
     value
 }
 
-fn simulate_into<S: SinkBuffer>(args: &FromSignals<'_>) -> Result<S> {
+fn simulate_into<S: SinkBuffer, C: SignalFunc>(
+    args: &FromSignals<'_>,
+    cb: &C,
+) -> Result<(S, Vec<C::State>)> {
     let groups = args.resolved_groups()?;
     let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     let mut fills = 0_i64;
     let levered = args.levered();
+    let mut states = Vec::new();
     for group in 0..groups.len() {
-        simulate_group(args, &groups, group, levered, &mut sink, &mut fills)?;
+        states.push(simulate_group(
+            args, &groups, group, levered, cb, &mut sink, &mut fills,
+        )?);
     }
     sink.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok(sink)
+    Ok((sink, states))
 }
 
 /// Simulates every column on one thread.
@@ -2301,7 +2493,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromSignals<'_>) -> Result<S> {
 /// Propagates any invariant violation from the execution kernel or the signal
 /// pipeline, and any rejection on a column whose `raise_reject` is set.
 pub fn simulate_from_signals(args: &FromSignals<'_>) -> Result<OrderRecords> {
-    simulate_into(args)
+    Ok(simulate_into(args, &NoCallbacks)?.0)
 }
 
 /// Simulates every column, keeping the logs of the orders that asked for one.
@@ -2314,7 +2506,7 @@ pub fn simulate_from_signals(args: &FromSignals<'_>) -> Result<OrderRecords> {
 ///
 /// As [`simulate_from_signals`].
 pub fn simulate_from_signals_logged(args: &FromSignals<'_>) -> Result<Journal> {
-    simulate_into(args)
+    Ok(simulate_into(args, &NoCallbacks)?.0)
 }
 
 /// Simulates every column across `n_threads`, in column-range chunks.
@@ -2331,7 +2523,7 @@ pub fn simulate_from_signals_parallel(
     args: &FromSignals<'_>,
     n_threads: usize,
 ) -> Result<OrderRecords> {
-    simulate_into_parallel(args, n_threads)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
 }
 
 /// Simulates every column across `n_threads`, keeping logs.
@@ -2347,7 +2539,28 @@ pub fn simulate_from_signals_logged_parallel(
     args: &FromSignals<'_>,
     n_threads: usize,
 ) -> Result<Journal> {
-    simulate_into_parallel(args, n_threads)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
+}
+
+/// `from_signals` with callbacks: `cb` adjusts each column's stops and
+/// decides its signals and size, bar by bar; see [`crate::callbacks`].
+/// Groups run across `n_threads` (1: serial), as without callbacks. Returns
+/// the records, plain ([`OrderRecords`]) or with logs ([`Journal`]), and each
+/// group's callback state in group order.
+///
+/// A callback's decision goes through the whole signal pipeline: conflicts,
+/// accumulation, stops, limit orders and `order_mode` as with the arrays.
+///
+/// # Errors
+///
+/// As [`simulate_from_signals`], and any error a callback returns. `from_ago`
+/// other than 0 is an error: a callback decides on its own bar.
+pub fn simulate_from_signal_func<S: SinkBuffer, C: SignalFunc + Sync>(
+    args: &FromSignals<'_>,
+    cb: &C,
+    n_threads: usize,
+) -> Result<(S, Vec<C::State>)> {
+    simulate_into_parallel(args, cb, n_threads)
 }
 
 /// Simulates every column across `n_threads` into any sink.
@@ -2355,17 +2568,21 @@ pub fn simulate_from_signals_logged_parallel(
 /// # Errors
 ///
 /// As [`simulate_from_signals_parallel`].
-fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usize) -> Result<S> {
+fn simulate_into_parallel<S: SinkBuffer, C: SignalFunc + Sync>(
+    args: &FromSignals<'_>,
+    cb: &C,
+    n_threads: usize,
+) -> Result<(S, Vec<C::State>)> {
     let groups = args.resolved_groups()?;
     let n_groups = groups.len();
     let n_threads = n_threads.max(1).min(n_groups.max(1));
     if n_threads == 1 {
-        return simulate_into(args);
+        return simulate_into(args, cb);
     }
 
     let ranges = groups.chunks(n_threads);
     let levered = args.levered();
-    let results: Vec<Result<S>> = std::thread::scope(|scope| {
+    let results: Vec<Result<(S, Vec<C::State>)>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .iter()
             .map(|&(start, end)| {
@@ -2375,10 +2592,13 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
                     let mut sink = S::with_capacity(args.fill_bound(cols));
                     // Per buffer, so ids do not depend on interleaving.
                     let mut fills = 0_i64;
+                    let mut states = Vec::new();
                     for group in start..end {
-                        simulate_group(args, groups, group, levered, &mut sink, &mut fills)?;
+                        states.push(simulate_group(
+                            args, groups, group, levered, cb, &mut sink, &mut fills,
+                        )?);
                     }
-                    Ok(sink)
+                    Ok((sink, states))
                 })
             })
             .collect();
@@ -2393,12 +2613,15 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
 
     // Report the lowest-numbered failure so errors are deterministic.
     let mut parts = Vec::with_capacity(results.len());
+    let mut states = Vec::with_capacity(n_groups);
     for result in results {
-        parts.push(result?);
+        let (sink, part) = result?;
+        parts.push(sink);
+        states.extend(part);
     }
     let mut merged = S::merge(parts);
     merged.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok(merged)
+    Ok((merged, states))
 }
 
 #[cfg(test)]

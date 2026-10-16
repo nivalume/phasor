@@ -13,10 +13,10 @@
 
 | # | 功能 | 状态 | 已有 | 还缺 |
 |---|---|:-:|---|---|
-| 1 | [模拟入口与回调](#21-模拟入口与回调) | 🟡 | `from_orders`、`from_signals`（含 `order_mode`）；内核、止损判定、记录写入已公开 | `from_order_func`、回调钩子、Python 回调 |
+| 1 | [模拟入口与回调](#21-模拟入口与回调) | 🟡 | `from_orders`、`from_signals`（含 `order_mode`）、`from_order_func`（flex、`row_wise`）、两个循环的回调钩子、Python 回调（直接调用）；内核、止损判定、挂单判定、现金流入账、记录写入已公开 | 常见回调的表达式 DSL |
 | 2 | [订单与仓位](#22-订单与仓位) | ✅ | 全部仓位类型、下单约束、价格选项（含 `nextvalidopen`、按根的 `from_ago`）、买卖价、`call_seq`（auto 按现金影响、显式顺序） | — |
 | 3 | [限价单与挂单](#23-限价单与挂单) | 🟡 | 限价单、突破单、有效期（按行数或按时间）、挂单冲突 | 语义评审 |
-| 4 | [止损](#24-止损) | 🟡 | 止损、止盈、移动止损、时间止损（按行数或按时间）、四种阶梯、`delta_format`、止损限价单、不经模拟的止损出场 | 动态阶梯（随回调） |
+| 4 | [止损](#24-止损) | ✅ | 止损、止盈、移动止损、时间止损（按行数或按时间）、四种阶梯、`delta_format`、止损限价单、不经模拟的止损出场、回调里的动态阶梯 | — |
 | 5 | [账户与资金](#25-账户与资金) | ✅ | 共享现金、入金出金、收支、分红、杠杆、合约乘数、初始持仓、`init_cash="auto"`、负价格、连续合约、汇率换算 | — |
 | 6 | [保证金、强平、持仓费](#26-保证金强平持仓费) ➕ | ✅ | 全仓和逐仓保证金、强平（含部分强平、分档、ADL、融资融券）、资金费、隔夜融资、借贷利息、标记价格；和 NautilusTrader 对照一致 | — |
 | 7 | [多周期与交易时段](#27-多周期与交易时段) | ✅ | 粗周期对齐到细周期、聚合回粗周期、交易时段、强制平仓 | `Portfolio.resample`（归在组合分析） |
@@ -42,13 +42,15 @@
 - [x] `from_signals`：入场出场信号、方向、冲突规则、加仓
 - [x] `order_mode=True`：`from_signals` 里 `size` 就是订单，止损、限价单、价格选项照常可用
 - [x] 自定义循环可用的零件：撮合内核（`execute_order`、`execute_validated`）、止损判定、记录写入（`RecordSink`、`LogSink`）、`Portfolio::from_records`、`phasor_core::random::uniform`
-- [ ] 公开现金流入账函数（`phasor-sim` 的 `cash` 模块）
-- [ ] 公开挂单判定，供自定义循环使用
-- [ ] Rust 回调 trait：`pre_sim`、`pre_group`、`pre_segment`、`order`、`post_order`、`post_segment`；只读上下文，可写的 `in_outputs`；不用时零开销，按账户组照常多线程
-- [ ] `from_order_func`：一根 K 线多笔（flex）、`stop_group_sim`、`row_wise=True`（跨组协调，此时组间不能并行）
-- [ ] `from_signals` 的回调：`signal_func`、`adjust_func`、`post_order_func`、`post_segment_func`
-- [ ] 按风险算仓位（依赖回调）
-- [ ] Python 回调（方案待定，见 [§4](#4-待决定)）
+- [x] 公开现金流入账函数：`phasor_sim::cash`（`book` 记任意一笔现金流并写记录，`deposit`、`pay_dividends`、`earn`）
+- [x] 公开挂单判定：`phasor_sim::limit`（`limit_price`、`last_row`、`fill_price`）
+- [x] Rust 回调 trait（`phasor_sim::callbacks`）：`OrderFunc` 的 `pre_group`、`pre_segment`、`order`、`flex_order`、`post_order`、`post_segment`；只读的 `Context`（现金、净值、各列持仓、债务、估值价、收盘价，价格不含合约乘数）；每组一个 `State`，随记录按组返回（即 `in_outputs`）。`NoCallbacks` 把全部调用在编译期去掉；按账户组照常多线程。`pre_sim` 不需要：回调对象在运行前构造
+- [x] `from_order_func`（`simulate_from_order_func`）：`FLEX` 时一根 K 线任意多笔、任意列和顺序；`Flow::SkipSegment`、`Flow::StopGroup`（停止下单，剩下的 K 线照常记现金流、持仓费和强平）；`Schedule::RowWise` 每根 K 线先跑完所有组再进下一根，单线程，记录和按组跑相同
+- [x] 回调不能绕过记录：改成杠杆或保证金账户、改列的账户类型都报错；价格的 `±inf` 和数组里同义
+- [x] `from_signals` 的回调（`simulate_from_signal_func`）：`adjust`（测试前改止损）、`signals`（四个信号和 `size`、`size_type`，照常走冲突、累加、止损、限价单、`order_mode`）、`post_order`、`post_segment`；和 `from_ago` 一起用报错
+- [x] 按风险算仓位：`risk_size(value, risk, entry, stop, multiplier)`，在 `order` 或 `signals` 回调里用（测试：1% 风险、保本止损）
+- [x] Python 回调，直接调用（每次调用拿 GIL，作调试和试规则用）：`phasor.from_order_func(close, order_func, flexible=, row_wise=, pre_group_func=, pre_segment_func=, post_order_func=, post_segment_func=)`，`from_signals(signal_func=, adjust_func=, post_order_func=, post_segment_func=, pre_group_func=)`；回调抛出的异常原样抛给调用方；组状态在 `pf.in_outputs`
+- [ ] 常见回调的表达式 DSL（Python 写、Rust 跑），见 [§4](#4-待决定)
 
 ### 2.2 订单与仓位
 
@@ -89,7 +91,7 @@
 - [x] 止损限价单 `stop_order_type="limit"`、`stop_limit_delta`，时间止损也可以（限价从开盘价算）
 - [x] `upon_stop_exit`（含反手，PRO 的名字 `stop_exit_type` 也接受）、`stop_entry_price`、`stop_exit_price`、`upon_stop_update`
 - [x] 不经模拟生成止损出场 `generate_ohlc_stop_exits`，支持阶梯（每级一次出场，`out["size"]` 是平掉的份额）、止损限价单和 `delta_format`；随机行情上和 `from_signals` 逐笔相同
-- [ ] 动态阶梯（PRO 的做法是在回调里改止损距离和出场数量），随 2.1 的回调做
+- [x] 动态阶梯：`adjust` 改止损距离和价位，`signals` 在 `accumulate` 下按数量部分出场（测试：每涨 2% 减三分之一，止损上移到上一级）
 
 ### 2.5 账户与资金
 
@@ -314,7 +316,7 @@ PRO 闭源，没法差分测试，按功能来源对照：
 
 | 问题 | 建议 |
 |---|---|
-| Python 回调方式 | 先做表达式 DSL 写常见回调和 Rust 插件；直接调用 Python 只作调试模式（每列每根 K 线拿一次 GIL，慢几个数量级） |
+| Python 回调方式 | 直接调用已做（调试模式，每列每根 K 线拿一次 GIL）。Rust 插件就是 `OrderFunc`/`SignalFunc`。待定：常见回调（按风险定仓位、移动止损到保本、全局预算）做成表达式 DSL 还是做成内置回调加参数 |
 | 联网代码放哪里 | 单独的可选 Python 包（如 `phasor-connectors`），保持库不联网；数据库读写放 `phasor-store` 或 Python 层 |
 | 能否用 PRO 的输出做对照 | 先确认 PRO 许可条款 |
 | 负价格下 `percent` 仓位和收益率的语义 | 先写说明，评审后实现 |

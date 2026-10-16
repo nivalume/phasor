@@ -55,11 +55,12 @@ from . import (
     validation,
 )
 from ._phasor import InstrumentId, BarType
-from ._phasor import Portfolio
+from ._phasor import Context, Portfolio
 
 __all__ = [
     "Expression",
     "FactorSet",
+    "Context",
     "Portfolio",
     "alpha158",
     "alpha360",
@@ -77,6 +78,7 @@ __all__ = [
     "validation",
     "InstrumentId",
     "BarType",
+    "from_order_func",
     "from_orders",
     "from_signals",
     "strategy",
@@ -658,6 +660,11 @@ def from_signals(
     group_lens=None,
     call_seq="default",
     column_map=None,
+    pre_group_func=None,
+    signal_func=None,
+    adjust_func=None,
+    post_order_func=None,
+    post_segment_func=None,
 ) -> Portfolio:
     """Runs a signal-driven backtest and returns the portfolio.
 
@@ -1025,6 +1032,23 @@ def from_signals(
         every column. Which bars that hits is the caller's to say: it is the
         exchange's insurance fund, not the account, that decides.
 
+    pre_group_func, signal_func, adjust_func, post_order_func, post_segment_func
+        Python functions called inside the loop (see ``from_order_func`` for
+        the cost). ``pre_group_func(group, from_col, to_col)`` returns the
+        group's state, passed last to every other call and returned in
+        ``pf.in_outputs``. ``signal_func(ctx, k, state)`` decides column
+        ``k`` (its place in the group) on this bar: ``None`` keeps the
+        arrays', a tuple ``(long_entry, long_exit, short_entry,
+        short_exit)``, or a dict of those and ``size``/``size_type``.
+        ``adjust_func(ctx, k, stops, state)`` gets the column's stops as a
+        dict before they are tested and returns ``None`` or the fields to
+        change (``sl_stop``, ``sl_price``, ``tp_stop``, ``tsl_stop``...).
+        ``post_order_func(ctx, k, result, state)`` and
+        ``post_segment_func(ctx, state)`` return ``None``, or ``"stop"`` to
+        stop trading the group. ``ctx`` is a ``phasor.Context``: ``row``,
+        ``group``, ``cash``, ``free_cash``, ``value`` and per-column
+        ``position``, ``debt``, ``val_price``.
+
     Returns
     -------
     Portfolio
@@ -1134,6 +1158,99 @@ def from_signals(
         group_lens=_group_lens(group_lens),
         call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
+        callbacks=_callbacks_of(
+            pre_group=pre_group_func,
+            signal=signal_func,
+            adjust=adjust_func,
+            post_order=post_order_func,
+            post_segment=post_segment_func,
+        ),
+    )
+
+
+def _callbacks_of(**funcs):
+    funcs = {name: f for name, f in funcs.items() if f is not None}
+    for name, f in funcs.items():
+        if not callable(f):
+            raise TypeError(f"{name}_func must be callable; got {type(f).__name__}")
+    return funcs or None
+
+
+def from_order_func(
+    close,
+    order_func,
+    *,
+    flexible=False,
+    row_wise=False,
+    pre_group_func=None,
+    pre_segment_func=None,
+    post_order_func=None,
+    post_segment_func=None,
+    size=np.nan,
+    **kwargs,
+) -> Portfolio:
+    """``from_orders`` with the orders decided by Python functions, bar by bar.
+
+    Every other argument is ``from_orders``': prices, fees, accounts, cash
+    flows, grouping and the rest. ``size`` is each order before
+    ``order_func`` sees it, ``NaN`` (no order) by default.
+
+    Each call takes the GIL, so this is orders of magnitude slower than an
+    array-driven run: for trying a rule out and for debugging. A rule worth
+    running at scale belongs in Rust (``phasor_sim::callbacks``).
+
+    order_func
+        ``order_func(ctx, k, state)`` for column ``k`` (its place in the
+        group) on bar ``ctx.row``, in the group's call sequence. Returns
+        ``None`` (keep the arrays' order), a size, or a dict of order fields:
+        ``size``, ``price`` (``inf`` is the close), ``size_type``,
+        ``direction``, ``fees``, ``slippage``, ``leverage``... With
+        ``flexible=True`` it is ``order_func(ctx, call, state)`` instead,
+        called until it returns ``None``, each call returning ``(k,
+        order)``: any number of orders per bar, for any column, in any
+        sequence.
+    row_wise
+        Run every group's bar before any group's next bar, on one thread, so
+        that functions sharing state across groups see the bars in order.
+        The records are the same as without when they do not.
+    pre_group_func
+        ``pre_group_func(group, from_col, to_col)`` returns the group's state
+        (``None`` without it), passed last to every other call and returned
+        in ``pf.in_outputs``, in group order. Mutate it in place.
+    pre_segment_func
+        ``pre_segment_func(ctx, state)`` before the bar's orders: ``"skip"``
+        places none, ``"stop"`` stops trading the group.
+    post_order_func
+        ``post_order_func(ctx, k, result, state)`` after each order, filled or
+        not; ``result`` is a dict (``filled``, ``size``, ``price``, ``fees``,
+        ``side``, ``status``, ``status_info``). ``"stop"`` stops the group.
+    post_segment_func
+        ``post_segment_func(ctx, state)`` at the bar's end, after earnings and
+        holding charges. ``"stop"`` stops the group.
+
+    ``ctx`` is a ``phasor.Context``: ``row``, ``group``, ``from_col``,
+    ``to_col``, ``cash``, ``free_cash``, ``value``, and per-column lists
+    ``position``, ``debt``, ``locked_cash``, ``val_price``, ``multiplier``.
+    A stopped group places no more orders, but its open positions still
+    earn, pay holding charges and can be liquidated.
+    """
+    for name, f in [("order_func", order_func)]:
+        if not callable(f):
+            raise TypeError(f"{name} must be callable; got {type(f).__name__}")
+    callbacks = _callbacks_of(
+        order=order_func,
+        pre_group=pre_group_func,
+        pre_segment=pre_segment_func,
+        post_order=post_order_func,
+        post_segment=post_segment_func,
+    )
+    return from_orders(
+        close,
+        size,
+        _callbacks=callbacks,
+        _flexible=bool(flexible),
+        _row_wise=bool(row_wise),
+        **kwargs,
     )
 
 
@@ -1203,6 +1320,9 @@ def from_orders(
     group_lens=None,
     call_seq="default",
     column_map=None,
+    _callbacks=None,
+    _flexible=False,
+    _row_wise=False,
 ) -> Portfolio:
     """Runs a backtest from one order request per element.
 
@@ -1527,6 +1647,9 @@ def from_orders(
         group_lens=_group_lens(group_lens),
         call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
+        callbacks=_callbacks,
+        flexible=_flexible,
+        row_wise=_row_wise,
     )
 
 

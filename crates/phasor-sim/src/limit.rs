@@ -58,7 +58,7 @@ const fn fills_below(buy: bool, reverse: bool) -> bool {
 ///
 /// Returns [`Error::Invariant`] for a delta that is infinite or negative, or
 /// a limit price that is not finite and above 0.
-pub(crate) fn limit_price(
+pub fn limit_price(
     price: f64,
     buy: bool,
     reverse: bool,
@@ -102,7 +102,7 @@ pub(crate) fn limit_price(
 /// # Errors
 ///
 /// Returns [`Error::Invariant`] for a negative `tif` or `expiry`.
-pub(crate) fn last_row(created: usize, tif: f64, expiry: f64) -> Result<Option<usize>> {
+pub fn last_row(created: usize, tif: f64, expiry: f64) -> Result<Option<usize>> {
     if tif < 0.0 || expiry < 0.0 {
         return Err(Error::Invariant(format!(
             "limit_tif and limit_expiry must be NaN or 0 or greater; got {tif} and {expiry}"
@@ -137,7 +137,7 @@ pub(crate) fn last_row(created: usize, tif: f64, expiry: f64) -> Result<Option<u
     clippy::too_many_arguments,
     reason = "the order's four fields and the bar's four prices"
 )]
-pub(crate) fn fill_price(
+pub fn fill_price(
     level: f64,
     buy: bool,
     reverse: bool,

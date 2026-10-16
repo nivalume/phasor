@@ -42,13 +42,14 @@
 
 use phasor_model::{AccountType, MarginMode};
 
-mod cash;
+pub mod callbacks;
+pub mod cash;
 pub mod from_orders;
 pub mod from_signals;
 pub mod groups;
 mod holding;
 mod initial;
-mod limit;
+pub mod limit;
 mod liquidation;
 mod margin;
 mod prices;
@@ -245,11 +246,13 @@ pub(crate) fn isolated_columns(
 /// size is never dust.
 pub const DEFAULT_MIN_SIZE: f64 = 1e-8;
 
+pub use callbacks::{Context, Decision, Flow, NoCallbacks, OrderFunc, SignalFunc, risk_size};
 pub use from_orders::{
-    FromOrders, simulate_from_orders, simulate_from_orders_logged,
-    simulate_from_orders_logged_parallel, simulate_from_orders_parallel,
+    FromOrders, Schedule, simulate_from_order_func, simulate_from_orders,
+    simulate_from_orders_logged, simulate_from_orders_logged_parallel,
+    simulate_from_orders_parallel,
 };
 pub use from_signals::{
-    FromSignals, simulate_from_signals, simulate_from_signals_logged,
+    FromSignals, simulate_from_signal_func, simulate_from_signals, simulate_from_signals_logged,
     simulate_from_signals_logged_parallel, simulate_from_signals_parallel,
 };

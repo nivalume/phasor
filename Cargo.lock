@@ -1155,6 +1155,7 @@ dependencies = [
  "phasor-analysis",
  "phasor-core",
  "phasor-data",
+ "phasor-exec",
  "phasor-expr",
  "phasor-generic",
  "phasor-model",
