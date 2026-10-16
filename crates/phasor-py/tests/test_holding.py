@@ -8,6 +8,7 @@ import pytest
 import phasor
 
 R = 1.0 / 1024.0
+N = np.nan
 
 
 def test_funding_is_paid_by_a_long_at_the_close_and_is_part_of_the_return():
@@ -126,6 +127,18 @@ def test_per_bar_charges_each_bar_for_the_time_until_the_next():
     both = phasor.rates.per_bar(np.array([[0.365, 0.73]]), idx)
     assert both.shape == (4, 2) and both.flags.f_contiguous
     np.testing.assert_allclose(both[:, 1], [0.002, 0.006, 0.002, 0.0])
+
+
+def test_interest_over_a_weekend_is_three_days():
+    # Daily bars, Thursday to Tuesday: Friday's bar holds the long over the
+    # weekend and pays three days of 36.5% a year on the 768 borrowed.
+    idx = np.array(["2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20"], dtype="datetime64[D]")
+    pf = phasor.from_orders(
+        np.full(4, 128.0), size=np.array([[12.0], [N], [N], [-12.0]]), init_cash=1024.0,
+        leverage=2.0, leverage_mode="eager", debt_rate=phasor.rates.per_bar(0.365, idx),
+    )
+    np.testing.assert_array_equal(pf.orders()["debt"], [768.0, 0.0])
+    np.testing.assert_allclose(pf.cash_flows("interest")[:, 0], [-0.768, -2.304, -0.768, 0.0])
 
 
 def test_per_bar_accepts_a_pandas_index():

@@ -30,7 +30,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | P | 维护与技术债 | 3 | 0 | 0 |
 | A | 账户模型地基 | 2 | 1 | 1 |
 | B | 现金流、杠杆、合约 | 6 | 0 | 4 |
-| C | 保证金账户、强平、持仓费（PRO 没有） | 3 | 1 | 1 |
+| C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
 | D | 订单与止损 | 0 | 0 | 9 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
@@ -41,13 +41,13 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **15** | **10** | **54** |
+| **合计** | | **16** | **10** | **53** |
 
 ### 下一步（按优先级）
 
 1. **B6 合约乘数**：保证金账户（C1）、强平（C2）、持仓费和借贷利息（C3、C4）都已完成，期货回测还差每手的点值，现在一手期货的价值就是价格，保证金、持仓费和强平都按它算。
-2. **C5 外部对照**：手算场景和守恒检查已经有一部分（各功能的性质测试），差 NautilusTrader 保证金账户的对照。
-3. **D1–D2 挂单、限价单**：PRO 功能里最大的一块空缺。
+2. **D1–D2 挂单、限价单**（连同 A3）：PRO 功能里最大的一块空缺。
+3. **C5 剩下的 NautilusTrader 对照**：手算场景和守恒检查已完成，对照要在外部环境里跑。
 
 ---
 
@@ -126,7 +126,7 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
     - [x] 收盘：`cash_earnings` 入账，在所有订单之后，没有信号的 K 线也入账。
     - [x] 现有止损 `sl_stop`/`tp_stop`：跳空时按开盘价成交，盘中按 high/low 触发，同一根 K 线上止损先于止盈；`price=-inf` 按开盘价成交。这部分原本就有，和 vectorbt 1.1.0 对照过（`from_signals.rs` 的 `stop_price` 和止损检查）。
     - [ ] 限价单和新止损类型（`td_stop`、`stop_ladder` 等）在开盘、盘中阶段的处理（随 D2、D5 做）。
-    - [ ] 止损成交和开盘现金流之间的先后顺序写进文档。
+    - [x] 止损成交和开盘现金流之间的先后顺序写进文档：`ARCHITECTURE.md` §8.8 列出一根 K 线的六步。即使止损按开盘价成交，也在开盘的入金和分红之后，分红付给随后被止损平掉的持仓。
     - [x] 估值价确定后、计算组净值前：保证金持仓结算当根盈亏（C1），没有信号的 K 线也结算。
     - [x] 收盘：持仓费、借贷利息入账，在 `cash_earnings` 之后，没有信号的 K 线也入账（C3、C4）。
     - [x] 强平检查：在价格确定、全仓列结算之后，估值和下单之前，按这根 K 线的路径检查带进来的持仓（C2）。
@@ -278,13 +278,13 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
   - 位置：`crates/phasor-sim/src/liquidation.rs`（检查、成交和核销，单元测试也在这里），`crates/phasor-sim/src/{from_orders,from_signals,lib}.rs`，`crates/phasor-model/src/enums.rs`（`MarginMode`，`CashFlowKind::Liquidation`），`crates/phasor-records/src/{lib,logs}.rs`（`Balances`，`isolated`、`liquidation` 列），`crates/phasor-analysis/src/portfolio.rs`（逐仓的可用现金），`crates/phasor-py/src/{lib,params,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §7.8、§8.7、§9.1、§10.2。测试 `crates/phasor-sim/tests/liquidation.rs`、`crates/phasor-analysis/tests/liquidation.rs`、`crates/phasor-py/tests/test_liquidation.py`。
 
-- [ ] **C3 持仓费：资金费、隔夜融资**（M，部分完成）
+- [x] **C3 持仓费：资金费、隔夜融资**（M）
   - 为什么：资金费套利的收益主要就是资金费。外汇隔夜利息、CFD 隔夜融资是同一类现金流：按持仓的名义价值，在结算时点收付。原来只能事先算好金额传进 `cash_earnings`，没法按模拟中的实际持仓结算。
   - 做了什么：
     - [x] 多头、空头两个费率序列 `long_financing_rate`、`short_financing_rate`（非结算时点为 NaN 或 0），按持仓方向取费率，`payment = −|position| × price × rate`，正数表示付出，记为 `CashRecords(kind=Financing)`。原计划的可选 `funding_price` 并入 C4 的 `mark_price`：持仓费和强平用同一个价格。
     - [x] 永续资金费 `funding_rate` 是单独的一个输入（Rust 和 Python 都是），`payment = −position × price × rate`，费率为正时多头付、空头收，记为 `CashRecords(kind=Funding)`。做成单独的输入，而不是在 Python 里把它展开成"空头费率 = −多头费率"，是因为两种费用的记录类型不同，同一次运行里可以一列是永续、一列是 CFD。
     - [x] 收盘结算：在当根订单和 `cash_earnings` 之后，按订单之后的持仓，没有信号的 K 线也结算。持仓费不封顶（`cash_earnings` 的扣款最多扣到可用现金），所以只要用了任一持仓费，整次运行走 B4 的 `const LEV: bool` 实例：现金可以小于 0，之后只能平仓；成交记录带上余额。杠杆为 1 的列成交不变。
-    - [ ] `research/phasor_lab` 的 `funding_modeled` 改成真实开关：研究模块的数据目录只有 K 线，没有资金费率历史，要等 G1 第 1 批的资金费率下载。
+    - 移到 G1：`research/phasor_lab` 的 `funding_modeled` 改成真实开关。引擎这边已经能收资金费，缺的是数据：研究模块的数据目录只有 K 线，没有资金费率历史。
   - 没做：合约乘数（B6），公式里还没有 `multiplier`。
   - 位置：`crates/phasor-sim/src/holding.rs`（四种持仓费的计算和单元测试），`crates/phasor-sim/src/{from_orders,from_signals,lib,cash}.rs`，`crates/phasor-model/src/enums.rs`（`CashFlowKind` 加 `Funding`、`Financing`、`Interest`、`BorrowFee`，判别值 3–6）；`ARCHITECTURE.md` §8.6。测试和性能见 C4。
 
@@ -312,11 +312,11 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
   - 位置：同 C3；`crates/phasor-analysis/src/{series,portfolio}.rs`，`crates/phasor-py/src/{lib,params,parse}.rs`，`crates/phasor-py/python/phasor/{__init__,rates}.py`。测试 `crates/phasor-sim/tests/holding.rs`、`crates/phasor-analysis/tests/holding.rs`、`crates/phasor-py/tests/test_holding.py`。
 
-- [ ] **C5 外部对照**（M）
+- [ ] **C5 外部对照**（M，部分完成）
   - 为什么：vectorbt 和 PRO 都没有这几项，没有现成的参照实现，只靠自己写的测试容易错得一致。
-  - 做什么：
-    - [ ] 手算 fixture：几十个小场景，逐笔写出保证金、权益、强平价。覆盖永续、期货（每手固定保证金）、外汇隔夜利息（多空费率不同）、跨周末计息。
-    - [ ] 守恒检查：权益 = 现金 + 未实现盈亏；永续资金费在多空之间对称、总和为零。其他持仓费不要求对称。
+  - 做了什么：
+    - [x] 手算场景：逐笔写出保证金、权益、强平价，以 Rust 测试的形式放在各功能旁边，而不是 TSV fixture（没有参考实现可以生成它们），共约七十个：内核保证金 11 个、模拟保证金 10 个、持仓费 5 + 12 个、强平 10 + 14 个、分析层手算 8 个（保证金 5、持仓费 1、强平 2）。覆盖永续（按名义价值的保证金和资金费）、期货（每单位固定保证金 `margin_basis="unit"`，初始和维持保证金都有）、外汇和 CFD 的隔夜融资（多空费率不同）、跨周末计息（Python `test_interest_over_a_weekend_is_three_days`：日线周五那根付 3 天）。
+    - [x] 守恒检查：权益 = 现金 + 未实现盈亏，由分析层的四个性质测试逐根检查（`crates/phasor-analysis/tests/{holding,liquidation}.rs`：重建出的权益按 `现金 + 持仓 × 收盘价` 算，循环里的权益是每根结算后的现金加未结算盈亏，两者每根 K 线都相等，覆盖杠杆、全仓和逐仓保证金列、四种持仓费、强平和穿仓核销、共享账户）；永续资金费在多空之间对称、每根 K 线总和为零（`crates/phasor-sim/tests/holding.rs` 的 `funding_between_a_long_and_a_short_of_one_size_sums_to_zero`，独立账户和共享账户）。其他持仓费不要求对称。
     - [ ] 和 NautilusTrader 的保证金账户在相同成交序列上对照（外部环境运行）。
 
 ### D. 订单与止损
@@ -419,6 +419,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 为什么：现在只有 `examples/` 里的下载脚本。
   - 做什么：
     - [ ] 第 1 批：Binance（现货、U 本位、币本位 K 线，**资金费率历史**，**标记价格 K 线**，指数价、溢价指数，Vision 批量文件），CCXT。资金费套利直接需要。
+    - [ ] 资金费率历史接进 `research/phasor_lab`：把 `funding_modeled` 改成真实开关，开时把费率对齐到结算时刻所在的 K 线、传给 `funding_rate`（从 C3 移过来）。
     - [ ] 第 2 批：Yahoo Finance、Alpaca、Polygon（Massive）、Databento。
     - [ ] 第 3 批：Alpha Vantage、Nasdaq Data Link、TradingView、findatapy。
     - [ ] 自定义数据源基类。
@@ -555,7 +556,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 - [ ] **K4 基准覆盖**（持续，部分完成）
   - 为什么：每个新功能都要证明关闭时不变慢、开启时代价可知。
   - 做什么：
-    - [x] 现金流、`cash_limit`、`reject_prob` 关闭时和 main 对比过（墙钟时间和 callgrind 指令数）。
+    - [x] 每个新功能关闭时都和改动前对比过（墙钟时间和 callgrind 指令数）：现金流、`cash_limit`、`reject_prob`（P1）、杠杆（B4）、保证金账户（C1）、持仓费（C3、C4）、强平（C2）。数字记在各自任务下。
     - [ ] 把新功能写进 `benchmarks/workloads*.tsv`，开启和关闭各测一次。
     - [x] 指令数回归检查：`benchmarks/instructions.py`（P1）。
 
@@ -610,7 +611,7 @@ A–F 改的是模拟内核，要按顺序做；G、H、I、J、K 基本不碰�
 |---|---|---|---|
 | M1 现金流 | A1–A4、B1–B3、B9 | 大部分完成（A2 部分完成，A3 推迟，A4 随 B4 完成） | 入金出金、利息、分红；把事先算好的资金费传进 `cash_earnings` |
 | M2 杠杆与合约 | B4–B8、B10 | B4、B10 完成，其余未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
-| M3 保证金账户 | C1–C5 | C1、C2、C4 完成，C3 部分完成（研究模块的开关等 G1），C5 未开始 | 资金费套利、永续和期货 CTA、外汇和 CFD 隔夜持仓、融资融券利息的准确回测，包括强平 |
+| M3 保证金账户 | C1–C5 | C1–C4 完成，C5 部分完成（差 NautilusTrader 对照） | 资金费套利、永续和期货 CTA、外汇和 CFD 隔夜持仓、融资融券利息的准确回测，包括强平 |
 | M4 订单与止损 | D1–D9 | 未开始 | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
 | M5 数据 | G0–G5 | G5 部分完成 | 不再依赖示例脚本下载数据 |
 | M6 回调 | E1–E5 | E4 部分完成（内核、止损判定、记录接口已公开） | 和账户状态相关的策略逻辑 |

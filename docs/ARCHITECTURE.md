@@ -735,6 +735,31 @@ the level, a cross account closing together, an isolated column alone and its
 capped loss, a hedge at extremes and at a mark, threads);
 `crates/phasor-analysis/tests/liquidation.rs` checks that the rebuilt equity
 is the loop's on every bar of a run that liquidates and writes off.
+
+### 8.8 One bar, in order
+
+Both loops run each account's bar in this order; `from_signals` adds the
+stop and signal steps. Each step reads what the steps before it left.
+
+1. **Open**: the deposit, then dividends on the position carried in (§8.5).
+2. **First pass, per column**: the order price and the valuation price are
+   resolved. In `from_signals`, armed stops are tested against the bar's
+   open, high and low (a gap fills at the open), trailed, and the signals are
+   read and sized. Cross margin columns settle at the valuation price (§8.4).
+3. **Liquidation**, on the positions carried in, before anything is valued
+   (§8.7). A stop that fired in step 2 is credited.
+4. **Value and order**: the group is valued once at the valuation prices,
+   and the call sequence orders the columns (§8.3).
+5. **Second pass**: the orders execute, stop exits among them, at their stop
+   level or at the open after a gap.
+6. **Close**: `cash_earnings`, then the holding charges, on the position the
+   orders left (§8.5, §8.6).
+
+So a stop that fills at the open still comes after the open's deposit and
+dividend: the dividend is owed to the position the stop then closes, as on an
+ex-date, and the deposit is in the cash the bar's orders size from. A
+position opened on a bar is first tested for its stops and for liquidation on
+the next one, and first charged at the close of the bar it opened on.
 ---
 
 ## 9. Records: phasor-records

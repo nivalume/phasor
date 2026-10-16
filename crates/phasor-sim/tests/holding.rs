@@ -189,6 +189,52 @@ fn a_hedged_pair_collects_the_shorts_funding_in_one_account() {
 }
 
 #[test]
+fn funding_between_a_long_and_a_short_of_one_size_sums_to_zero() {
+    // A conservation check: funding moves money from one side to the other
+    // and creates none. Equal positions at one mark price and one rate, in
+    // separate accounts and in one, pay and receive exactly the same.
+    let n_rows = 60;
+    let close: Vec<f64> = prices(n_rows, 1);
+    let mark: Vec<f64> = close.iter().map(|c| c * 1.003).collect();
+    let funding: Vec<f64> = (0..n_rows)
+        .map(|i| match i % 4 {
+            0 => 1e-4 * ((i % 7) as f64 - 3.0),
+            2 => N,
+            _ => 0.0,
+        })
+        .collect();
+    let both: Vec<f64> = [close.clone(), close.clone()].concat();
+    let both_mark: Vec<f64> = [mark.clone(), mark].concat();
+    let mut size = vec![N; 2 * n_rows];
+    size[0] = 8.0;
+    size[n_rows] = -8.0;
+    for groups in [Groups::ungrouped(2), Groups::from_lens(&[2], 2).unwrap()] {
+        let fills = simulate_from_orders(&FromOrders {
+            n_rows,
+            n_cols: 2,
+            init_cash: FlexArray::scalar(1000.0),
+            close: FlexArray::full(&both, n_rows, 2).unwrap(),
+            size: FlexArray::full(&size, n_rows, 2).unwrap(),
+            account_type: FlexArray::scalar(AccountType::Margin),
+            initial_margin: FlexArray::scalar(0.1),
+            funding_rate: FlexArray::per_row(&funding, n_rows).unwrap(),
+            mark_price: FlexArray::full(&both_mark, n_rows, 2).unwrap(),
+            groups,
+            ..FromOrders::default()
+        })
+        .unwrap();
+        let cash = &fills.cash;
+        assert!(cash.len() > 20, "too few funding payments to mean anything");
+        let mut net = vec![0.0; n_rows];
+        for k in 0..cash.len() {
+            assert_eq!(cash.kind[k], FUNDING);
+            net[cash.idx[k] as usize] += cash.amount[k];
+        }
+        assert!(net.iter().all(|&v| v == 0.0), "{net:?}");
+    }
+}
+
+#[test]
 fn financing_charges_each_side_its_own_rate() {
     // Long and short 8 at 128, unshared. The long pays 2⁻¹⁰ a bar; the short's
     // rate is negative, so it is paid 2⁻¹¹ a bar.
