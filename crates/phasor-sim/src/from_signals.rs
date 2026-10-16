@@ -704,11 +704,31 @@ fn prepare_order(
 }
 
 /// Executes a group sequentially within each bar; groups are independent.
+fn simulate_group<S: RecordSink + LogSink>(
+    args: &FromSignals<'_>,
+    groups: &Groups,
+    group: usize,
+    sink: &mut S,
+    fills: &mut i64,
+) -> Result<()> {
+    if crate::cash::all_off(
+        &args.cash_deposits,
+        &args.cash_dividends,
+        &args.cash_earnings,
+    ) {
+        group_loop::<S, false>(args, groups, group, sink, fills)
+    } else {
+        group_loop::<S, true>(args, groups, group, sink, fills)
+    }
+}
+
+/// The loop of [`simulate_group`], in two copies: with `FLOWS` false it has no
+/// code for cash flows at all. See [`crate::cash::all_off`].
 #[allow(
     clippy::too_many_lines,
     reason = "keep fill, stop state and log updates together"
 )]
-fn simulate_group<S: RecordSink + LogSink>(
+fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
     args: &FromSignals<'_>,
     groups: &Groups,
     group: usize,
@@ -766,9 +786,10 @@ fn simulate_group<S: RecordSink + LogSink>(
     let mut pending: Vec<Option<Pending>> = vec![None; len];
     let mut order_values = vec![0.0; len];
     let mut seq: Vec<usize> = (0..len).collect();
-    let at_open =
-        !crate::cash::is_off(&args.cash_deposits) || !crate::cash::is_off(&args.cash_dividends);
-    let earnings = !crate::cash::is_off(&args.cash_earnings);
+    let at_open = FLOWS
+        && (!crate::cash::is_off(&args.cash_deposits)
+            || !crate::cash::is_off(&args.cash_dividends));
+    let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
     for i in 0..args.n_rows {
         if at_open {
             crate::cash::at_open(

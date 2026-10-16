@@ -36,6 +36,22 @@ pub(crate) fn is_off(array: &FlexArray<'_, f64>) -> bool {
     matches!(*array, FlexArray::Scalar(v) if v.is_nan() || v == 0.0)
 }
 
+/// Whether a run books no cash flow at all, so a loop can run its copy that has
+/// no code for one.
+///
+/// Branches on flags fixed for the run and never taken still cost the loops
+/// time: the copy without them runs `from_orders` about 5% faster and
+/// `from_signals` about 6% (one thread, interleaved rounds). On `from_orders`
+/// it executes about as many instructions, so the cost is not work the
+/// branches do; see `benchmarks/README.md`.
+pub(crate) fn all_off(
+    deposits: &FlexArray<'_, f64>,
+    dividends: &FlexArray<'_, f64>,
+    earnings: &FlexArray<'_, f64>,
+) -> bool {
+    is_off(deposits) && is_off(dividends) && is_off(earnings)
+}
+
 /// Books `amount` to the balance, capping an outflow at the free cash.
 ///
 /// Returns what was applied. `free_cash` never exceeds `cash` — it is cash

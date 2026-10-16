@@ -321,11 +321,30 @@ impl ColumnState {
 /// path writes every group into one buffer. Resetting it per group would point
 /// group 1's logs at group 0's fills — an in-range index naming the wrong
 /// trade, which nothing downstream could flag.
+fn simulate_group<S: RecordSink + LogSink>(
+    args: &FromOrders<'_>,
+    group: usize,
+    sink: &mut S,
+    fills: &mut i64,
+) -> Result<()> {
+    if crate::cash::all_off(
+        &args.cash_deposits,
+        &args.cash_dividends,
+        &args.cash_earnings,
+    ) {
+        group_loop::<S, false>(args, group, sink, fills)
+    } else {
+        group_loop::<S, true>(args, group, sink, fills)
+    }
+}
+
+/// The loop of [`simulate_group`], in two copies: with `FLOWS` false it has no
+/// code for cash flows at all. See [`crate::cash::all_off`].
 #[allow(
     clippy::too_many_lines,
     reason = "the bar's phases read in order: deposit, resolve, execute, earn"
 )]
-fn simulate_group<S: RecordSink + LogSink>(
+fn group_loop<S: RecordSink + LogSink, const FLOWS: bool>(
     args: &FromOrders<'_>,
     group: usize,
     sink: &mut S,
@@ -358,9 +377,10 @@ fn simulate_group<S: RecordSink + LogSink>(
     // does not fill used to pay all fourteen checks and little else.
     let params_vary = args.params_vary_by_row();
     let mut orders: Vec<ValidatedOrder> = cols.clone().map(|c| build_order(args, 0, c)).collect();
-    let at_open =
-        !crate::cash::is_off(&args.cash_deposits) || !crate::cash::is_off(&args.cash_dividends);
-    let earnings = !crate::cash::is_off(&args.cash_earnings);
+    let at_open = FLOWS
+        && (!crate::cash::is_off(&args.cash_deposits)
+            || !crate::cash::is_off(&args.cash_dividends));
+    let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
 
     for i in 0..args.n_rows {
         if at_open {

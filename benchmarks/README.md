@@ -18,6 +18,10 @@ cargo run --release --example bench -p phasor-sim
 python benchmarks/compare.py                    # head-to-head
 python benchmarks/compare.py --check-baseline   # regression gate
 python benchmarks/compare.py --write-baseline   # accept current numbers
+
+# Instruction counts against main. Needs valgrind; on macOS see
+# "Instruction counts" below.
+python benchmarks/instructions.py
 ```
 
 ## Same work, or no comparison
@@ -203,6 +207,66 @@ non-zero; the note explains, it does not excuse.
 
 The threaded figures were found by trying to inject a 30% slowdown and watching
 the same code report "+63%" between runs instead.
+
+## Instruction counts
+
+The constraint in `docs/plan.md` allows a feature that is switched off to cost
+at most 3%, and interleaved timings move by about 4% between rounds on a
+shared machine. Timings alone cannot tell a 3.8% regression from a 2% one.
+`instructions.py` counts instructions instead, which repeat exactly from run
+to run:
+
+```bash
+python benchmarks/instructions.py                        # against main
+python benchmarks/instructions.py --base origin/main
+python benchmarks/instructions.py --base-dir ../checkout   # an existing tree
+```
+
+It builds the `bench` example from this tree and from the base (checked out
+in a scratch worktree) into `target/instructions/`, runs each workload once
+under callgrind with counting switched on only inside `run_once` (the `--once`
+mode of the example, so input generation is not counted), and reports the
+change per workload and as a geometric mean per loop. It aborts if the two
+builds did different work, the same rule as above, and exits non-zero if a
+loop's mean grew by more than 3%.
+
+valgrind does not run on macOS, so there it runs in a container:
+
+```bash
+docker build -t phasor-callgrind -f benchmarks/callgrind.Dockerfile benchmarks
+docker run --rm -v "$PWD:$PWD" -v phasor-cargo:/usr/local/cargo/registry \
+    -w "$PWD" phasor-callgrind python3 benchmarks/instructions.py --base origin/main
+```
+
+Once, a build in the container missed an edit made just before it and the
+check counted the previous binary. A result that did not move after an edit
+deserves `CARGO_TARGET_DIR=target/instructions/head cargo clean --release -p
+phasor-sim` and a second run before it is believed.
+
+**A count is not a time.** The fix that brought `from_signals` back under the
+limit showed this in both directions, measured against main on an Apple M4 Pro,
+with eight interleaved single-thread rounds per comparison (a range is two
+sittings or more):
+
+| Change | `from_orders` instructions | `from_orders` time | `from_signals` instructions | `from_signals` time |
+|---|---:|---:|---:|---:|
+| Before the fix | +4.2% | +3.2% to +4.0% | +1.1% | +4.5% to +4.6% |
+| Two copies of each loop, with and without cash-flow code | +4.5% | −1.9% | −3.5% | −1.8% |
+| Plus the kernel's rare branches out of line, `buy`/`sell` inlined | +0.5% | −3.7% to −4.1% | −4.5% | −2.0% to −2.4% |
+
+Splitting the loops barely moved `from_orders`' instruction count and made it
+about 5% faster: the branches it removed are on flags fixed for the run and
+never taken, so they cost no work, and still cost time. The kernel change
+alone, without the split, went the other way: it took `from_orders` back to
++0.2% instructions but its time down by only 0.4 to 2.7 points, and
+`from_signals` got slower in two sittings out of four. This core retires about
+six instructions a cycle on these loops, so where the code sits and what it
+keeps in registers can matter more than how much of it runs.
+
+So use the count to see a change, and the interleaved timings to decide
+whether it matters. A count that grows means the loop does more work, which
+is worth knowing before any timing. A flat count clears nothing, and the
+acceptance in `docs/plan.md` is on time.
 
 ## Adding a workload
 

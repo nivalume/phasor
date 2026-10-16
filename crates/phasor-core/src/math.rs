@@ -89,7 +89,12 @@ pub fn is_less(a: f64, b: f64) -> bool {
 /// `a + b` for two nearly-cancelling large values loses most of its
 /// significant digits — the sum's distance from zero is then meaningless at
 /// a relative tolerance.
-#[inline]
+///
+/// Inlining is forced because every balance update runs this. Once `buy` and
+/// `sell` were inlined into the matching kernel, the compiler stopped inlining
+/// this into it, and the calls cost both simulation loops about 1.3% more
+/// instructions (`benchmarks/instructions.py`).
+#[inline(always)]
 #[must_use]
 pub fn is_addition_zero(a: f64, b: f64) -> bool {
     if sign(a) != sign(b) {

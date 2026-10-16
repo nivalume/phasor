@@ -12,7 +12,12 @@
 //!
 //! ```text
 //! cargo run --release --example bench -p phasor-sim -- benchmarks/results/phasor.tsv
+//! cargo run --release --example bench -p phasor-sim -- --once signals_dense
 //! ```
+//!
+//! `--once NAME` runs one workload once, single-threaded and untimed, and
+//! prints its fill count and checksum. It is what `benchmarks/instructions.py`
+//! runs under callgrind.
 //!
 //! Release only. A debug build of the execution kernel is roughly fifty times
 //! slower and the numbers mean nothing.
@@ -266,9 +271,44 @@ fn time_workload(
     }
 }
 
+/// Runs one workload once, serially, and returns its fill count.
+///
+/// `benchmarks/instructions.py` counts instructions inside this function only
+/// (callgrind's `--toggle-collect`), which leaves input generation out of the
+/// count. It must stay a function of its own for that to work.
+#[inline(never)]
+fn run_once(run: impl FnOnce() -> usize) -> usize {
+    run()
+}
+
+/// Times a workload, or under `--once` runs it a single time.
+fn measure(
+    once: bool,
+    out: &mut String,
+    name: &str,
+    n_rows: usize,
+    n_cols: usize,
+    sum: u64,
+    cores: usize,
+    run: impl Fn(usize) -> usize,
+) {
+    if once {
+        let fills = run_once(|| run(1));
+        println!("{name}\t{fills}\t{sum}");
+    } else {
+        time_workload(out, name, n_rows, n_cols, sum, cores, run);
+    }
+}
+
 fn main() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let out_path = std::env::args().nth(1).map_or_else(
+    let cli: Vec<String> = std::env::args().skip(1).collect();
+    let only = match cli.first().map(String::as_str) {
+        Some("--once") => Some(cli.get(1).expect("--once needs a workload name").clone()),
+        _ => None,
+    };
+    let skip = |name: &str| only.as_ref().is_some_and(|o| o != name);
+    let out_path = cli.first().filter(|_| only.is_none()).map_or_else(
         || repo_root.join("benchmarks/results/phasor.tsv"),
         PathBuf::from,
     );
@@ -284,7 +324,7 @@ fn main() {
     )
     .unwrap();
 
-    for w in &workloads {
+    for w in workloads.iter().filter(|w| !skip(&w.name)) {
         let (close, size) = generate(w);
         let sum = checksum(&close).wrapping_add(checksum(&size));
         let (price, val_price) = match w.price_mode.as_str() {
@@ -309,7 +349,8 @@ fn main() {
             slippage: FlexArray::Scalar(w.slippage),
             ..Default::default()
         };
-        time_workload(
+        measure(
+            only.is_some(),
             &mut out,
             &w.name,
             w.n_rows,
@@ -330,7 +371,7 @@ fn main() {
 
     let signal_workloads =
         parse_signal_workloads(&repo_root.join("benchmarks/workloads_signals.tsv"));
-    for w in &signal_workloads {
+    for w in signal_workloads.iter().filter(|w| !skip(&w.name)) {
         let (close, high, low, entries, exits) = generate_signals(w);
         let sum = checksum(&close)
             .wrapping_add(entries.iter().filter(|e| **e).count() as u64)
@@ -351,7 +392,8 @@ fn main() {
             fees: FlexArray::Scalar(w.fees),
             ..Default::default()
         };
-        time_workload(
+        measure(
+            only.is_some(),
             &mut out,
             &w.name,
             w.n_rows,
@@ -370,6 +412,16 @@ fn main() {
         );
     }
 
+    if let Some(name) = &only {
+        let known = workloads.iter().map(|w| &w.name);
+        assert!(
+            known
+                .chain(signal_workloads.iter().map(|w| &w.name))
+                .any(|w| w == name),
+            "no workload named {name:?}"
+        );
+        return;
+    }
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent).expect("cannot create results directory");
     }

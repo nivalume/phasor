@@ -38,6 +38,39 @@ fn floor_to(value: f64, granularity: f64) -> f64 {
     (value / granularity).floor() * granularity
 }
 
+/// The cash a `lock_cash` buy may spend, before the caps every buy applies.
+///
+/// Out of line, like [`sell_size_limit`]: most runs never lock cash, and
+/// [`buy`] is inlined into the kernel, so this keeps the copy small.
+#[cold]
+#[inline(never)]
+fn locked_cash_limit(state: &ExecuteOrderState, adj_price: f64, order: &Order) -> f64 {
+    if state.position >= 0.0 {
+        // In a long position cash == free_cash, unless another column has
+        // locked some of it.
+        return state.free_cash;
+    }
+    // Covering the short costs this much; what is left over is what a new long
+    // may use.
+    let cover_req_cash = state.position.abs() * adj_price * (1.0 + order.fees) + order.fixed_fees;
+    let cover_free_cash = add(state.free_cash + 2.0 * state.debt, -cover_req_cash);
+    if cover_free_cash > 0.0 {
+        // Enough to close the short and open a long.
+        state.free_cash + 2.0 * state.debt
+    } else if cover_free_cash < 0.0 {
+        // Not enough to close the short: solve for the part that can be
+        // covered. The 2 * avg_entry_price term is the reservation released by
+        // shrinking the short.
+        let avg_entry_price = state.debt / state.position.abs();
+        let max_short_size = (state.free_cash - order.fixed_fees)
+            / (adj_price * (1.0 + order.fees) - 2.0 * avg_entry_price);
+        max_short_size * adj_price * (1.0 + order.fees) + order.fixed_fees
+    } else {
+        // Exactly enough to close the short.
+        state.cash
+    }
+}
+
 /// Buys, or covers an existing short.
 ///
 /// Comparisons against zero here are exact, not tolerance-based, matching the
@@ -45,6 +78,11 @@ fn floor_to(value: f64, granularity: f64) -> f64 {
 ///
 /// `size` is positive. `percent`, when not `NaN`, caps the spend at that
 /// fraction of the available cash.
+///
+/// Inlining is forced here and in [`sell`]: left to itself, the compiler
+/// stopped inlining either once the kernel grew, and the calls cost
+/// `from_orders` about 2.5% more instructions (`benchmarks/instructions.py`).
+#[inline(always)]
 fn buy(
     state: ExecuteOrderState,
     size: f64,
@@ -56,32 +94,7 @@ fn buy(
 
     // How much cash this order may spend.
     let mut cash_limit = if order.lock_cash {
-        if state.position >= 0.0 {
-            // In a long position cash == free_cash, unless another column has
-            // locked some of it.
-            state.free_cash
-        } else {
-            // Covering the short costs this much; what is left over is what a
-            // new long may use.
-            let cover_req_cash =
-                state.position.abs() * adj_price * (1.0 + order.fees) + order.fixed_fees;
-            let cover_free_cash = add(state.free_cash + 2.0 * state.debt, -cover_req_cash);
-            if cover_free_cash > 0.0 {
-                // Enough to close the short and open a long.
-                state.free_cash + 2.0 * state.debt
-            } else if cover_free_cash < 0.0 {
-                // Not enough to close the short: solve for the part that can
-                // be covered. The 2 * avg_entry_price term is the reservation
-                // released by shrinking the short.
-                let avg_entry_price = state.debt / state.position.abs();
-                let max_short_size = (state.free_cash - order.fixed_fees)
-                    / (adj_price * (1.0 + order.fees) - 2.0 * avg_entry_price);
-                max_short_size * adj_price * (1.0 + order.fees) + order.fixed_fees
-            } else {
-                // Exactly enough to close the short.
-                state.cash
-            }
-        }
+        locked_cash_limit(&state, adj_price, order)
     } else {
         state.cash
     };
@@ -220,11 +233,63 @@ fn buy(
     ))
 }
 
+/// The most a `sell` may sell and short when cash is locked or the request is
+/// an infinite percentage, and the part of `percent` still to apply after it.
+/// `Err` is the reason the order is rejected.
+///
+/// Out of line because most runs reach neither case, as [`locked_cash_limit`].
+#[cold]
+#[inline(never)]
+fn sell_size_limit(
+    state: &ExecuteOrderState,
+    size: f64,
+    adj_price: f64,
+    order: &Order,
+    percent: f64,
+) -> core::result::Result<(f64, f64), StatusInfo> {
+    // Work out the largest position that can be sold and shorted.
+    let long_size = state.position.max(0.0);
+    let long_cash = long_size * adj_price * (1.0 - order.fees);
+    let total_free_cash = add(state.free_cash, long_cash);
+
+    let max_size_limit = if total_free_cash <= 0.0 {
+        if state.position <= 0.0 {
+            // Nothing to sell and no free cash to short with.
+            return Err(StatusInfo::NoCashShort);
+        }
+        // A position to close, but no free cash to short beyond it.
+        long_size
+    } else {
+        let max_short_size =
+            add(total_free_cash, -order.fixed_fees) / (adj_price * (1.0 + order.fees));
+        let limit = add(long_size, max_short_size);
+        if limit <= 0.0 {
+            return Err(StatusInfo::CantCoverFees);
+        }
+        limit
+    };
+
+    Ok(if order.lock_cash {
+        // The percentage is consumed here rather than applied again in `sell`.
+        if size.is_infinite() && !percent.is_nan() {
+            ((percent * max_size_limit).min(max_size_limit), f64::NAN)
+        } else if !percent.is_nan() {
+            ((percent * size).min(max_size_limit), f64::NAN)
+        } else {
+            (size.min(max_size_limit), percent)
+        }
+    } else {
+        // Reached only when size is infinite and a percentage is set.
+        (max_size_limit, percent)
+    })
+}
+
 /// Sells, or opens/extends a short.
 ///
 /// As in [`buy`], comparisons against zero are exact by design.
 ///
 /// `size` is positive.
+#[inline(always)]
 fn sell(
     state: ExecuteOrderState,
     size: f64,
@@ -237,50 +302,14 @@ fn sell(
     let mut size_limit = if order.direction == Direction::LongOnly {
         state.position.min(size)
     } else if order.lock_cash || (size.is_infinite() && !percent.is_nan()) {
-        // Work out the largest position that can be sold and shorted.
-        let long_size = state.position.max(0.0);
-        let long_cash = long_size * adj_price * (1.0 - order.fees);
-        let total_free_cash = add(state.free_cash, long_cash);
-
-        let max_size_limit = if total_free_cash <= 0.0 {
-            if state.position <= 0.0 {
-                // Nothing to sell and no free cash to short with.
-                return Ok((
-                    state,
-                    OrderResult::not_filled(OrderStatus::Rejected, StatusInfo::NoCashShort),
-                ));
-            }
-            // A position to close, but no free cash to short beyond it.
-            long_size
-        } else {
-            let max_short_size =
-                add(total_free_cash, -order.fixed_fees) / (adj_price * (1.0 + order.fees));
-            let limit = add(long_size, max_short_size);
-            if limit <= 0.0 {
-                return Ok((
-                    state,
-                    OrderResult::not_filled(OrderStatus::Rejected, StatusInfo::CantCoverFees),
-                ));
-            }
-            limit
-        };
-
-        if order.lock_cash {
-            // The percentage is consumed here rather than applied again below.
-            if size.is_infinite() && !percent.is_nan() {
-                let limit = (percent * max_size_limit).min(max_size_limit);
-                percent = f64::NAN;
+        match sell_size_limit(&state, size, adj_price, order, percent) {
+            Ok((limit, rest)) => {
+                percent = rest;
                 limit
-            } else if !percent.is_nan() {
-                let limit = (percent * size).min(max_size_limit);
-                percent = f64::NAN;
-                limit
-            } else {
-                size.min(max_size_limit)
             }
-        } else {
-            // Reached only when size is infinite and a percentage is set.
-            max_size_limit
+            Err(info) => {
+                return Ok((state, OrderResult::not_filled(OrderStatus::Rejected, info)));
+            }
         }
     } else {
         size
