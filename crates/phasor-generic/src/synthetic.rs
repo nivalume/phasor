@@ -13,7 +13,8 @@
 //! # Every draw is a function of `(seed, row, col)`
 //!
 //! There is no generator state. Each normal or uniform draw is derived from
-//! the seed, the row and the column through SplitMix64, so the same arguments
+//! the seed, the row and the column through SplitMix64
+//! ([`phasor_core::random`]), so the same arguments
 //! always give the same path, bit for bit, and column `c` does not depend on
 //! how many other columns were asked for. A result that came from a seed can
 //! be reproduced from that seed alone.
@@ -25,6 +26,7 @@
 //! paths.
 
 use phasor_core::error::{Error, Result};
+use phasor_core::random::{bits, to_unit_nonzero};
 
 /// Salts that keep the draws of one `(seed, row, col)` independent of each
 /// other. Each draw has its own, so changing one never shifts another.
@@ -33,32 +35,12 @@ const SALT_NORMAL_U2: u64 = 0x6E6F_726D_616C_5F32;
 const SALT_HIGH: u64 = 0x6F68_6C63_5F68_6967;
 const SALT_LOW: u64 = 0x6F68_6C63_5F6C_6F77;
 
-/// One SplitMix64 step: a bijective mix of 64 bits.
-fn splitmix64(x: u64) -> u64 {
-    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-/// 64 random bits that depend only on `(seed, row, col, salt)`.
+/// A uniform draw on `(0, 1]`, keyed by `(seed, row, col, salt)`.
 ///
-/// Chained rather than XOR-ed together, so that `(row, col)` and `(col, row)`
-/// do not collide.
-fn bits(seed: u64, row: usize, col: usize, salt: u64) -> u64 {
-    let h = splitmix64(seed ^ salt);
-    let h = splitmix64(h ^ row as u64);
-    splitmix64(h ^ col as u64)
-}
-
-/// A uniform draw on the open interval `(0, 1)`.
-///
-/// The top 53 bits are centred in their bucket (`+ 0.5`), so the result is
-/// never exactly `0` — which is what keeps `ln` in [`normal`] finite — and
-/// never exactly `1`.
+/// Never exactly `0`, which is what keeps `ln` in [`normal`] finite; see
+/// [`to_unit_nonzero`] for the one draw in 2⁵³ that is exactly `1`.
 fn uniform(seed: u64, row: usize, col: usize, salt: u64) -> f64 {
-    const SCALE: f64 = 1.0 / (1_u64 << 53) as f64;
-    ((bits(seed, row, col, salt) >> 11) as f64 + 0.5) * SCALE
+    to_unit_nonzero(bits(seed, row, col, salt))
 }
 
 /// A standard normal draw by Box–Muller, from two independent uniforms.
@@ -189,7 +171,7 @@ pub fn gbm(
 /// - **high** is `max(open, close) * (1 + spread * U)`.
 /// - **low** is `min(open, close) * (1 - spread * U')`.
 ///
-/// `U` and `U'` are independent uniforms on `(0, 1)`. The extension is applied
+/// `U` and `U'` are independent uniforms on `(0, 1]`. The extension is applied
 /// to the magnitude (`hi + |hi| * spread * U`), which is the formula above for
 /// positive prices and still widens the bar for negative ones, so
 /// `low <= min(open, close) <= max(open, close) <= high` holds on every bar of
@@ -261,6 +243,207 @@ mod tests {
         a.chunks_exact(n_rows)
             .flat_map(|col| col.windows(2).map(|w| f(w[0], w[1])).collect::<Vec<_>>())
             .collect()
+    }
+
+    #[test]
+    fn draws_are_pinned() {
+        // Recorded from the original implementation: a seed names one path,
+        // so these may never change.
+        let pins = [
+            ((0, 0, 0, 0), 0x2382_75bc_38fc_be91, 0x3fc1_c13a_de1c_7e5e),
+            (
+                (0, 0, 0, SALT_NORMAL_U1),
+                0xb4ad_b8f7_acd3_9cda,
+                0x3fe6_95b7_1ef5_9a74,
+            ),
+            (
+                (0, 0, 0, SALT_NORMAL_U2),
+                0xb63f_23a4_b7f1_6ed4,
+                0x3fe6_c7e4_7496_fe2e,
+            ),
+            (
+                (0, 0, 0, SALT_HIGH),
+                0x1efd_09d4_975b_563d,
+                0x3fbe_fd09_d497_5b54,
+            ),
+            (
+                (0, 0, 0, SALT_LOW),
+                0xa360_e9d6_2c76_a900,
+                0x3fe4_6c1d_3ac5_8ed6,
+            ),
+            ((7, 3, 4, 0), 0x7d66_a7eb_793e_ac4a, 0x3fdf_59a9_fade_4fab),
+            (
+                (7, 3, 4, SALT_NORMAL_U1),
+                0xf8a5_afb9_9fc5_fd5a,
+                0x3fef_14b5_f733_f8c0,
+            ),
+            (
+                (7, 3, 4, SALT_NORMAL_U2),
+                0x85b5_e54b_79c3_f659,
+                0x3fe0_b6bc_a96f_387e,
+            ),
+            (
+                (7, 3, 4, SALT_HIGH),
+                0xd4cd_c47b_6f61_4b2a,
+                0x3fea_99b8_8f6d_ec2a,
+            ),
+            (
+                (7, 3, 4, SALT_LOW),
+                0x28f7_d3df_8c35_364c,
+                0x3fc4_7be9_efc6_1a9a,
+            ),
+            ((7, 4, 3, 0), 0xb5a9_aa4e_0d7c_cea6, 0x3fe6_b535_49c1_af9a),
+            (
+                (7, 4, 3, SALT_NORMAL_U1),
+                0x5f91_354b_ece3_bf49,
+                0x3fd7_e44d_52fb_38ef,
+            ),
+            (
+                (7, 4, 3, SALT_NORMAL_U2),
+                0x4e2b_ea0d_17b2_c141,
+                0x3fd3_8afa_8345_ecb1,
+            ),
+            (
+                (7, 4, 3, SALT_HIGH),
+                0x4a8a_4105_9acc_37cb,
+                0x3fd2_a290_4166_b30d,
+            ),
+            (
+                (7, 4, 3, SALT_LOW),
+                0xc9c1_15ba_6160_589f,
+                0x3fe9_3822_b74c_2c0c,
+            ),
+            (
+                (42, 1000, 17, 0),
+                0x2171_2418_8479_1f91,
+                0x3fc0_b892_0c42_3c8e,
+            ),
+            (
+                (42, 1000, 17, SALT_NORMAL_U1),
+                0xa306_4b2e_f967_e474,
+                0x3fe4_60c9_65df_2cfc,
+            ),
+            (
+                (42, 1000, 17, SALT_NORMAL_U2),
+                0x0405_4a24_c4a8_ffeb,
+                0x3f90_1528_9312_a3f0,
+            ),
+            (
+                (42, 1000, 17, SALT_HIGH),
+                0xd95c_1d11_a4af_e94f,
+                0x3feb_2b83_a234_95fe,
+            ),
+            (
+                (42, 1000, 17, SALT_LOW),
+                0xe155_1c0a_a864_dac3,
+                0x3fec_2aa3_8155_0c9c,
+            ),
+            (
+                (u64::MAX, usize::MAX, 99, 0),
+                0xfa44_035f_777d_fdb4,
+                0x3fef_4880_6bee_efc0,
+            ),
+            (
+                (u64::MAX, usize::MAX, 99, SALT_NORMAL_U1),
+                0x9fb6_f9d0_0548_8f0a,
+                0x3fe3_f6df_3a00_a912,
+            ),
+            (
+                (u64::MAX, usize::MAX, 99, SALT_NORMAL_U2),
+                0x758e_2504_2569_7f48,
+                0x3fdd_6389_4109_5a5f,
+            ),
+            (
+                (u64::MAX, usize::MAX, 99, SALT_HIGH),
+                0xd3fa_1f51_0593_31ae,
+                0x3fea_7f43_ea20_b266,
+            ),
+            (
+                (u64::MAX, usize::MAX, 99, SALT_LOW),
+                0xd1fb_9a47_70c8_c16a,
+                0x3fea_3f73_48ee_1918,
+            ),
+        ];
+        for ((seed, row, col, salt), want_bits, want_uniform) in pins {
+            assert_eq!(
+                bits(seed, row, col, salt),
+                want_bits,
+                "{seed} {row} {col} {salt}"
+            );
+            assert_eq!(uniform(seed, row, col, salt).to_bits(), want_uniform);
+        }
+        let normals = [
+            ((0, 0, 0), 0xbfc9_5605_a1a3_c3bb),
+            ((7, 3, 4), 0xbfce_995a_2d38_5388),
+            ((7, 4, 3), 0xbfde_9f9a_f4f4_3498),
+            ((42, 1000, 17), 0x3fee_40c3_ba23_7591),
+            ((u64::MAX, usize::MAX, 99), 0xbfee_117d_5732_852c),
+        ];
+        for ((seed, row, col), want) in normals {
+            assert_eq!(normal(seed, row, col).to_bits(), want, "{seed} {row} {col}");
+        }
+    }
+
+    #[test]
+    fn paths_are_pinned() {
+        let walk = random_walk(3, 2, 1.0, 0.5, 42).unwrap();
+        assert_eq!(
+            bits_of(&walk),
+            [
+                0x3ff0_0000_0000_0000,
+                0x3ffc_b2df_8394_5597,
+                0x4000_4c8d_2c4d_a82f,
+                0x3ff0_0000_0000_0000,
+                0x3fd4_916a_dd03_3a46,
+                0xbfdc_f9aa_e6da_b40c,
+            ]
+        );
+        let close = gbm(3, 2, 100.0, 0.05, 0.2, 1.0 / 252.0, 42).unwrap();
+        assert_eq!(
+            bits_of(&close),
+            [
+                0x4059_0000_0000_0000,
+                0x4059_820e_8cc6_7d92,
+                0x4059_ab10_0d5a_4aec,
+                0x4059_0000_0000_0000,
+                0x4058_943d_bb8c_2ec4,
+                0x4058_1b6d_fb99_eefd,
+            ]
+        );
+        let (open, high, low) = ohlc_from_close(&close, 3, 2, 0.01, 42).unwrap();
+        assert_eq!(
+            bits_of(&open),
+            [
+                0x4059_0000_0000_0000,
+                0x4059_0000_0000_0000,
+                0x4059_820e_8cc6_7d92,
+                0x4059_0000_0000_0000,
+                0x4059_0000_0000_0000,
+                0x4058_943d_bb8c_2ec4,
+            ]
+        );
+        assert_eq!(
+            bits_of(&high),
+            [
+                0x4059_12f6_9ddc_877f,
+                0x4059_a197_1de7_14a3,
+                0x4059_ceac_6b32_0b14,
+                0x4059_25cd_0921_ba79,
+                0x4059_0ccc_d726_36ca,
+                0x4058_b0a1_844d_c763,
+            ]
+        );
+        assert_eq!(
+            bits_of(&low),
+            [
+                0x4058_ca08_764b_1af5,
+                0x4058_cac1_b9e8_6378,
+                0x4059_77f8_1b41_57cb,
+                0x4058_c415_e670_cc0f,
+                0x4058_8d59_a95f_3144,
+                0x4058_0aba_f13a_2ab5,
+            ]
+        );
     }
 
     #[test]
@@ -364,10 +547,10 @@ mod tests {
     }
 
     #[test]
-    fn uniforms_stay_strictly_inside_the_unit_interval() {
+    fn uniforms_are_never_zero() {
         for row in 0..10_000 {
             let u = uniform(1, row, 0, SALT_NORMAL_U1);
-            assert!(u > 0.0 && u < 1.0);
+            assert!(u > 0.0 && u <= 1.0);
             assert!(normal(1, row, 0).is_finite());
         }
     }

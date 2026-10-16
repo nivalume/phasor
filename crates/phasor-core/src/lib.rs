@@ -22,5 +22,6 @@ pub mod error;
 pub mod flex;
 pub mod math;
 pub mod matrix;
+pub mod random;
 
 pub use error::{Error, Result};

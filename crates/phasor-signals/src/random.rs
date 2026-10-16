@@ -5,9 +5,10 @@
 //! A stream generator makes every draw depend on every draw before it, so the
 //! answer changes with the order columns are visited in, the number of
 //! threads, or a column added in front. Here every draw is a pure function of
-//! `(seed, row, col)` — SplitMix64's finalizer applied to the three — so one
-//! column's signals are the same whether it is generated alone or as the
-//! thousandth of a sweep, and a seed names one answer.
+//! `(seed, row, col)` — [`phasor_core::random::uniform`], SplitMix64 chained
+//! over the three — so one column's signals are the same whether it is
+//! generated alone or as the thousandth of a sweep, and a seed names one
+//! answer.
 //!
 //! # What these are for
 //!
@@ -16,23 +17,7 @@
 //! are not cryptographic and are not meant to match NumPy's stream.
 
 use phasor_core::error::{Error, Result};
-
-/// SplitMix64's output finalizer: a bijection on `u64` that avalanches.
-const fn mix(mut z: u64) -> u64 {
-    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-/// A uniform draw in `[0, 1)` determined by `(seed, row, col)` alone.
-///
-/// Built from the top 53 bits, so every value is exactly representable and
-/// 1.0 is never returned.
-fn uniform(seed: u64, row: usize, col: usize) -> f64 {
-    let x = mix(mix(mix(seed) ^ row as u64) ^ col as u64);
-    (x >> 11) as f64 * (1.0 / (1_u64 << 53) as f64)
-}
+use phasor_core::random::uniform;
 
 /// An index drawn uniformly from `0..m`, for `m > 0`.
 fn below(m: usize, seed: u64, row: usize, col: usize) -> usize {
@@ -143,6 +128,45 @@ mod tests {
 
     fn col(v: &[bool], n_rows: usize, c: usize) -> &[bool] {
         &v[c * n_rows..(c + 1) * n_rows]
+    }
+
+    /// The indices of the `true` cells.
+    fn on(v: &[bool]) -> Vec<usize> {
+        v.iter()
+            .enumerate()
+            .filter_map(|(i, &b)| b.then_some(i))
+            .collect()
+    }
+
+    #[test]
+    fn outputs_are_pinned() {
+        // Recorded from the original implementation: a seed names one answer,
+        // so these may never change.
+        let pins = [
+            ((0, 0, 0), 0x3fc1_c13a_de1c_7e5c),
+            ((7, 3, 4), 0x3fdf_59a9_fade_4faa),
+            ((7, 4, 3), 0x3fe6_b535_49c1_af99),
+            ((42, 1000, 17), 0x3fc0_b892_0c42_3c8c),
+            ((u64::MAX, usize::MAX, 99), 0x3fef_4880_6bee_efbf),
+        ];
+        for ((seed, row, col), want) in pins {
+            assert_eq!(
+                uniform(seed, row, col).to_bits(),
+                want,
+                "{seed} {row} {col}"
+            );
+        }
+        assert_eq!(
+            on(&random_by_prob(12, 3, 0.25, 42).unwrap()),
+            [2, 3, 9, 19, 26, 31]
+        );
+        assert_eq!(
+            on(&random_n(12, 3, 3, 42).unwrap()),
+            [2, 4, 7, 16, 20, 21, 27, 34, 35]
+        );
+        let (entries, exits) = random_entries_exits(12, 3, 2, 42).unwrap();
+        assert_eq!(on(&entries), [0, 4, 16, 20, 25, 34]);
+        assert_eq!(on(&exits), [2, 7, 18, 21, 27, 35]);
     }
 
     #[test]

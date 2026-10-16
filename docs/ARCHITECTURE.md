@@ -119,7 +119,7 @@ double as a native `from_order_func`.
 
 | Crate | Role |
 |---|---|
-| `phasor-core` | `Matrix`, `FlexArray`, column labels, float tolerances, `Error` (§3); no external deps |
+| `phasor-core` | `Matrix`, `FlexArray`, column labels, float tolerances, `Error` (§3), seeded random draws keyed by `(seed, row, col)`; no external deps |
 | `phasor-model` | execution enums, ids, `BarType`, `OhlcvPanel`, fixed-point `Price`/`Quantity` (§3.6) |
 | `phasor-generic` | rolling / expanding / EWM windows, shifts, fills, crossovers; seeded synthetic prices (`random_walk`, `gbm`, `ohlc_from_close`) |
 | `phasor-signals` | signal cleaning, exit generation, ranks, ranges (§6.2) |
@@ -494,8 +494,11 @@ ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition
 MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`.
 `raise_reject` turns a rejection into an error. `reject_prob` takes a
 caller-supplied draw. Both loops compute it from `(seed, row, col)` with
-SplitMix64 (`crates/phasor-sim/src/random.rs`), only when the probability is
-non-zero, so it does not depend on the thread count or the grouping.
+SplitMix64 (`phasor_core::random::uniform`, `crates/phasor-core/src/random.rs`),
+only when the probability is non-zero, so it does not depend on the thread
+count or the grouping; a custom loop that calls the same function rejects the
+same orders. The random signals (§6.2) and the synthetic prices draw through
+the same module.
 `cash_limit` (not in the reference, not in the log schema) caps the cash a buy
 may spend, applied before `percent`; sells and shorts are unaffected.
 
@@ -1040,7 +1043,7 @@ appears only in the optional `test` extra.
 
 | Topic | Files | Section |
 |---|---|---|
-| matrix, broadcasting, labels, tolerances, errors | `crates/phasor-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
+| matrix, broadcasting, labels, tolerances, errors, seeded random draws | `crates/phasor-core/src/{matrix,flex,columns,math,error,random}.rs` | §3, §7.6 |
 | enums, ids, bars, fixed point | `crates/phasor-model/src/{enums,ids,bar,types}.rs` | §3.6 |
 | data loading and alignment | `crates/phasor-data/src/lib.rs`, `crates/phasor-py/python/phasor/data.py` | §4 |
 | expressions | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |

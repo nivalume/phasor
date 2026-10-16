@@ -26,7 +26,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 
 | 阶段 | 内容 | 完成 | 部分完成 | 未开始 |
 |---|---|---:|---:|---:|
-| P | 维护与技术债 | 2 | 0 | 1 |
+| P | 维护与技术债 | 3 | 0 | 0 |
 | A | 账户模型地基 | 1 | 1 | 2 |
 | B | 现金流、杠杆、合约 | 5 | 0 | 5 |
 | C | 保证金、强平、资金费（PRO 没有） | 0 | 0 | 5 |
@@ -40,7 +40,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **9** | **9** | **61** |
+| **合计** | | **10** | **9** | **60** |
 
 ### 下一步（按优先级）
 
@@ -96,12 +96,13 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
     - [x] `from_signals` 的止损参数：`upon_stop_exit`（含 `reverse`）、`stop_entry_price`（含 `fillprice`）、`stop_exit_price`、`upon_stop_update`。取值是枚举名的小写连写，`None` 用引擎默认值。
   - 位置：`crates/phasor-py/src/{lib,research,parse,array}.rs`，`crates/phasor-py/python/phasor/{events,robust,labels,signals,synthetic,_columns}.py`；Rust 侧新增 `Portfolio::excursions`、`Portfolio::edge_ratio`（`crates/phasor-analysis/src/portfolio.rs`）和 `edge_ratio_by_column`（`crates/phasor-records/src/excursions.rs`）。测试 `crates/phasor-py/tests/{test_portfolio_analysis,test_research,test_stop_modes}.py`；`test_bindings.py` 的止损对照用例加了这四个参数（需要 vectorbt）。
 
-- [ ] **P3 合并三份 SplitMix64 随机数实现**（S）
+- [x] **P3 合并三份 SplitMix64 随机数实现**（S）
   - 为什么：`phasor-sim/src/random.rs`、`phasor-signals/src/random.rs`、`phasor-generic/src/synthetic.rs` 各有一份。并行开发时各自写的，以后改一处容易漏另外两处。
-  - 现状：三处的 SplitMix64 混合步骤相同；sim 和 signals 从 `(seed, row, col)` 映射到 `[0, 1)` 的方式也相同；synthetic 多一个 salt 参数，并且映射到开区间 `(0, 1)`（加 0.5），两种结果不同。
-  - 要做：
-    - [ ] `phasor-core` 提供混合步骤和带 salt 的链式哈希，两种均匀映射各自保留，三处改为调用它。
-    - [ ] 先加测试固定三处现在的输出（覆盖 `(seed, row, col, salt)` 和两种区间），保证合并不改变任何已有结果。
+  - 做了什么：
+    - [x] 先加测试，按位固定三处原来的输出：sim 和 signals 的 `[0, 1)` 随机数；synthetic 的 64 位哈希、加 0.5 的随机数和正态随机数（salt 取 0 和代码里的四个）。键取 5 组 `(seed, row, col)`，含 `u64::MAX`、`usize::MAX`。另外固定 `random_by_prob`、`random_n`、`random_entries_exits`、`random_walk`、`gbm`、`ohlc_from_close` 各一小段完整输出。合并后这些测试原样通过。
+    - [x] `phasor_core::random` 提供混合步骤 `mix`、带 salt 的链式哈希 `bits(seed, row, col, salt)`、两种映射 `to_unit`（`[0, 1)`）和 `to_unit_nonzero`（加 0.5），以及不带 salt 的 `uniform(seed, row, col)`。三处改为调用它；sim 保留一个不内联的薄包装，两个循环的代码不变。`mix` 用 SplitMix64 参考实现种子 0 的前四个输出测试。
+  - 顺带发现：synthetic 的映射原来注释写的是开区间 `(0, 1)`，其实是 `(0, 1]`。2⁵² 以上加的 0.5 放不进 `f64`，按偶数舍入，最高一档成了恰好 1.0（2⁵³ 次里一次）。对 Box–Muller 和 OHLC 都无害，为了不改已有结果保持不变，只改了注释。
+  - 位置：`crates/phasor-core/src/random.rs`；调用处 `crates/phasor-sim/src/random.rs`、`crates/phasor-signals/src/random.rs`、`crates/phasor-generic/src/synthetic.rs`。
 
 ### A. 账户模型地基
 
@@ -187,7 +188,7 @@ PRO 没有、但加密货币回测需要的保证金、强平和资金费。
 - [x] **B9 单笔现金上限 `cash_limit`，随机拒单 `reject_prob`**（S）
   - 为什么：`cash_limit` 限制单笔买单的资金；`reject_prob` 测试成交失败时策略的表现，它原来是已知问题（参数存在但没接进循环）。
   - 做了什么：`cash_limit` 只限制买单，在 `percent` 之前生效，不写进日志（日志格式和参考实现一致）。随机数由 `(seed, row, col)` 经 SplitMix64 算出，和线程数、分组无关。内核改为在买卖之前判断随机拒单。
-  - 位置：`crates/phasor-exec/src/kernel.rs`、`crates/phasor-sim/src/random.rs`。
+  - 位置：`crates/phasor-exec/src/kernel.rs`、`crates/phasor-sim/src/random.rs`（随机数本身在 `crates/phasor-core/src/random.rs`，见 P3）。
 
 - [x] **B10 敞口指标**（S）
   - 为什么：看仓位占比、多空敞口、净敞口，是检查组合风险的基本工具。
@@ -294,7 +295,7 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 做什么：
     - [x] 已公开：撮合内核和内核状态（`execute_order`、`execute_validated`、`ValidatedOrder`、`ExecuteOrderState`、`ProcessOrderState`），止损判定（`stop_price`、`from_stop`），记录写入（`RecordSink`、`LogSink`），从记录构造 `Portfolio`（`Portfolio::from_records`）。
     - [ ] 现金流入账函数（`phasor-sim` 的 `cash` 模块，目前私有）。
-    - [ ] 按 `(seed, row, col)` 取随机数的函数（目前私有，和 P3 一起做）。
+    - [x] 按 `(seed, row, col)` 取随机数的函数：`phasor_core::random::uniform`（P3）。两个循环给 `reject_prob` 的就是它，自定义循环调用它会拒掉同样的单。
     - [ ] 列和账户组状态（A3）、挂单判定（D1、D2）。
 
 - [ ] **E5 Python 回调**（L，方案待定）

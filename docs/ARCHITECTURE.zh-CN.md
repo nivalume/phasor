@@ -102,7 +102,7 @@ vectorbt 的 Rust 后端不支持回调函数，`from_order_func` 只能留在 N
 
 | Crate | 职责 |
 |---|---|
-| `phasor-core` | `Matrix`、`FlexArray`、列标签、浮点容差、`Error`（§3）；无外部依赖 |
+| `phasor-core` | `Matrix`、`FlexArray`、列标签、浮点容差、`Error`（§3），按 `(seed, row, col)` 取的带种子随机数；无外部依赖 |
 | `phasor-model` | 撮合枚举、id、`BarType`、`OhlcvPanel`、定点 `Price`/`Quantity`（§3.6） |
 | `phasor-generic` | 滚动 / 扩展 / EWM 窗口、平移、填充、交叉；带种子的合成价格（`random_walk`、`gbm`、`ohlc_from_close`） |
 | `phasor-signals` | 信号清洗、生成离场、排名、区间（§6.2） |
@@ -421,7 +421,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 ### 7.6 结果与拒单原因
 
-`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数。两个循环用 SplitMix64 从 `(seed, row, col)` 算出这个数（`crates/phasor-sim/src/random.rs`），只在概率不为 0 时计算，所以结果和线程数、分组都无关。`cash_limit`（参考实现没有，也不在日志格式里）限制一笔买单最多花多少现金，在 `percent` 之前生效；卖单和做空不受影响。
+`OrderStatus`：`Filled | Ignored | Rejected`。`StatusInfo`（14 种）：`SizeNaN PriceNaN ValPriceNaN ValueNaN ValueZeroNeg SizeZero NoCashShort NoCashLong NoOpenPosition MaxSizeExceeded RandomEvent CantCoverFees MinSizeNotReached PartialFill`。`raise_reject` 把拒单变成错误。`reject_prob` 使用调用方提供的随机数。两个循环用 SplitMix64 从 `(seed, row, col)` 算出这个数（`phasor_core::random::uniform`，`crates/phasor-core/src/random.rs`），只在概率不为 0 时计算，所以结果和线程数、分组都无关；自定义循环调用同一个函数，拒掉的单也相同。随机信号（§6.2）和合成价格也用这个模块取随机数。`cash_limit`（参考实现没有，也不在日志格式里）限制一笔买单最多花多少现金，在 `percent` 之前生效；卖单和做空不受影响。
 
 ---
 
@@ -890,7 +890,7 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 
 | 主题 | 文件 | 章节 |
 |---|---|---|
-| 矩阵、广播、标签、容差、错误 | `crates/phasor-core/src/{matrix,flex,columns,math,error}.rs` | §3 |
+| 矩阵、广播、标签、容差、错误、带种子随机数 | `crates/phasor-core/src/{matrix,flex,columns,math,error,random}.rs` | §3、§7.6 |
 | 枚举、id、K 线、定点数 | `crates/phasor-model/src/{enums,ids,bar,types}.rs` | §3.6 |
 | 数据加载与对齐 | `crates/phasor-data/src/lib.rs`、`crates/phasor-py/python/phasor/data.py` | §4 |
 | 表达式 | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
