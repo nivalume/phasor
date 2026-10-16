@@ -55,9 +55,21 @@ impl<T: Copy> FlexArray<'_, T> {
     /// Panics if the index is out of range for the underlying storage. The
     /// checked constructors make this unreachable for indices inside the
     /// shape the array was built against.
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn get(&self, row: usize, col: usize) -> T {
+        // A scalar is most parameters of most runs: answered where it is
+        // read, without a call. The simulation loops read five or more per
+        // bar and column, and the call cost more than the read.
+        if let Self::Scalar(v) = *self {
+            return v;
+        }
+        self.get_array(row, col)
+    }
+
+    /// [`get`](Self::get) for every layout but a scalar.
+    #[inline]
+    fn get_array(&self, row: usize, col: usize) -> T {
         match *self {
             Self::Scalar(v) => v,
             Self::PerColumn(v) => v[col],

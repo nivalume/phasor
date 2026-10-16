@@ -254,7 +254,8 @@
 - [x] `from_signals` 性能回到约束以内（拆出 `FLOWS`、`LEV` 实例，内核冷路径拆分）
 - [x] 新功能接到 Python
 - [x] 合并三份 SplitMix64 实现到 `phasor_core::random`
-- [ ] `from_orders` 指令数比 c0fc6b2 累计多约 4.4%（价格选项 +2.04%、百分比仓位 +1.24%、负价格的分派约每根 K 线 1 条指令 +0.79%），压回 3% 以内，并补一次交替计时
+- [x] `from_orders` 指令数比 c0fc6b2 累计超过 3%：`FlexArray::get` 标量快路径后是 +2.47%（`from_signals` −14.30%）
+- [ ] 补一次交替计时：从限价单起只测了指令数；标量快路径是 `#[inline(always)]`，指令少了，代码变大，要确认时间也降
 - [ ] `RUSTDOCFLAGS="-D warnings" cargo doc` 不通过：`phasor-sim`、`phasor-records` 的文档链接指向私有模块或其他 crate
 - [ ] `Symbol` / `Venue` 未驻留，但模块注释说已驻留（`phasor-model`）
 - [ ] 过时注释：`phasor-analysis` 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程
@@ -307,8 +308,9 @@ PRO 闭源，没法差分测试，按功能来源对照：
 | 按根的 `from_ago`、显式调用顺序、止损的 `delta_format` 和阶梯、按时间的止损和有效期 | e94e740 | +0.14% | −0.37% |
 | 初始持仓、负价格 | eaabcc2 | +0.79% | +1.23% |
 | 融资融券强平、分档、部分强平、ADL、逐仓持仓费、负现金计息 | 40a3e79 | −0.42% | −0.47% |
+| 回调、`from_order_func`、`row_wise`；`FlexArray::get` 标量快路径 | ee45e7f | −1.18% | −13.85% |
 
-从限价单起只测了指令数，没有跑交替计时。单次都在 3% 以内，但累计起来，和 c0fc6b2 比 `from_orders` 在 e94e740 时是 +3.47%（`from_signals` −0.90%），之后又加了约 0.9 个百分点，超过约束，见 2.17。
+从限价单起只测了指令数，没有跑交替计时。回调这一行是两件事相抵：回调本身让 `from_orders` 多了约 4%（循环拆成 `Group::run_rows` 以支持 `row_wise`，寄存器分配变差），`FlexArray::get` 对标量直接返回、不再调用函数，省回约 5%。累计和 c0fc6b2 比：`from_orders` +2.47%，`from_signals` −14.30%，回到约束以内。
 
 ---
 

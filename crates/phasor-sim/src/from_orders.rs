@@ -612,6 +612,167 @@ struct Group<'g> {
     stopped: bool,
 }
 
+/// Executes column `k`'s `order` against the group's account, records it
+/// and updates the column; evaluates to the kernel's result and the group's
+/// value after it.
+///
+/// A macro, so that the bar loop and [`execute`] (the flex path) share one
+/// text while the bar loop keeps it inline: called as an inlined function,
+/// it cost the loop about 23 instructions a bar without callbacks (a second
+/// borrow of the column, and the result carried out through a `Result`).
+macro_rules! fill {
+    (
+        $args:expr, $group:expr, $i:expr, $k:expr, $col:expr, $order:expr, $value:expr,
+        $cash:expr, $free_cash:expr, $state:expr, $margin:expr, $isolated:expr, $mult:expr,
+        $sink:expr, $fills:expr $(,)?
+    ) => {{
+        let (args, group, i, k, col, value) = ($args, $group, $i, $k, $col, $value);
+        let order: &ValidatedOrder = $order;
+        let state: &mut [ColumnState] = $state;
+        let (margin, isolated, mult): (&[bool], &[bool], &[f64]) = ($margin, $isolated, $mult);
+        let sink = &mut *$sink;
+        let fills: &mut i64 = $fills;
+        let st = &state[k];
+        let process = ProcessOrderState {
+            cash: $cash,
+            position: st.position,
+            debt: st.debt,
+            locked_cash: st.locked_cash,
+            free_cash: $free_cash,
+            val_price: st.last_val_price,
+            value,
+            oidx: 0,
+            lidx: 0,
+        };
+
+        // Drawn only when asked for, so a run without random rejection never
+        // touches the generator.
+        let draw =
+            (order.order().reject_prob > 0.0).then(|| crate::random::uniform(args.seed, i, col));
+        let (exec_state, result) = execute_validated(&process, order, draw)?;
+
+        if result.status == OrderStatus::Rejected && order.order().raise_reject {
+            return Err(Error::Invariant(format!(
+                "order rejected at row {i}, column {col}: {}",
+                result
+                    .status_info
+                    .map_or("unknown reason", phasor_model::StatusInfo::describe)
+            )));
+        }
+
+        // `update_value` re-marks the valuation price to the price actually
+        // filled at, and moves the value with it. Within a bar that matters only
+        // for a shared group, where the value is threaded across columns; across
+        // bars the re-marked price survives when the next bar's valuation is
+        // unusable and forward-fill is on, and then changes the size of a
+        // target-sized order.
+        let (new_val_price, new_value) = if result.is_filled() && args.update_value {
+            let (val_price, value) = updated_value(
+                $cash,
+                exec_state.cash,
+                st.position,
+                exec_state.position,
+                st.last_val_price,
+                result.price,
+                value,
+            );
+            if LEV {
+                // Borrowing moves no value: it adds as much debt as cash. A
+                // margin fill adds as much cost basis as position value.
+                let now = ColumnState {
+                    position: exec_state.position,
+                    debt: exec_state.debt,
+                    ..*st
+                };
+                let m = margin[k];
+                (val_price, value - (now.owed(m) - st.owed(m)))
+            } else {
+                (val_price, value)
+            }
+        } else {
+            (st.last_val_price, value)
+        };
+
+        let mut order_id = -1_i64;
+        if result.is_filled() {
+            let side = result.side.expect("a filled order always carries a side");
+            if LEV {
+                sink.push_order(
+                    i,
+                    col,
+                    result.size,
+                    result.price / mult[k],
+                    result.fees,
+                    side,
+                );
+                sink.push_balances(Balances {
+                    debt: exec_state.debt,
+                    locked_cash: exec_state.locked_cash,
+                    margin: margin[k],
+                    isolated: isolated[k],
+                    liquidation: false,
+                    multiplier: mult[k],
+                });
+            } else {
+                sink.push_order(i, col, result.size, result.price, result.fees, side);
+            }
+            // The record's own index, so a log joins back to the fill it
+            // produced. Counted rather than read off the sink, because a sink
+            // need not be an array.
+            order_id = *fills;
+            *fills += 1;
+        }
+
+        if order.order().log {
+            let mut entry = LogEntry {
+                group,
+                col,
+                idx: i,
+                cash: $cash,
+                position: st.position,
+                debt: st.debt,
+                locked_cash: st.locked_cash,
+                free_cash: $free_cash,
+                val_price: st.last_val_price,
+                value,
+                request: *order.order(),
+                new_cash: exec_state.cash,
+                new_position: exec_state.position,
+                new_debt: exec_state.debt,
+                new_locked_cash: exec_state.locked_cash,
+                new_free_cash: exec_state.free_cash,
+                new_val_price,
+                new_value,
+                result,
+                order_id,
+                liquidation: false,
+                multiplier: 1.0,
+            };
+            if LEV {
+                crate::unscale_log(&mut entry, mult[k]);
+            }
+            sink.push_log(&entry);
+        }
+
+        $cash = exec_state.cash;
+        $free_cash = exec_state.free_cash;
+        state[k].position = exec_state.position;
+        state[k].debt = exec_state.debt;
+        state[k].locked_cash = exec_state.locked_cash;
+        // The reference guards this write with the same NaN/ffill test used
+        // during resolution. Here that guard provably cannot change anything:
+        // `new_val_price` is either the current `last_val_price`, or a filled
+        // order's price, which is finite. The only skipped case would assign NaN
+        // over NaN.
+        //
+        // Written unconditionally rather than carrying a branch no fixture can
+        // reach. Restore the guard when a loop appears where `new_val_price` can
+        // be NaN independently of `last_val_price`.
+        state[k].last_val_price = new_val_price;
+        (result, new_value)
+    }};
+}
+
 impl<'g> Group<'g> {
     /// The group before its first bar, with its initial positions open.
     fn new<S: RecordSink + LogSink, const LEV: bool>(
@@ -748,7 +909,7 @@ impl<'g> Group<'g> {
         clippy::too_many_lines,
         reason = "the bar's phases read in order: deposit, resolve, execute, earn"
     )]
-    #[inline(always)]
+    #[inline(never)]
     fn run_rows<S: RecordSink + LogSink, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
         &mut self,
         args: &FromOrders<'_>,
@@ -764,19 +925,22 @@ impl<'g> Group<'g> {
         let shared = self.shared;
         let mut cash = self.cash;
         let mut free_cash = self.free_cash;
-        let state = &mut self.state;
-        let price = &mut self.price;
-        let order_value = &mut self.order_value;
+        // Slices, not the vectors: their pointers and lengths then stay in
+        // registers across the bars rather than being read back through
+        // `self` at every index.
+        let state: &mut [ColumnState] = &mut self.state;
+        let price: &mut [f64] = &mut self.price;
+        let order_value: &mut [f64] = &mut self.order_value;
         let seq = &mut self.seq;
-        let orders = &mut self.orders;
-        let margin = &self.margin;
-        let isolated = &self.isolated;
-        let mult = &self.mult;
+        let orders: &mut [ValidatedOrder] = &mut self.orders;
+        let margin: &[bool] = &self.margin;
+        let isolated: &[bool] = &self.isolated;
+        let mult: &[f64] = &self.mult;
         let to_close = &mut self.to_close;
         let quotes = &self.quotes;
         let quotes_on = self.quotes_on;
         let plain = self.plain;
-        let raw_price = &mut self.raw_price;
+        let raw_price: &mut [f64] = &mut self.raw_price;
         let mut stopped = C::ON && self.stopped;
         let at_open = FLOWS && self.at_open;
         let earnings = FLOWS && self.earnings;
@@ -1001,7 +1165,7 @@ impl<'g> Group<'g> {
                     let col = cols.start + k;
                     let order =
                         callback_order::<LEV>(args, i, col, request, margin, mult, k, price[k])?;
-                    let (result, new_value) = execute::<S, LEV>(
+                    let (new_value, stop) = execute::<S, C, LEV>(
                         args,
                         group,
                         i,
@@ -1017,25 +1181,16 @@ impl<'g> Group<'g> {
                         mult,
                         sink,
                         fills,
+                        Some(After {
+                            cb,
+                            cs: &mut *cs,
+                            request: &request,
+                            orders,
+                            cols: &cols,
+                        }),
                     )?;
                     group_value = new_value;
-                    if post_order::<C, LEV>(
-                        args,
-                        cb,
-                        cs,
-                        group,
-                        i,
-                        &cols,
-                        cash,
-                        free_cash,
-                        group_value,
-                        state,
-                        mult,
-                        orders,
-                        k,
-                        &request,
-                        result,
-                    )? {
+                    if stop {
                         stopped = true;
                         break;
                     }
@@ -1091,9 +1246,12 @@ impl<'g> Group<'g> {
                     orders[k].set_bar(size, order_price, size_type, direction);
 
                     // The callback's order, as it asked and as validated.
+                    // Copied only with callbacks: a request is most of a cache
+                    // line, and a bar without a fill costs little else.
                     let custom: ValidatedOrder;
-                    let mut request = *orders[k].order();
+                    let mut asked: Option<Order> = None;
                     let order = if C::ON {
+                        let mut request = *orders[k].order();
                         if LEV {
                             request.price /= mult[k];
                         }
@@ -1121,28 +1279,24 @@ impl<'g> Group<'g> {
                             k,
                             order_price,
                         )?;
+                        asked = Some(request);
                         &custom
                     } else {
                         &orders[k]
                     };
 
-                    let (result, new_value) = execute::<S, LEV>(
-                        args,
-                        group,
-                        i,
-                        k,
-                        col,
-                        order,
-                        value,
-                        &mut cash,
-                        &mut free_cash,
-                        state,
-                        margin,
-                        isolated,
-                        mult,
-                        sink,
-                        fills,
-                    )?;
+                    let (result, new_value) = fill!(
+                        args, group, i, k, col, order, value, cash, free_cash, state, margin,
+                        isolated, mult, sink, fills,
+                    );
+
+                    let mut stop = false;
+                    if let Some(request) = asked.filter(|_| C::ON) {
+                        stop = post_order::<C, LEV>(
+                            args, cb, cs, group, i, &cols, cash, free_cash, new_value, state, mult,
+                            orders, k, &request, result,
+                        )?;
+                    }
                     // The group's value is threaded, not re-derived. **Every
                     // order in a bar is sized against the value the bar opened
                     // with**, and a fill moves that value only when
@@ -1152,25 +1306,7 @@ impl<'g> Group<'g> {
                     // already changed, which is not what the reference models
                     // and not what "decide the whole bar at once" means.
                     group_value = new_value;
-                    if C::ON
-                        && post_order::<C, LEV>(
-                            args,
-                            cb,
-                            cs,
-                            group,
-                            i,
-                            &cols,
-                            cash,
-                            free_cash,
-                            group_value,
-                            state,
-                            mult,
-                            orders,
-                            k,
-                            &request,
-                            result,
-                        )?
-                    {
+                    if C::ON && stop {
                         stopped = true;
                         break;
                     }
@@ -1232,14 +1368,25 @@ impl<'g> Group<'g> {
     }
 }
 
+/// What [`execute`] hands [`OrderFunc::post_order`] after the fill.
+struct After<'a, C: OrderFunc> {
+    cb: &'a C,
+    cs: &'a mut C::State,
+    request: &'a Order,
+    orders: &'a [ValidatedOrder],
+    cols: &'a std::ops::Range<usize>,
+}
+
 /// Executes column `k`'s `order` against the group's account and records
-/// it, returning the result and the group's value after it.
+/// it, returning the group's value after it and whether a callback stopped
+/// the group. The result stays here: carried out, it cost a move and a
+/// wider `Result` on every bar of a run without callbacks.
 #[allow(
     clippy::too_many_arguments,
     reason = "the bar, the column, the group's account and the sink"
 )]
 #[inline(always)]
-fn execute<S: RecordSink + LogSink, const LEV: bool>(
+fn execute<S: RecordSink + LogSink, C: OrderFunc, const LEV: bool>(
     args: &FromOrders<'_>,
     group: usize,
     i: usize,
@@ -1255,144 +1402,22 @@ fn execute<S: RecordSink + LogSink, const LEV: bool>(
     mult: &[f64],
     sink: &mut S,
     fills: &mut i64,
-) -> Result<(OrderResult, f64)> {
-    let st = &state[k];
-    let process = ProcessOrderState {
-        cash: *cash,
-        position: st.position,
-        debt: st.debt,
-        locked_cash: st.locked_cash,
-        free_cash: *free_cash,
-        val_price: st.last_val_price,
-        value,
-        oidx: 0,
-        lidx: 0,
-    };
-
-    // Drawn only when asked for, so a run without random rejection never
-    // touches the generator.
-    let draw = (order.order().reject_prob > 0.0).then(|| crate::random::uniform(args.seed, i, col));
-    let (exec_state, result) = execute_validated(&process, order, draw)?;
-
-    if result.status == OrderStatus::Rejected && order.order().raise_reject {
-        return Err(Error::Invariant(format!(
-            "order rejected at row {i}, column {col}: {}",
-            result
-                .status_info
-                .map_or("unknown reason", phasor_model::StatusInfo::describe)
-        )));
-    }
-
-    // `update_value` re-marks the valuation price to the price actually
-    // filled at, and moves the value with it. Within a bar that matters only
-    // for a shared group, where the value is threaded across columns; across
-    // bars the re-marked price survives when the next bar's valuation is
-    // unusable and forward-fill is on, and then changes the size of a
-    // target-sized order.
-    let (new_val_price, new_value) = if result.is_filled() && args.update_value {
-        let (val_price, value) = updated_value(
-            *cash,
-            exec_state.cash,
-            st.position,
-            exec_state.position,
-            st.last_val_price,
-            result.price,
-            value,
-        );
-        if LEV {
-            // Borrowing moves no value: it adds as much debt as cash. A
-            // margin fill adds as much cost basis as position value.
-            let now = ColumnState {
-                position: exec_state.position,
-                debt: exec_state.debt,
-                ..*st
-            };
-            let m = margin[k];
-            (val_price, value - (now.owed(m) - st.owed(m)))
-        } else {
-            (val_price, value)
+    after: Option<After<'_, C>>,
+) -> Result<(f64, bool)> {
+    let (result, new_value) = fill!(
+        args, group, i, k, col, order, value, *cash, *free_cash, state, margin, isolated, mult,
+        sink, fills,
+    );
+    let mut stop = false;
+    if C::ON {
+        if let Some(a) = after {
+            stop = post_order::<C, LEV>(
+                args, a.cb, a.cs, group, i, a.cols, *cash, *free_cash, new_value, state, mult,
+                a.orders, k, a.request, result,
+            )?;
         }
-    } else {
-        (st.last_val_price, value)
-    };
-
-    let mut order_id = -1_i64;
-    if result.is_filled() {
-        let side = result.side.expect("a filled order always carries a side");
-        if LEV {
-            sink.push_order(
-                i,
-                col,
-                result.size,
-                result.price / mult[k],
-                result.fees,
-                side,
-            );
-            sink.push_balances(Balances {
-                debt: exec_state.debt,
-                locked_cash: exec_state.locked_cash,
-                margin: margin[k],
-                isolated: isolated[k],
-                liquidation: false,
-                multiplier: mult[k],
-            });
-        } else {
-            sink.push_order(i, col, result.size, result.price, result.fees, side);
-        }
-        // The record's own index, so a log joins back to the fill it
-        // produced. Counted rather than read off the sink, because a sink
-        // need not be an array.
-        order_id = *fills;
-        *fills += 1;
     }
-
-    if order.order().log {
-        let mut entry = LogEntry {
-            group,
-            col,
-            idx: i,
-            cash: *cash,
-            position: st.position,
-            debt: st.debt,
-            locked_cash: st.locked_cash,
-            free_cash: *free_cash,
-            val_price: st.last_val_price,
-            value,
-            request: *order.order(),
-            new_cash: exec_state.cash,
-            new_position: exec_state.position,
-            new_debt: exec_state.debt,
-            new_locked_cash: exec_state.locked_cash,
-            new_free_cash: exec_state.free_cash,
-            new_val_price,
-            new_value,
-            result,
-            order_id,
-            liquidation: false,
-            multiplier: 1.0,
-        };
-        if LEV {
-            crate::unscale_log(&mut entry, mult[k]);
-        }
-        sink.push_log(&entry);
-    }
-
-    *cash = exec_state.cash;
-    *free_cash = exec_state.free_cash;
-    state[k].position = exec_state.position;
-    state[k].debt = exec_state.debt;
-    state[k].locked_cash = exec_state.locked_cash;
-    // The reference guards this write with the same NaN/ffill test used
-    // during resolution. Here that guard provably cannot change anything:
-    // `new_val_price` is either the current `last_val_price`, or a filled
-    // order's price, which is finite. The only skipped case would assign NaN
-    // over NaN.
-    //
-    // Written unconditionally rather than carrying a branch no fixture can
-    // reach. Restore the guard when a loop appears where `new_val_price` can
-    // be NaN independently of `last_val_price`.
-    state[k].last_val_price = new_val_price;
-    Ok((result, new_value))
+    Ok((new_value, stop))
 }
 
 /// What a group is worth, as [`group_value`] has it, in either copy.
