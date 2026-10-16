@@ -337,6 +337,41 @@ pub enum StopUpdateMode {
     OverrideNaN = 2,
 }
 
+/// Whether a signal's order executes on its bar or rests as a limit order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum OrderType {
+    /// Execute at the order price, with slippage.
+    Market = 0,
+    /// Rest at a limit price until the market reaches it, its time runs out,
+    /// or something else fills in the column. No slippage.
+    Limit = 1,
+}
+
+/// What a limit order fills at once the market reaches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum LimitOrderPrice {
+    /// The limit price, or the open when the bar opened beyond it.
+    Limit = 0,
+    /// The limit price, even when the bar opened beyond it.
+    HardLimit = 1,
+    /// The bar's close.
+    Close = 2,
+}
+
+/// How a limit order's `limit_delta` is read against the order price.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum DeltaFormat {
+    /// A fraction of the order price.
+    Percent = 0,
+    /// An amount of price.
+    Absolute = 1,
+    /// The limit price itself.
+    Target = 2,
+}
+
 /// Which side a trade was on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -433,6 +468,9 @@ mod tests {
         assert_eq!(MarginMode::Isolated as i8, 1);
         assert_eq!(AccountType::Margin as i8, 1);
         assert_eq!(MarginBasis::Unit as i8, 1);
+        assert_eq!(OrderType::Limit as i8, 1);
+        assert_eq!(LimitOrderPrice::Close as i8, 2);
+        assert_eq!(DeltaFormat::Target as i8, 2);
     }
 
     #[test]

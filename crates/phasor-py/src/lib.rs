@@ -942,6 +942,38 @@ fn account_types(
         .map(Some)
 }
 
+/// An enum parameter given as one name, or one name per column: `None`
+/// keeps the engine's default.
+fn per_column<T: Copy>(
+    value: Option<&Bound<'_, PyAny>>,
+    n_cols: usize,
+    name: &str,
+    expected: &str,
+    parse: fn(&str) -> Result<T, String>,
+) -> PyResult<Option<Vec<T>>> {
+    let bad = pyo3::exceptions::PyValueError::new_err;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Ok(one) = value.extract::<String>() {
+        return Ok(Some(vec![parse(&one).map_err(bad)?; n_cols]));
+    }
+    let names: Vec<String> = value.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{name} must be {expected}"))
+    })?;
+    if names.len() != n_cols {
+        return Err(bad(format!(
+            "{name} has {} entries for {n_cols} columns",
+            names.len()
+        )));
+    }
+    names
+        .iter()
+        .map(|one| parse(one).map_err(bad))
+        .collect::<PyResult<_>>()
+        .map(Some)
+}
+
 /// `margin_mode` as one mode per column: `None` keeps the engine's default.
 ///
 /// A string applies to every column and a list gives each its own, as for
@@ -1100,6 +1132,14 @@ fn deposits_view<'a>(
     stop_exit_price = None,
     upon_stop_exit = None,
     upon_stop_update = None,
+    order_type = None,
+    limit_delta = None,
+    delta_format = None,
+    limit_reverse = None,
+    limit_order_price = None,
+    limit_delay = None,
+    limit_tif = None,
+    limit_expiry = None,
     val_price = None,
     cash_deposits = None,
     cash_dividends = None,
@@ -1169,6 +1209,14 @@ fn from_signals(
     stop_exit_price: Option<&str>,
     upon_stop_exit: Option<&str>,
     upon_stop_update: Option<&str>,
+    order_type: Option<&Bound<'_, PyAny>>,
+    limit_delta: Option<&Bound<'_, PyAny>>,
+    delta_format: Option<&str>,
+    limit_reverse: Option<&Bound<'_, PyAny>>,
+    limit_order_price: Option<&str>,
+    limit_delay: Option<&Bound<'_, PyAny>>,
+    limit_tif: Option<&Bound<'_, PyAny>>,
+    limit_expiry: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
@@ -1241,6 +1289,11 @@ fn from_signals(
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
+    let limit_delta_b = borrow_opt_f64(limit_delta, "limit_delta")?;
+    let limit_tif_b = borrow_opt_f64(limit_tif, "limit_tif")?;
+    let limit_expiry_b = borrow_opt_f64(limit_expiry, "limit_expiry")?;
+    let limit_reverse_b = array::borrow_opt_bool(limit_reverse, "limit_reverse")?;
+    let limit_delay_b = array::borrow_opt_bool(limit_delay, "limit_delay")?;
     let p = Shared::borrow(
         size,
         price,
@@ -1307,6 +1360,23 @@ fn from_signals(
         .transpose()
         .map_err(bad)?
         .map_or(d.upon_stop_update, FlexArray::Scalar);
+    let order_types = per_column(
+        order_type,
+        n_cols,
+        "order_type",
+        "'market', 'limit', or one of them per column",
+        parse::order_type,
+    )?;
+    let delta_format = delta_format
+        .map(parse::delta_format)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.delta_format, FlexArray::Scalar);
+    let limit_order_price = limit_order_price
+        .map(parse::limit_order_price)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.limit_order_price, FlexArray::Scalar);
     let (groups, account_cash) = account_inputs(
         cash_sharing,
         group_lens,
@@ -1431,6 +1501,16 @@ fn from_signals(
         stop_exit_price,
         upon_stop_exit,
         upon_stop_update,
+        order_type: order_types.as_ref().map_or(Ok(d.order_type), |types| {
+            FlexArray::per_column(types, n_cols).map_err(to_py_err)
+        })?,
+        limit_delta: flex_or_f64(&limit_delta_b, n_rows, n_cols, per_col, d.limit_delta)?,
+        delta_format,
+        limit_reverse: flex_or_bool(&limit_reverse_b, n_rows, n_cols, d.limit_reverse)?,
+        limit_order_price,
+        limit_delay: flex_or_bool(&limit_delay_b, n_rows, n_cols, d.limit_delay)?,
+        limit_tif: flex_or_f64(&limit_tif_b, n_rows, n_cols, per_col, d.limit_tif)?,
+        limit_expiry: flex_or_f64(&limit_expiry_b, n_rows, n_cols, per_col, d.limit_expiry)?,
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,

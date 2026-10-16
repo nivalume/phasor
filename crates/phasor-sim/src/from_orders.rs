@@ -26,6 +26,7 @@ use phasor_exec::{
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
 use crate::groups::{CallSeq, Groups, approx_order_value};
+use crate::state::ColumnState;
 
 /// Inputs to [`simulate_from_orders`].
 ///
@@ -418,46 +419,6 @@ pub(crate) fn updated_value(
     (price, value_before + cash_flow + (asset_now - asset_before))
 }
 
-/// Per-column state that survives from one bar to the next.
-///
-/// A group carries one of these per column plus a single shared cash balance —
-/// which is the whole of what cash sharing means, expressed as a type.
-#[derive(Debug, Clone, Copy)]
-struct ColumnState {
-    position: f64,
-    debt: f64,
-    locked_cash: f64,
-    last_val_price: f64,
-}
-
-impl ColumnState {
-    const fn new() -> Self {
-        Self {
-            position: 0.0,
-            debt: 0.0,
-            locked_cash: 0.0,
-            last_val_price: f64::NAN,
-        }
-    }
-
-    /// What the column owes on a long: its debt, which on a short is a
-    /// reservation instead and already in the position's value.
-    fn long_debt(&self) -> f64 {
-        if self.position > 0.0 { self.debt } else { 0.0 }
-    }
-
-    /// What is subtracted from `position × price` to leave the column's
-    /// share of the value: a cash column's [`long_debt`](Self::long_debt), a
-    /// margin column's signed cost basis.
-    fn owed(&self, margin: bool) -> f64 {
-        if margin {
-            crate::margin::owed(self.position, self.debt)
-        } else {
-            self.long_debt()
-        }
-    }
-}
-
 /// Simulates one group, writing its fills to `sink`.
 ///
 /// Self-contained by construction: it touches no state belonging to any other
@@ -723,7 +684,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         for (slot, &picked) in seq.iter().enumerate().take(group_len) {
             let k = if shared { picked } else { slot };
             let col = cols.start + k;
-            let st = state[k];
+            // Borrowed, not copied: the state also carries `from_signals`'
+            // stops and resting order, which this loop never reads.
+            let st = &state[k];
 
             // An unshared column values only itself, which is what phase 1
             // did and what a group of one still means.
@@ -799,7 +762,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                     let now = ColumnState {
                         position: exec_state.position,
                         debt: exec_state.debt,
-                        ..st
+                        ..*st
                     };
                     let m = margin[k];
                     (val_price, value - (now.owed(m) - st.owed(m)))

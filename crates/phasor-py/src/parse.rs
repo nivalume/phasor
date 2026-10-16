@@ -10,8 +10,9 @@
 //! tested without a Python interpreter; the caller wraps the message.
 
 use phasor_model::{
-    AccountType, AccumulationMode, CashFlowKind, Direction, LeverageMode, MarginBasis, MarginMode,
-    SizeType, StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
+    AccountType, AccumulationMode, CashFlowKind, DeltaFormat, Direction, LeverageMode,
+    LimitOrderPrice, MarginBasis, MarginMode, OrderType, SizeType, StopEntryPrice, StopExitMode,
+    StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -239,9 +240,78 @@ pub fn upon_stop_update(name: &str) -> Result<StopUpdateMode, String> {
     }
 }
 
+/// Whether a signal's order executes on its bar or rests as a limit order.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn order_type(name: &str) -> Result<OrderType, String> {
+    match name {
+        "market" => Ok(OrderType::Market),
+        "limit" => Ok(OrderType::Limit),
+        other => Err(format!(
+            "order_type must be 'market' or 'limit'; got {other:?}"
+        )),
+    }
+}
+
+/// What a limit order fills at.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn limit_order_price(name: &str) -> Result<LimitOrderPrice, String> {
+    match name {
+        "limit" => Ok(LimitOrderPrice::Limit),
+        "hardlimit" => Ok(LimitOrderPrice::HardLimit),
+        "close" => Ok(LimitOrderPrice::Close),
+        other => Err(format!(
+            "limit_order_price must be 'limit', 'hardlimit' or 'close'; got {other:?}"
+        )),
+    }
+}
+
+/// How a limit order's delta is read.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn delta_format(name: &str) -> Result<DeltaFormat, String> {
+    match name {
+        "percent" => Ok(DeltaFormat::Percent),
+        "absolute" => Ok(DeltaFormat::Absolute),
+        "target" => Ok(DeltaFormat::Target),
+        other => Err(format!(
+            "delta_format must be 'percent', 'absolute' or 'target'; got {other:?}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_limit_option_maps_to_its_own_variant() {
+        assert_eq!(order_type("market").unwrap(), OrderType::Market);
+        assert_eq!(order_type("limit").unwrap(), OrderType::Limit);
+        assert_eq!(limit_order_price("limit").unwrap(), LimitOrderPrice::Limit);
+        assert_eq!(
+            limit_order_price("hardlimit").unwrap(),
+            LimitOrderPrice::HardLimit
+        );
+        assert_eq!(limit_order_price("close").unwrap(), LimitOrderPrice::Close);
+        assert_eq!(delta_format("percent").unwrap(), DeltaFormat::Percent);
+        assert_eq!(delta_format("absolute").unwrap(), DeltaFormat::Absolute);
+        assert_eq!(delta_format("target").unwrap(), DeltaFormat::Target);
+        assert!(
+            order_type("stop")
+                .unwrap_err()
+                .contains("'market' or 'limit'")
+        );
+        assert!(limit_order_price("open").is_err());
+        assert!(delta_format("pct").is_err());
+    }
 
     #[test]
     fn every_size_type_maps_to_its_own_variant() {

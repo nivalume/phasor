@@ -362,6 +362,14 @@ def from_signals(
     stop_exit_price=None,
     upon_stop_exit=None,
     upon_stop_update=None,
+    order_type=None,
+    limit_delta=None,
+    delta_format=None,
+    limit_reverse=None,
+    limit_order_price=None,
+    limit_delay=None,
+    limit_tif=None,
+    limit_expiry=None,
     val_price=None,
     cash_deposits=None,
     cash_dividends=None,
@@ -454,6 +462,31 @@ def from_signals(
         a NaN keeps the old stop), ``overridenan`` (a NaN clears it) or
         ``keep``. Averaging down with the original stop and averaging down
         with a moved one are different strategies.
+    order_type
+        ``"market"`` (the default) executes a signal on its bar; ``"limit"``
+        rests it as a limit order until the market reaches it. A string, or
+        one per column. Stop exits are always market orders. A limit order
+        pays no slippage; it fills at once if the order price already reaches
+        it, and is otherwise tested from the next bar (from the rest of its
+        own bar when placed at the open, ``price=-np.inf``). While it rests,
+        a signal on the same side is ignored and one on the other side
+        cancels it, as does a stop or a liquidation filling in its column.
+    limit_delta, delta_format, limit_reverse
+        Where it rests: ``limit_delta`` below the order price for a buy and
+        above for a sell, as a fraction (``delta_format="percent"``, the
+        default), an amount of price (``"absolute"``) or the limit price
+        itself (``"target"``); NaN is at the order price. ``limit_reverse``
+        turns both round, so a buy fills at or above its price: a breakout
+        entry.
+    limit_order_price
+        What it fills at once reached: ``"limit"`` (the default; the open
+        instead when a bar opens beyond the limit), ``"hardlimit"`` (the
+        limit even then) or ``"close"``.
+    limit_delay, limit_tif, limit_expiry
+        ``limit_delay`` tests it from the next bar even when the price already
+        reaches it. ``limit_tif`` is how many bars after the one it was placed
+        on it may fill, and ``limit_expiry`` the row it is cancelled at; NaN
+        is no limit. Both count bars: the engine has no timestamps.
     cash_sharing, group_lens
         Share capital across adjacent columns. None groups all columns when
         sharing is enabled; explicit positive lengths must sum to n_cols.
@@ -627,6 +660,14 @@ def from_signals(
         stop_exit_price=stop_exit_price,
         upon_stop_exit=upon_stop_exit,
         upon_stop_update=upon_stop_update,
+        order_type=order_type,
+        limit_delta=_param(limit_delta, "limit_delta"),
+        delta_format=delta_format,
+        limit_reverse=_flag(limit_reverse, "limit_reverse"),
+        limit_order_price=limit_order_price,
+        limit_delay=_flag(limit_delay, "limit_delay"),
+        limit_tif=_param(limit_tif, "limit_tif"),
+        limit_expiry=_param(limit_expiry, "limit_expiry"),
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),

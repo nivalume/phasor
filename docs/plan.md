@@ -28,10 +28,10 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | 阶段 | 内容 | 完成 | 部分完成 | 未开始 |
 |---|---|---:|---:|---:|
 | P | 维护与技术债 | 3 | 0 | 0 |
-| A | 账户模型地基 | 2 | 1 | 1 |
+| A | 账户模型地基 | 2 | 2 | 0 |
 | B | 现金流、杠杆、合约 | 7 | 0 | 3 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
-| D | 订单与止损 | 0 | 0 | 9 |
+| D | 订单与止损 | 1 | 1 | 7 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
@@ -41,11 +41,11 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **17** | **10** | **52** |
+| **合计** | | **18** | **12** | **49** |
 
 ### 下一步（按优先级）
 
-1. **D1–D2 挂单、限价单**（连同 A3）：PRO 功能里最大的一块空缺。
+1. **D3 挂单冲突**：D2 的限价单已按 PRO 的默认规则处理挂单期间的新信号和止损（待决定事项 13），D3 把这些规则做成参数。
 2. **C5 剩下的 NautilusTrader 对照**：手算场景和守恒检查已完成，对照要在外部环境里跑。
 3. **B5 `valuepercent` 和 `*100` 仓位类型**：工作量小，换算链各加一级。
 
@@ -132,11 +132,13 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
     - [x] 强平检查：在价格确定、全仓列结算之后，估值和下单之前，按这根 K 线的路径检查带进来的持仓（C2）。
   - 位置：入账函数在 `crates/phasor-sim/src/cash.rs`；先后顺序由 `crates/phasor-sim/src/from_orders.rs`、`from_signals.rs` 的 K 线循环决定。
 
-- [ ] **A3 显式的模拟状态结构**（S，推迟到 D1）
+- [ ] **A3 显式的模拟状态结构**（S，部分完成，随 D1）
   - 为什么：D 要加挂单，F 要保存和恢复状态，都需要一个公开的、可以序列化的状态结构。
-  - 现状：两个循环各有一个私有的 `ColumnState`（`from_orders.rs` 里是持仓、负债、估值价；`from_signals.rs` 里另加止损），字段不同，都不能序列化；账户组的现金和可用现金仍是局部变量。
-  - 为什么推迟：现在没有使用方，先定义结构是空转。D1 加挂单时一起做，那时挂单是第一个使用方。
-  - 做什么：把两份 `ColumnState` 合并成一个公开、可序列化的结构，新增 `GroupState` 存放现金和可用现金。只重构，不改行为，用现有 fixture 验证。
+  - 做了什么：
+    - [x] 两个循环的私有 `ColumnState` 合并成 `phasor_sim::state::ColumnState`，公开、纯数据（`Copy`，字段全公开）：持仓、负债、`locked_cash`、估值价、止损 `StopState`、挂单 `LimitOrder`。`from_orders` 只读账户部分。只重构，不改行为：fixture 和全部测试原样通过。
+    - [ ] `GroupState`（现金、可用现金）：仍是循环里的局部变量。没有读它的地方，先定义是空转，随 F 做。
+    - [ ] 序列化：工作区没有 serde，结构已是纯数据，随 F 决定格式。
+  - 位置：`crates/phasor-sim/src/state.rs`；`ARCHITECTURE.md` §8.11。
 
 - [x] **A4 内核状态加 `locked_cash`**（S，随 B4 完成）
   - 为什么：杠杆需要记录被占用的自有资金。
@@ -340,13 +342,36 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
 
 ### D. 订单与止损
 
-- [ ] **D1 挂单状态**（M）
+- [x] **D1 挂单状态**（M）
   - 为什么：限价单、突破单要跨 K 线存在，需要按列保存挂单。
-  - 做什么：在 A3 合并后的 `ColumnState` 里加挂单槽（类型、方向、价格、数量、创建行、到期行），每列最多一张。和 A3 一起做。
+  - 做了什么：`ColumnState.limit: LimitOrder`，每列最多一张：限价、买卖方向、是否反向、成交价规则、挂出时定好的数量（`size`、`size_type`、`direction`）、创建行、最后可成交的行。`price` 为 `NaN` 表示没有挂单。
+  - 位置：`crates/phasor-sim/src/state.rs`。
 
-- [ ] **D2 限价单与突破单**（L）
+- [ ] **D2 限价单与突破单**（L，部分完成）
   - 为什么：只有市价单时，挂单入场、突破入场这类策略没法回测。
-  - 做什么：`order_type`、`limit_delta`、`limit_reverse`（突破单）、`limit_order_price`（跳空时的成交价）、`limit_delay`、`limit_tif`、`limit_expiry`、`time_delta_format`、`delta_format`。限价单不加滑点。
+  - 做了什么（只在 `from_signals`，规则见待决定事项 13 和 `ARCHITECTURE.md` §8.10）：
+    - [x] `order_type`（`market` / `limit`，Python 里可以每列一个）；止损出场仍是市价单。
+    - [x] `limit_delta` + `delta_format`（`percent`、`absolute`、`target`）：买单在订单价下方、卖单在上方；`limit_reverse` 反过来，即突破单。
+    - [x] 挂出时订单价已经够到限价就当根成交；按开盘价挂出（`price=-inf`）时再检查当根剩下的部分；`limit_delay` 推到下一根。之后每根从开盘价开始检查。
+    - [x] `limit_order_price`：`limit`（够到时的订单价或跳空开盘价，否则限价）、`hardlimit`（总是限价）、`close`。限价单不加滑点。
+    - [x] `limit_tif`（挂出后多少根）、`limit_expiry`（到哪一行撤单），都按行数。
+    - [x] 每列每根 K 线一笔，优先级止损 > 挂单成交 > 新信号；本列有其他成交（止损、强平、反向信号）就撤单，同方向的新信号忽略。
+    - [ ] `time_delta_format`：引擎没有时间戳，`limit_tif`、`limit_expiry` 只按行数。按时间给的换算要在 Python 层按索引做，像 `phasor.rates.per_bar` 那样。
+    - 不在本项：`from_orders` 的限价单；止损按限价单出场（`stop_order_type`，D5）。
+  - 验收：
+    - 单元测试 6 个（三种 `delta_format` 和反向、不可能的限价报错、买单和突破单的成交价、没有 K 线范围时只看起点、有效期和到期）。模拟测试 13 个，在五根 K 线上手算：挂单后在低点成交且不加滑点、跳空时三种成交价、立即成交和 `limit_delay`、突破单、按开盘价挂出、有效期和到期、同方向信号忽略和反方向信号撤单、止损和强平撤单（看日志：撤掉的单不会到内核）、日志里的成交、参数报错；两个性质测试：限价等于订单价的限价单等于不加滑点的市价单（独立和共享账户），挂单运行串行和多线程一致。Python 13 个。
+    - 变异检查：去掉止损撤单、强平撤单、有效期、同方向忽略、按开盘价挂出时检查当根、`limit_delay`、不加滑点中的任何一处，测试都会失败。
+    - 和改动前（c0fc6b2）比，默认参数下 `tests/fixtures/` 的对照测试原样通过。
+  - 性能（功能全关，和 c0fc6b2 比，单线程）：
+
+    | | `from_orders` | `from_signals` |
+    |---|---:|---:|
+    | 指令数（几何平均，各 workload 区间） | +0.15%（+0.11% ~ +0.17%） | +1.02%（+0.65% ~ +1.18%） |
+
+    这次没有跑交替计时，等下一个大模块做完一起测。
+  - 教训：第一版 `from_signals` 多了 3.68%。按函数看，`prepare_order` 每次调用多约 20 条指令，`read_signals` 也不再被内联。把限价单的代码放进不内联的函数反而到了 +5.72%；改成 `prepare_order::<LIMITS>` 两份实例（没有限价单的那份不含相关代码），并给 `read_signals` 加 `#[inline(always)]` 后降到 +1.02%。`from_orders` 的 +0.73% 来自每笔订单复制变大的 `ColumnState`，改成借用后是 +0.15%。
+
+  - 位置：`crates/phasor-sim/src/{limit,state,from_signals,lib}.rs`，`crates/phasor-model/src/enums.rs`（`OrderType`、`LimitOrderPrice`、`DeltaFormat`），`crates/phasor-py/src/{lib,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.8、§8.10。测试 `crates/phasor-sim/tests/limit_orders.rs`、`crates/phasor-py/tests/test_limit_orders.py`。
 
 - [ ] **D3 挂单冲突**（M）
   - 为什么：挂单还没成交时又来新信号，保留、重挂还是取消，结果差别很大，必须有明确规则。
@@ -631,7 +656,7 @@ A–F 改的是模拟内核，要按顺序做；G、H、I、J、K 基本不碰�
 | M1 现金流 | A1–A4、B1–B3、B9 | 大部分完成（A2 部分完成，A3 推迟，A4 随 B4 完成） | 入金出金、利息、分红；把事先算好的资金费传进 `cash_earnings` |
 | M2 杠杆与合约 | B4–B8、B10 | B4、B10 完成，其余未开始 | 现货杠杆、期货乘数、初始持仓、敞口分析 |
 | M3 保证金账户 | C1–C5 | C1–C4 完成，C5 部分完成（差 NautilusTrader 对照） | 资金费套利、永续和期货 CTA、外汇和 CFD 隔夜持仓、融资融券利息的准确回测，包括强平 |
-| M4 订单与止损 | D1–D9 | 未开始 | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
+| M4 订单与止损 | D1–D9 | D1 完成，D2 部分完成（缺按时间给的有效期） | 限价单、突破单、时间止损、分批止盈、多周期模拟 |
 | M5 数据 | G0–G5 | G5 部分完成 | 不再依赖示例脚本下载数据 |
 | M6 回调 | E1–E5 | E4 部分完成（内核、止损判定、记录接口已公开） | 和账户状态相关的策略逻辑 |
 | M7 增量与持久化 | F1–F6、L2 | 未开始 | 回测接新数据，长历史分批 |
@@ -679,6 +704,7 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 9 | 持仓费的参数形式（C3） | `long_financing_rate`、`short_financing_rate` 两个费率序列，正数表示付出；永续用单独的 `funding_rate`（费率为正时多头付、空头收），记录类型不同。C3 按此实现 | 已定 |
 | 10 | 费率怎么对应时间（C3、C4） | 内核只收每根 K 线的费率，覆盖到下一根 K 线为止；年化换算放在 Python（`phasor.rates.per_bar`），按时间索引的实际间隔计天数。C4 按此实现 | 已定 |
 | 11 | 保证金的给法（C1） | 名义价值比例（`NaN` 表示 `1 / leverage`）或每单位固定金额，用 `margin_basis` 选，都可以随时间变化，成交时确定。按仓位大小分档的保证金、跨品种抵扣的组合保证金先不做。C1 按此实现 | 已定 |
+| 13 | 限价单的语义（D1、D2） | 每列每根 K 线只执行一笔：已触发的止损优先，其次是本根被触及的挂单，最后是本根的新信号。挂单按挂出时的持仓定数量，所以本列有其他成交（止损、强平、反向信号）就撤单；挂单期间同方向的新信号忽略（PRO 默认的 `KeepIgnore`），反方向的撤单并执行（`CancelExecute`），D3 再做成可选。挂出时价格已经够到就立即成交；按开盘价挂出（`price=-inf`）且不 `limit_delay` 时，当根剩下的部分也检查。跳空越过限价按开盘价（`Limit`）、限价（`HardLimit`）或收盘价（`Close`）成交，不加滑点。引擎没有时间戳，`limit_tif` 按 K 线根数、`limit_expiry` 按行号 | 按建议实现，待评审 |
 | 12 | 换到其他市场还需要、计划里没有的功能 | 多币种账户、币本位（反向）合约、期货换月、A 股的 T+1 和涨跌停、期权。先记在这里，有需要时单独立项 | 未定 |
 
 ---
@@ -695,8 +721,8 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 自定义模拟循环 | 部分（内核、止损判定、记录写入接口已公开） | E4 |
 | `signal_func_nb`、`adjust_func_nb`、`post_order_func_nb`、`post_segment_func_nb`、`pre_*` 钩子 | 无 | E1、E3 |
 | `in_outputs` | 无 | E1 |
-| 限价单、突破单（`order_type`、`limit_delta`、`limit_reverse`、`limit_order_price`、`limit_delay`） | 无 | D2 |
-| 订单有效期（`limit_tif`、`limit_expiry`、`time_delta_format`） | 无 | D2 |
+| 限价单、突破单（`order_type`、`limit_delta`、`limit_reverse`、`limit_order_price`、`limit_delay`） | **有**（`from_signals`；`limit_tif`、`limit_expiry` 按行数） | D2 |
+| 订单有效期（`limit_tif`、`limit_expiry`、`time_delta_format`） | 部分（按行数；按时间的 `time_delta_format` 无） | D2 |
 | 挂单冲突（`upon_*_conflict`） | 无 | D3 |
 | `delta_format` | 无 | D2 |
 | `price` 的 `nextopen`/`nextclose`，`from_ago`，`price_area_vio_mode`，买卖价分离 | 部分 | D4 |

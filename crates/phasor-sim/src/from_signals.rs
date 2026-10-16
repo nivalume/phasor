@@ -50,8 +50,8 @@ use phasor_exec::{
     ProcessOrderState, SizeType, ValidatedOrder, execute_validated,
 };
 use phasor_model::{
-    AccumulationMode, ConflictMode, DirectionConflictMode, OppositeEntryMode, StopEntryPrice,
-    StopExitMode, StopExitPrice, StopUpdateMode,
+    AccumulationMode, ConflictMode, DeltaFormat, DirectionConflictMode, LimitOrderPrice,
+    OppositeEntryMode, OrderType, StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode,
 };
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
@@ -61,6 +61,7 @@ use crate::signals::{
     Signals, from_stop, resolve_dir_conflict, resolve_opposite_entry, resolve_signal_conflict,
     signals_to_size,
 };
+use crate::state::{ColumnState, LimitOrder, StopState};
 
 /// Inputs to [`simulate_from_signals`].
 ///
@@ -193,6 +194,29 @@ pub struct FromSignals<'a> {
     pub upon_stop_exit: FlexArray<'a, StopExitMode>,
     /// Whether adding to a position re-arms its stops.
     pub upon_stop_update: FlexArray<'a, StopUpdateMode>,
+    /// Whether a signal's order executes on its bar or rests as a limit
+    /// order until the market reaches it. Stop exits are always market
+    /// orders. See [`crate::limit`].
+    pub order_type: FlexArray<'a, OrderType>,
+    /// How far from the order price a limit order rests, in `delta_format`,
+    /// read on the bar it is placed. `NaN` is at the order price.
+    pub limit_delta: FlexArray<'a, f64>,
+    /// How `limit_delta` is read.
+    pub delta_format: FlexArray<'a, DeltaFormat>,
+    /// Whether a limit order fills with the market moving through it the
+    /// other way: a buy at or above it, a sell at or below. A breakout entry.
+    pub limit_reverse: FlexArray<'a, bool>,
+    /// What a limit order fills at once the market reaches it.
+    pub limit_order_price: FlexArray<'a, LimitOrderPrice>,
+    /// Whether a limit order is first tested on the bar after the one it is
+    /// placed on, even when the price already reaches it.
+    pub limit_delay: FlexArray<'a, bool>,
+    /// How many bars after the one it is placed on a limit order may fill.
+    /// `NaN` is until it fills or is cancelled.
+    pub limit_tif: FlexArray<'a, f64>,
+    /// The row a limit order is cancelled at, before that bar is tested.
+    /// `NaN` is none.
+    pub limit_expiry: FlexArray<'a, f64>,
     /// Whether to run the stop engine at all.
     pub use_stops: bool,
 
@@ -292,6 +316,14 @@ impl Default for FromSignals<'_> {
             stop_exit_price: FlexArray::Scalar(StopExitPrice::StopLimit),
             upon_stop_exit: FlexArray::Scalar(StopExitMode::Close),
             upon_stop_update: FlexArray::Scalar(StopUpdateMode::Override),
+            order_type: FlexArray::Scalar(OrderType::Market),
+            limit_delta: FlexArray::Scalar(f64::NAN),
+            delta_format: FlexArray::Scalar(DeltaFormat::Percent),
+            limit_reverse: FlexArray::Scalar(false),
+            limit_order_price: FlexArray::Scalar(LimitOrderPrice::Limit),
+            limit_delay: FlexArray::Scalar(false),
+            limit_tif: FlexArray::Scalar(f64::NAN),
+            limit_expiry: FlexArray::Scalar(f64::NAN),
             use_stops: true,
             val_price: FlexArray::Scalar(f64::INFINITY),
             cash_deposits: FlexArray::Scalar(0.0),
@@ -383,35 +415,8 @@ const fn should_update_stop(stop: f64, mode: StopUpdateMode) -> bool {
     }
 }
 
-/// Live stop state for one column.
-#[derive(Debug, Clone, Copy)]
-struct Stops {
-    /// The price the stop-loss is measured from; trails with the position.
-    sl_price: f64,
-    sl_stop: f64,
-    sl_trail: bool,
-    /// The price the take-profit is measured from; fixed at entry.
-    tp_price: f64,
-    tp_stop: f64,
-}
-
-impl Stops {
-    const fn cleared() -> Self {
-        Self {
-            sl_price: f64::NAN,
-            sl_stop: f64::NAN,
-            sl_trail: false,
-            tp_price: f64::NAN,
-            tp_stop: f64::NAN,
-        }
-    }
-
-    const fn armed(&self) -> bool {
-        !self.sl_stop.is_nan() || !self.tp_stop.is_nan()
-    }
-}
-
 /// Reads the four signals for one bar and merges the two conventions.
+#[inline(always)]
 fn read_signals(args: &FromSignals<'_>, i: usize, col: usize) -> Signals {
     let mut s = Signals {
         long_entry: args.long_entries.get(i, col),
@@ -441,33 +446,6 @@ fn read_signals(args: &FromSignals<'_>, i: usize, col: usize) -> Signals {
         }
     }
     s
-}
-
-/// Per-symbol state within a shared account.
-#[derive(Clone, Copy)]
-struct ColumnState {
-    position: f64,
-    debt: f64,
-    locked_cash: f64,
-    last_val_price: f64,
-    stops: Stops,
-}
-
-impl ColumnState {
-    /// What the column owes on a long, as in `from_orders`.
-    fn long_debt(&self) -> f64 {
-        if self.position > 0.0 { self.debt } else { 0.0 }
-    }
-
-    /// What is subtracted from `position × price` to leave the column's
-    /// share of the value, as in `from_orders`.
-    fn owed(&self, margin: bool) -> f64 {
-        if margin {
-            crate::margin::owed(self.position, self.debt)
-        } else {
-            self.long_debt()
-        }
-    }
 }
 
 impl FromSignals<'_> {
@@ -628,16 +606,39 @@ fn build_order(
     }
 }
 
+/// The bar's open, high, low and close, with a missing open, high or low
+/// reconstructed from what is known, so a close-only series still tests
+/// stops and limit orders rather than silently never triggering them.
+fn bar_range(args: &FromSignals<'_>, i: usize, col: usize) -> (f64, f64, f64, f64) {
+    let close = args.close.get(i, col);
+    let mut open = args.open.get(i, col);
+    if open.is_nan() {
+        open = close;
+    }
+    let mut low = args.low.get(i, col);
+    if low.is_nan() {
+        low = open.min(close);
+    }
+    let mut high = args.high.get(i, col);
+    if high.is_nan() {
+        high = open.max(close);
+    }
+    (open, high, low, close)
+}
+
 /// Resolves prices, stops, conflicts and size before any group order fills.
 ///
 /// `sizes_checked` says the size and size type were validated once for the
 /// column, so a bar with neither a signal nor a stop can be skipped without
 /// changing where an invalid size is reported.
+///
+/// `LIMITS` says whether the column's group can place a limit order; the
+/// copy without has no code for one.
 #[allow(
     clippy::too_many_lines,
     reason = "keep the ordered signal pipeline together"
 )]
-fn prepare_order(
+fn prepare_order<const LIMITS: bool>(
     args: &FromSignals<'_>,
     i: usize,
     col: usize,
@@ -652,12 +653,16 @@ fn prepare_order(
     // `-inf` means this bar's open here, where `from_orders` has no open
     // to reach for and falls back to the previous close.
     let mut price = args.price.get(i, col);
+    // Whether the order is placed at the open, which leaves the rest of the
+    // bar for a limit order to be tested against.
+    let mut at_open = false;
     if price.is_infinite() {
         price = if price > 0.0 {
             args.close.get(i, col)
         } else {
             let open = args.open.get(i, col);
             if !open.is_nan() {
+                at_open = true;
                 open
             } else if i > 0 {
                 args.close.get(i - 1, col)
@@ -688,22 +693,7 @@ fn prepare_order(
     let mut stop_limit = false;
     let mut triggered = f64::NAN;
     if args.use_stops && stops.armed() {
-        // A missing open, high or low is reconstructed from what is
-        // known, so a close-only series still tests stops rather than
-        // silently never triggering them.
-        let close = args.close.get(i, col);
-        let mut open = args.open.get(i, col);
-        if open.is_nan() {
-            open = close;
-        }
-        let mut low = args.low.get(i, col);
-        if low.is_nan() {
-            low = open.min(close);
-        }
-        let mut high = args.high.get(i, col);
-        if high.is_nan() {
-            high = open.max(close);
-        }
+        let (open, high, low, _) = bar_range(args, i, col);
 
         if !stops.sl_stop.is_nan() {
             triggered = stop_price(
@@ -737,6 +727,17 @@ fn prepare_order(
             } else if position < 0.0 && low < stops.sl_price {
                 stops.sl_price = low;
             }
+        }
+    }
+
+    // --- the resting limit order --------------------------------------
+    // Tested after the stops: a stop that fired fills in the column, which
+    // cancels it, as does its time running out.
+    if LIMITS && state.limit.is_pending() {
+        if let Some(fill) = test_resting(args, i, col, state, triggered) {
+            state.stops = stops;
+            state.last_val_price = last_val_price;
+            return Ok(Some(fill));
         }
     }
 
@@ -834,6 +835,12 @@ fn prepare_order(
         sized.size
     };
 
+    if LIMITS && triggered.is_nan() {
+        if let Some(routed) = route_limit(args, i, col, state, price, at_open, size, sized)? {
+            return Ok(routed);
+        }
+    }
+
     Ok(Some(Pending {
         size,
         price,
@@ -842,6 +849,163 @@ fn prepare_order(
         stop_limit,
         stop_hit: triggered,
     }))
+}
+
+/// Tests the order resting in a column on bar `i`, after its stops: a stop
+/// that fired fills in the column, which cancels it, as does its time
+/// running out. Returns the fill if the bar reaches it.
+///
+/// Out of line, with [`route_limit`], so a run without limit orders keeps
+/// the signal pipeline as small as it was.
+#[inline(never)]
+fn test_resting(
+    args: &FromSignals<'_>,
+    i: usize,
+    col: usize,
+    state: &mut ColumnState,
+    triggered: f64,
+) -> Option<Pending> {
+    let l = state.limit;
+    if !triggered.is_nan() || i > l.last_row {
+        state.limit = LimitOrder::none();
+        return None;
+    }
+    let (open, high, low, close) = bar_range(args, i, col);
+    let fill = crate::limit::fill_price(
+        l.price,
+        l.buy,
+        l.reverse,
+        l.order_price,
+        open,
+        high,
+        low,
+        close,
+    );
+    if fill.is_nan() {
+        return None;
+    }
+    state.limit = LimitOrder::none();
+    Some(Pending {
+        size: l.size,
+        price: fill,
+        size_type: l.size_type,
+        direction: l.direction,
+        stop_limit: true,
+        stop_hit: f64::NAN,
+    })
+}
+
+/// Routes a signal's sized order where limit orders are on: `None` executes
+/// it as a market order, `Some` is what the bar does instead — nothing,
+/// while an order on the same side rests, or the order placed as a limit
+/// order and, if the bar already reaches it, its fill.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the column, its bar, the order price and the sized order"
+)]
+#[inline(never)]
+fn route_limit(
+    args: &FromSignals<'_>,
+    i: usize,
+    col: usize,
+    state: &mut ColumnState,
+    price: f64,
+    at_open: bool,
+    size: f64,
+    sized: crate::signals::SizedOrder,
+) -> Result<Option<Option<Pending>>> {
+    // Before the short-only flip a positive size buys, whatever the
+    // direction.
+    let buy = sized.size > 0.0;
+    if state.limit.is_pending() {
+        if state.limit.buy == buy {
+            // The order resting already does what this one asks.
+            return Ok(Some(None));
+        }
+        state.limit = LimitOrder::none();
+    }
+    if args.order_type.get(i, col) == OrderType::Limit {
+        return place_limit(args, i, col, state, price, at_open, buy, size, sized).map(Some);
+    }
+    Ok(None)
+}
+
+/// Places a signal's sized order as a limit order at `price`, the bar's
+/// order price, and fills it at once if the bar already reaches it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the column, its bar, the order price and the sized order"
+)]
+fn place_limit(
+    args: &FromSignals<'_>,
+    i: usize,
+    col: usize,
+    state: &mut ColumnState,
+    price: f64,
+    at_open: bool,
+    buy: bool,
+    size: f64,
+    sized: crate::signals::SizedOrder,
+) -> Result<Option<Pending>> {
+    let reverse = args.limit_reverse.get(i, col);
+    let level = crate::limit::limit_price(
+        price,
+        buy,
+        reverse,
+        args.limit_delta.get(i, col),
+        args.delta_format.get(i, col),
+    )?;
+    // No order price, nothing to rest at.
+    if level.is_nan() {
+        return Ok(None);
+    }
+    let Some(last_row) =
+        crate::limit::last_row(i, args.limit_tif.get(i, col), args.limit_expiry.get(i, col))?
+    else {
+        return Ok(None);
+    };
+    let order = LimitOrder {
+        price: level,
+        buy,
+        reverse,
+        order_price: args.limit_order_price.get(i, col),
+        size,
+        size_type: sized.size_type,
+        direction: sized.direction,
+        created: i,
+        last_row,
+    };
+    if !args.limit_delay.get(i, col) {
+        // From the order price on: the rest of the bar only after its open.
+        let (high, low) = if at_open {
+            let (_, high, low, _) = bar_range(args, i, col);
+            (high, low)
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+        let fill = crate::limit::fill_price(
+            level,
+            buy,
+            reverse,
+            order.order_price,
+            price,
+            high,
+            low,
+            args.close.get(i, col),
+        );
+        if !fill.is_nan() {
+            return Ok(Some(Pending {
+                size,
+                price: fill,
+                size_type: sized.size_type,
+                direction: sized.direction,
+                stop_limit: true,
+                stop_hit: f64::NAN,
+            }));
+        }
+    }
+    state.limit = order;
+    Ok(None)
 }
 
 /// Executes a group sequentially within each bar; groups are independent.
@@ -889,16 +1053,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     let shared = len > 1;
     let mut cash = args.init_cash.get(0, cols.start);
     let mut free_cash = cash;
-    let mut states = vec![
-        ColumnState {
-            position: 0.0,
-            debt: 0.0,
-            locked_cash: 0.0,
-            last_val_price: f64::NAN,
-            stops: Stops::cleared()
-        };
-        len
-    ];
+    let mut states = vec![ColumnState::new(); len];
     // The request per column, and the variant a resting stop fills through,
     // built once unless a parameter varies down the column. This hoists the
     // parameter reads and checks that `from_orders` measured at +30% on
@@ -932,6 +1087,11 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     } else {
         Vec::new()
     };
+    // Whether any of the group's columns can place a limit order; without
+    // one, no bar tests or places any.
+    let limits = crate::count_where(&args.order_type, args.n_rows, cols.clone(), |t| {
+        t == OrderType::Limit
+    }) > 0;
     let liquidates = LEV && !args.liquidation().off() && margin.contains(&true);
     let mut on_path = Vec::new();
     let mut to_close = Vec::new();
@@ -1001,7 +1161,12 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         let mut any = false;
         for (k, col) in cols.clone().enumerate() {
             let m = if LEV { mult[k] } else { 1.0 };
-            pending[k] = prepare_order(args, i, col, &mut states[k], sizes_checked, m)?;
+            // Two copies, so a run without limit orders has no code for them.
+            pending[k] = if limits {
+                prepare_order::<true>(args, i, col, &mut states[k], sizes_checked, m)?
+            } else {
+                prepare_order::<false>(args, i, col, &mut states[k], sizes_checked, m)?
+            };
             any |= pending[k].is_some();
             // Every bar, quiet or not: the profit is the account's whether
             // or not a signal comes.
@@ -1210,7 +1375,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             // --- re-arm stops ---------------------------------------------
             if args.use_stops && result.is_filled() {
                 if position == 0.0 {
-                    stops = Stops::cleared();
+                    stops = StopState::cleared();
                 } else {
                     let anchor = match args.stop_entry_price.get(i, col) {
                         StopEntryPrice::ValPrice => val_price_now,
@@ -1230,7 +1395,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                         || position.is_sign_positive() != position_before.is_sign_positive();
 
                     if opened_or_reversed {
-                        stops = Stops {
+                        stops = StopState {
                             sl_price: anchor,
                             sl_stop: sl,
                             sl_trail: args.sl_trail.get(i, col),
@@ -1430,7 +1595,8 @@ fn liquidate<S: RecordSink + LogSink>(
         states[k].position = after.position;
         states[k].debt = after.debt;
         states[k].locked_cash = after.locked_cash;
-        states[k].stops = Stops::cleared();
+        states[k].stops = StopState::cleared();
+        states[k].limit = LimitOrder::none();
         pending[k] = None;
         if isolated[k] {
             crate::liquidation::write_off(returned, row, at.col, cash, free_cash, sink);

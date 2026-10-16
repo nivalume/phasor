@@ -619,6 +619,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Signal conventions (OR-merged): `entries/exits + direction` (in `Both`, exit = short entry), or four explicit arrays.
 - Conflicts: `resolve_signal_conflict` → `resolve_dir_conflict` → `resolve_opposite_entry`.
 - `signals_to_size` accepts only `Amount | Value | Percent`.
+- `order_type = Limit` rests a signal's order as a limit order (§8.10).
 - The stages in `signals.rs` are pure functions, tested exhaustively (§14.3).
 
 ### 8.3 Groups, cash sharing and call order
@@ -744,8 +745,9 @@ stop and signal steps. Each step reads what the steps before it left.
 1. **Open**: the deposit, then dividends on the position carried in (§8.5).
 2. **First pass, per column**: the order price and the valuation price are
    resolved. In `from_signals`, armed stops are tested against the bar's
-   open, high and low (a gap fills at the open), trailed, and the signals are
-   read and sized. Cross margin columns settle at the valuation price (§8.4).
+   open, high and low (a gap fills at the open), trailed, then a resting
+   limit order (§8.10), and the signals are read and sized. Cross margin
+   columns settle at the valuation price (§8.4).
 3. **Liquidation**, on the positions carried in, before anything is valued
    (§8.7). A stop that fired in step 2 is credited.
 4. **Value and order**: the group is valued once at the valuation prices,
@@ -791,6 +793,63 @@ accounts, funding, dividends, liquidations): a run at `k` is the run at 1
 with every amount-sized order `k` times larger, its sizes `k` times smaller
 and everything in cash the same; plus a futures position by hand, the
 refusals and threads.
+
+### 8.10 Limit orders
+
+`from_signals` only (`crates/phasor-sim/src/limit.rs`). A signal whose
+`order_type` is `Limit` is sized as any other, then rests at a limit price
+instead of executing; stop exits stay market orders.
+
+- **The level.** `limit_delta` away from the bar's order price, below for a
+  buy and above for a sell: a fraction (`delta_format = Percent`), an amount
+  of price (`Absolute`), or the level itself (`Target`); `NaN` is at the
+  order price. A buy fills with the market at or below it, a sell at or
+  above. `limit_reverse` turns both round, which is a breakout (stop) entry.
+- **When it is tested.** At once, at the order price: a limit the price
+  already reaches fills on its own bar. Placed at the open (`price = -inf`),
+  it is also tested against the rest of that bar, its high and low; placed at
+  the close or any other price it is not, since what the bar did after it is
+  unknown. `limit_delay` defers all of it to the next bar. From then on each
+  bar tests it from its open, so a bar that opens beyond it has gapped
+  through.
+- **The fill.** `limit_order_price = Limit` fills at the price that reached
+  it first: the order price or a gapping open, which are at least as good as
+  the level, else the level. `HardLimit` always fills at the level, `Close`
+  at the close. No slippage: the fill goes through the slippage-free request
+  a stop resting at its level uses.
+- **How long.** `limit_tif` bars after the one it was placed on, and not on
+  or after the row `limit_expiry`; `NaN` is no limit. Rows, because the
+  engine has no timestamps.
+- **One order per column per bar**, in this priority: a stop that fires, then
+  a resting limit the bar reaches, then the bar's new signal. A resting order
+  was sized against the position held when it was placed, so any other fill
+  in its column cancels it: a stop, a liquidation, or a new signal on the
+  other side, which then executes (PRO's `upon_opp_limit_conflict =
+  CancelExecute`). A new signal on the same side is ignored while it rests
+  (`upon_adj_limit_conflict = KeepIgnore`). D3 is to make both choices.
+- **State.** The order lives in the column's state (`phasor_sim::state::
+  LimitOrder`, below); placing one reaches no kernel and writes no log row,
+  its fill writes both as any order.
+- **Cost.** Whether any column of a group can place one is decided once per
+  group; without one, no bar tests or places any.
+
+`crates/phasor-sim/src/limit.rs` unit-tests the level, the fill and the
+expiry; `crates/phasor-sim/tests/limit_orders.rs` works each rule by hand on
+five bars (resting and filling, the three fill prices on a gap, at once and
+delayed, a breakout, at the open, time in force and expiry, the same and the
+other side, a stop and a liquidation cancelling it, the log), and checks on
+random runs that a limit at the order price is a market order without
+slippage and that threads change nothing.
+
+### 8.11 Column state
+
+`phasor_sim::state` holds what both loops carry for each column between
+bars, as one public plain-data structure: `ColumnState { position, debt,
+locked_cash, last_val_price, stops: StopState, limit: LimitOrder }`.
+`from_orders` reads the account part, `from_signals` all of it. The group's
+cash and free cash are still locals of the loops; they join it, and the
+state becomes something a run can be saved from and resumed with, when
+incremental runs (F) read them.
 
 ---
 
