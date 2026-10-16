@@ -388,6 +388,42 @@ pub enum PendingConflictMode {
     CancelExecute = 3,
 }
 
+/// Which of the bar's prices an order executes at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum PriceType {
+    /// The `price` input, with its `+inf` and `-inf` conventions.
+    Price = 0,
+    /// The bar's open.
+    Open = 1,
+    /// The bar's close.
+    Close = 2,
+}
+
+/// What to do with an order price outside the bar's low–high range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum PriceAreaVioMode {
+    /// Execute at it anyway.
+    Ignore = 0,
+    /// Move it to the nearer of the low and the high.
+    Cap = 1,
+    /// Stop the run with an error.
+    Error = 2,
+}
+
+/// How a stop ladder splits a position across its steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum StopLadderMode {
+    /// No ladder: a stop is one level and closes the whole position.
+    Disabled = 0,
+    /// Each step closes an equal share of the position it was armed on.
+    Uniform = 1,
+    /// Each step closes a share proportional to its distance from the last.
+    Weighted = 2,
+}
+
 /// Which side a trade was on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i8)]
@@ -488,6 +524,9 @@ mod tests {
         assert_eq!(LimitOrderPrice::Close as i8, 2);
         assert_eq!(DeltaFormat::Target as i8, 2);
         assert_eq!(PendingConflictMode::CancelExecute as i8, 3);
+        assert_eq!(PriceType::Close as i8, 2);
+        assert_eq!(PriceAreaVioMode::Error as i8, 2);
+        assert_eq!(StopLadderMode::Weighted as i8, 2);
     }
 
     #[test]

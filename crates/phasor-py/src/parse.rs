@@ -11,8 +11,9 @@
 
 use phasor_model::{
     AccountType, AccumulationMode, CashFlowKind, DeltaFormat, Direction, LeverageMode,
-    LimitOrderPrice, MarginBasis, MarginMode, OrderType, PendingConflictMode, SizeType,
-    StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
+    LimitOrderPrice, MarginBasis, MarginMode, OrderType, PendingConflictMode, PriceAreaVioMode,
+    PriceType, SizeType, StopEntryPrice, StopExitMode, StopExitPrice, StopLadderMode,
+    StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -305,9 +306,79 @@ pub fn pending_conflict(name: &str) -> Result<PendingConflictMode, String> {
     }
 }
 
+/// Which of the bar's prices an order executes at.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn price_type(name: &str) -> Result<PriceType, String> {
+    match name {
+        "price" => Ok(PriceType::Price),
+        "open" => Ok(PriceType::Open),
+        "close" => Ok(PriceType::Close),
+        other => Err(format!(
+            "price_type must be 'price', 'open' or 'close'; got {other:?}"
+        )),
+    }
+}
+
+/// What to do with an order price outside the bar.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn price_area_vio_mode(name: &str) -> Result<PriceAreaVioMode, String> {
+    match name {
+        "ignore" => Ok(PriceAreaVioMode::Ignore),
+        "cap" => Ok(PriceAreaVioMode::Cap),
+        "error" => Ok(PriceAreaVioMode::Error),
+        other => Err(format!(
+            "price_area_vio_mode must be 'ignore', 'cap' or 'error'; got {other:?}"
+        )),
+    }
+}
+
+/// How a stop ladder splits a position.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn stop_ladder(name: &str) -> Result<StopLadderMode, String> {
+    match name {
+        "disabled" => Ok(StopLadderMode::Disabled),
+        "uniform" => Ok(StopLadderMode::Uniform),
+        "weighted" => Ok(StopLadderMode::Weighted),
+        other => Err(format!(
+            "stop_ladder must be 'disabled', 'uniform' or 'weighted'; got {other:?}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_price_and_ladder_option_maps_to_its_own_variant() {
+        assert_eq!(price_type("price").unwrap(), PriceType::Price);
+        assert_eq!(price_type("open").unwrap(), PriceType::Open);
+        assert_eq!(price_type("close").unwrap(), PriceType::Close);
+        assert_eq!(
+            price_area_vio_mode("ignore").unwrap(),
+            PriceAreaVioMode::Ignore
+        );
+        assert_eq!(price_area_vio_mode("cap").unwrap(), PriceAreaVioMode::Cap);
+        assert_eq!(
+            price_area_vio_mode("error").unwrap(),
+            PriceAreaVioMode::Error
+        );
+        assert_eq!(stop_ladder("disabled").unwrap(), StopLadderMode::Disabled);
+        assert_eq!(stop_ladder("uniform").unwrap(), StopLadderMode::Uniform);
+        assert_eq!(stop_ladder("weighted").unwrap(), StopLadderMode::Weighted);
+        assert!(price_type("nextopen").is_err());
+        assert!(price_area_vio_mode("clip").is_err());
+        assert!(stop_ladder("yes").is_err());
+    }
 
     #[test]
     fn every_pending_conflict_mode_maps_to_its_own_variant() {

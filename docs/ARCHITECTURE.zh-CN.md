@@ -595,6 +595,32 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 
 `phasor_sim::state` 存放两个循环每列在 K 线之间带着的东西，是一个公开的纯数据结构：`ColumnState { position, debt, locked_cash, last_val_price, stops: StopState, limit: LimitOrder }`。`from_orders` 读其中账户部分，`from_signals` 全部都读。账户组的现金和可用现金仍是循环里的局部变量；等增量回测（F）要读它们时再并进来，那时状态才能用来保存和续跑。
 
+### 8.12 价格选项
+
+两个循环都有，`crates/phasor-sim/src/prices.rs`。默认全关，每个账户组判断一次，没用到时不读这些输入。
+
+- **`price_type`**：`Price`（默认，`price` 及其 `±inf` 约定）、`Open` 或 `Close`，都取执行那根 K 线的价格。
+- **`from_ago`**：在第 `i` 根执行的订单，是第 `i − from_ago` 根决定的：信号（或数量）、数量类型、方向和显式价格都在那一行读，那一行不存在之前什么也不执行。按名字给的价格（`±inf`、`Open`、`Close`）仍是执行那根的。Python 的 `price="nextopen"` 就是 `Open` 加 `from_ago = 1`：在一根收盘时决定，下一根开盘执行，不用到当时不可能知道的数据；`"nextclose"` 同理。
+- **`bid_price`、`ask_price`**：给了的地方，买单按卖价、卖单按买价成交，替代订单价；滑点照加。`from_signals` 定好数量就知道买卖方向；`from_orders` 按数量的正负判断，目标类数量按估值价和当前持仓比较（`prices::buys`），和内核换算数量时的比较一样。
+- **`price_area_vio_mode`**：订单价超出当根最高最低价时，照常成交（`Ignore`）、截到较近的边界（`Cap`）或报错（`Error`）。作用于市价单的价格和止损的 `StopExitPrice::Price`；止损价、跳空价和限价单的成交价本来就在 K 线范围内。
+
+### 8.13 更多止损
+
+`from_signals`，`crates/phasor-sim/src/stops.rs`。
+
+| 输入 | 触发条件 | 成交价 |
+|---|---|---|
+| `tsl_stop`、`tsl_th` | 价格从入场以来的最好价回撤 `tsl_stop`（空头反过来），前提是价格先朝有利方向走过 `tsl_th`（`NaN`/0 表示立即生效） | 触发价，或跳空的开盘价 |
+| `td_stop` | 入场那根之后第 `td_stop` 根 | 开盘价 |
+| `dt_stop` | 第 `dt_stop` 行 | 开盘价 |
+
+- **一根 K 线里的先后。** 先检查时间止损（在开盘），再依次是止损、移动止损、止盈。最好价和是否生效在检查之后更新，和 `sl_trail` 一样。按行数算，因为引擎没有时间戳。
+- **阶梯**（`stop_ladder = Uniform | Weighted`）：`sl_stop`、`tp_stop` 的每一行是一级，递增，最后一级之后为 `NaN`。每级平掉布置阶梯时仓位的相同份额，或与上一级距离成比例的份额，再布置下一级；最后一级平掉剩下的。加仓不重新布置阶梯。
+- **止损限价单**（`stop_order_type = Limit`）：价格类止损触发后，在触发价往不利方向偏 `stop_limit_delta`（按 `delta_format`）的位置挂限价单；触发时的价格够得到就立即成交。跳空越过限价则挂着，和其他限价单一样（§8.10）。
+- **状态和开销。** `StopState` 存放新止损、阶梯的级数和布置时的仓位。只有布置了这些止损的账户组才走 `stops::arm`/`stops::update` 和扩展的 `prepare_order`，否则仍是参考实现的止损逻辑。
+
+`crates/phasor-sim/tests/price_options.rs` 和 `stop_extensions.rs` 逐项手算，`prices.rs`、`stops.rs` 里有单元测试。
+
 ---
 
 ## 9. 记录 phasor-records

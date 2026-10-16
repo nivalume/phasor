@@ -28,10 +28,10 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | 阶段 | 内容 | 完成 | 部分完成 | 未开始 |
 |---|---|---:|---:|---:|
 | P | 维护与技术债 | 3 | 0 | 0 |
-| A | 账户模型地基 | 2 | 2 | 0 |
+| A | 账户模型地基 | 3 | 1 | 0 |
 | B | 现金流、杠杆、合约 | 7 | 0 | 3 |
 | C | 保证金账户、强平、持仓费（PRO 没有） | 4 | 1 | 0 |
-| D | 订单与止损 | 2 | 1 | 6 |
+| D | 订单与止损 | 4 | 1 | 4 |
 | E | 回调与自定义模拟 | 0 | 1 | 4 |
 | F | 状态延续与增量回测 | 0 | 0 | 6 |
 | G | 数据 | 0 | 1 | 5 |
@@ -41,14 +41,13 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
 | K | 性能与分布式 | 0 | 1 | 3 |
 | L | 工具链 | 0 | 0 | 5 |
 | M | AI 接口 | 0 | 0 | 3 |
-| **合计** | | **19** | **12** | **48** |
+| **合计** | | **22** | **11** | **46** |
 
 ### 下一步（按优先级）
 
-1. **D4 价格选项**：`nextopen` 是避免用到未来数据最常用的写法；买卖价分开能模拟点差。
-2. **D5 止损扩展**：时间止损、分批止盈、移动止盈，以及按限价单出场的止损（复用 D2）。
-3. **B5 `valuepercent` 和 `*100` 仓位类型**：工作量小，换算链各加一级。
-4. **C5 剩下的 NautilusTrader 对照**：要在外部环境里跑。
+1. **D6 不经模拟生成止损信号**：复用 D5 的 `stops::test`，工作量小。
+2. **D7 `from_signals` 的仓位扩展**：全部仓位类型和 `order_mode`，可以和 B5 一起做。
+3. **C5 剩下的 NautilusTrader 对照**：要在外部环境里跑。
 
 ---
 
@@ -120,13 +119,13 @@ PRO 没有的保证金账户、强平和持仓费（永续资金费、隔夜融�
     - 分析层的现金和可用现金都计入这些记录。入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`。有入金时，总收益改为逐根连乘，回撤在扣掉入金后的曲线上计算。
   - 位置：`crates/phasor-records/src/cash.rs`，`crates/phasor-analysis/src/series.rs`，`ARCHITECTURE.md` §8.5、§9.1、§10.2。
 
-- [ ] **A2 K 线内的处理阶段**（M，部分完成）
+- [x] **A2 K 线内的处理阶段**（M）
   - 为什么：限价单、时间止损、现金收支、强平都需要在一根 K 线里有明确的先后顺序，否则同一组输入在不同实现里结果不同。
   - 做什么：
     - [x] 开盘：入金/出金、分红入账，早于下单量的计算。
     - [x] 收盘：`cash_earnings` 入账，在所有订单之后，没有信号的 K 线也入账。
     - [x] 现有止损 `sl_stop`/`tp_stop`：跳空时按开盘价成交，盘中按 high/low 触发，同一根 K 线上止损先于止盈；`price=-inf` 按开盘价成交。这部分原本就有，和 vectorbt 1.1.0 对照过（`from_signals.rs` 的 `stop_price` 和止损检查）。
-    - [ ] 限价单和新止损类型（`td_stop`、`stop_ladder` 等）在开盘、盘中阶段的处理（随 D2、D5 做）。
+    - [x] 限价单和新止损类型的处理阶段：挂单在止损之后、新信号之前检查（D2，§8.10）；时间止损在开盘，先于价格类止损（D5，§8.13）。
     - [x] 止损成交和开盘现金流之间的先后顺序写进文档：`ARCHITECTURE.md` §8.8 列出一根 K 线的六步。即使止损按开盘价成交，也在开盘的入金和分红之后，分红付给随后被止损平掉的持仓。
     - [x] 估值价确定后、计算组净值前：保证金持仓结算当根盈亏（C1），没有信号的 K 线也结算。
     - [x] 收盘：持仓费、借贷利息入账，在 `cash_earnings` 之后，没有信号的 K 线也入账（C3、C4）。
@@ -385,14 +384,30 @@ PRO 让用户在回调里自己写资金费，也不做强平。phasor 原生支
   - 验收：纯函数穷举测试；模拟测试 2 个，在五根 K 线上手算限价单冲突的四种模式（含保留的挂单在另一笔市价成交后仍按原数量成交、反方向信号被忽略）和止损冲突（同方向的空头入场：止损后再开空、撤止损直接反手、都撤；反方向的多头入场：止损后重新入场；同方向的多头出场撤止损后按收盘价出场）；Python 3 个。
   - 位置：`crates/phasor-model/src/enums.rs`（`PendingConflictMode`），`crates/phasor-sim/src/{signals,from_signals}.rs`，`crates/phasor-py/src/{lib,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`；`ARCHITECTURE.md` §8.10。测试在 `crates/phasor-sim/tests/limit_orders.rs`、`crates/phasor-py/tests/test_limit_orders.py`。
 
-- [ ] **D4 价格选项**（M）
+- [x] **D4 价格选项**（M）
   - 为什么：`nextopen` 是避免用到未来数据最常用的写法；买卖价分离能模拟点差。
-  - 做什么：`price` 支持 `"open" | "close" | "nextopen" | "nextclose"`；`from_ago`；`price_area_vio_mode`；买价、卖价分开传。
+  - 做了什么（两个循环都有，`ARCHITECTURE.md` §8.12）：
+    - [x] `price_type`（`Price` / `Open` / `Close`）；Python 的 `price` 可以是 `"open"`、`"close"`、`"nextopen"`、`"nextclose"`，后两个设 `from_ago=1`。
+    - [x] `from_ago`：订单信息（信号或数量、数量类型、方向、显式价格）取 `from_ago` 根之前的，按名字给的价格仍取执行那根的。整次运行一个值。
+    - [x] `bid_price`、`ask_price`：买单按卖价、卖单按买价；`from_orders` 的目标类数量按当前持仓判断方向。
+    - [x] `price_area_vio_mode`：`ignore`、`cap`、`error`。
+  - 没做：`from_ago` 按列或按行设置；PRO 的 `NextValidOpen` 这类跳过缺失值的选项。
+  - 验收：单元测试 3 个，模拟测试 4 个（按开盘价和收盘价成交、下一根开盘执行上一根的订单且显式价格随订单移动、买卖价和目标类数量的方向、超出范围的三种处理），Python 3 个。
+  - 性能（D4、D5 合计，功能全关，和 8d09d8f 比，单线程，指令数几何平均）：`from_orders` +2.04%，`from_signals` −0.03%。`from_orders` 第一版是 +2.94%：每根 K 线都按 `from_ago` 读订单、判断价格选项；改成两者都没用时按原来的方式读，用到时调用不内联的函数后降到 +2.04%。没有跑交替计时。
+  - 位置：`crates/phasor-sim/src/{prices,from_orders,from_signals}.rs`，`crates/phasor-model/src/enums.rs`（`PriceType`、`PriceAreaVioMode`），`crates/phasor-py/src/{lib,parse}.rs`，`crates/phasor-py/python/phasor/__init__.py`。测试 `crates/phasor-sim/tests/price_options.rs`、`crates/phasor-py/tests/test_price_and_stops.py`。
 
-- [ ] **D5 止损扩展**（L）
+- [x] **D5 止损扩展**（L）
   - 为什么：时间止损、分批止盈、移动止盈都是常用的出场方式。
   - 现状：止损后反手和按成交价锚定止损已有，名字沿用 vectorbt 1.x：`upon_stop_exit=Reverse/ReverseReduce`（PRO 叫 `stop_exit_type`）、`stop_entry_price=FillPrice`。Python 的 `from_signals` 也能设（P2）。
-  - 做什么：`tsl_stop`、`tsl_th`、`td_stop`、`dt_stop`、`stop_ladder`、`stop_order_type="limit"` 和 `stop_limit_delta`；可选：PRO 同名的参数别名。
+  - 做了什么（`from_signals`，`ARCHITECTURE.md` §8.13）：
+    - [x] `tsl_stop`、`tsl_th`：从入场以来的最好价回撤触发，先朝有利方向走过 `tsl_th` 才生效。和原来的 `sl_trail` 并存。
+    - [x] `td_stop`（入场后多少根）、`dt_stop`（行号）：在开盘出场，先于价格类止损。按行数，没有按时间给的形式。
+    - [x] `stop_ladder`（`uniform`、`weighted`）：`sl_stop`、`tp_stop` 的行是阶梯的级，每级平一部分，最后一级平掉剩下的。Python 里一维数组是所有列共用的级，`(n_steps, n_cols)` 是每列各自的。
+    - [x] `stop_order_type="limit"` 和 `stop_limit_delta`：止损触发后挂止损限价单，跳空越过限价就挂着（复用 D2）。
+    - [ ] PRO 同名的参数别名（可选）。
+  - 没做：PRO 阶梯的 `AdaptUniform`、`AdaptWeighted`、`Dynamic` 模式；移动止损的阶梯；时间止损按限价单出场。
+  - 验收：单元测试 5 个（移动止损的门槛和最好价、空头、时间止损先于价格止损、止损先于止盈并记下触发价、两种阶梯的份额和递增校验）；模拟测试 6 个（移动止损和门槛、两种时间止损、止盈阶梯两种模式、止损阶梯和递减报错、止损限价单在盘中成交和跳空后挂着、多线程一致）；Python 4 个。
+  - 位置：`crates/phasor-sim/src/{stops,state,from_signals}.rs`，`crates/phasor-model/src/enums.rs`（`StopLadderMode`），`crates/phasor-py/src/{lib,parse,array}.rs`，`crates/phasor-py/python/phasor/__init__.py`。测试 `crates/phasor-sim/tests/stop_extensions.rs`、`crates/phasor-py/tests/test_price_and_stops.py`。
 
 - [ ] **D6 不经模拟生成止损信号**（S）
   - 为什么：研究阶段想先看止损信号的分布，不必跑完整模拟。
@@ -732,14 +747,14 @@ PRO 闭源，没法像对 vectorbt 1.1.0 那样做差分测试。按功能来源
 | 限价单、突破单（`order_type`、`limit_delta`、`limit_reverse`、`limit_order_price`、`limit_delay`） | **有**（`from_signals`；`limit_tif`、`limit_expiry` 按行数） | D2 |
 | 订单有效期（`limit_tif`、`limit_expiry`、`time_delta_format`） | 部分（按行数；按时间的 `time_delta_format` 无） | D2 |
 | 挂单冲突（`upon_*_conflict`） | **有** | D3 |
-| `delta_format` | 无 | D2 |
-| `price` 的 `nextopen`/`nextclose`，`from_ago`，`price_area_vio_mode`，买卖价分离 | 部分 | D4 |
+| `delta_format` | **有** | D2 |
+| `price` 的 `nextopen`/`nextclose`，`from_ago`，`price_area_vio_mode`，买卖价分离 | **有**（`from_ago` 整次运行一个值） | D4 |
 | `call_seq="auto"` 和自定义顺序 | 有（`Explicit` 只在 Rust 里可用） | E |
 | `sl_stop`、`tp_stop` | 有 | — |
-| `tsl_stop`、`tsl_th` | 无（有 `sl_trail`） | D5 |
-| `td_stop`、`dt_stop` | 无 | D5 |
-| `stop_ladder` | 无 | D5 |
-| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | 部分（反手、按成交价锚定、`stop_exit_price`、`upon_stop_update` 已有，名字沿用 vectorbt 1.x） | D5 |
+| `tsl_stop`、`tsl_th` | **有** | D5 |
+| `td_stop`、`dt_stop` | **有**（按行数） | D5 |
+| `stop_ladder` | 部分（`uniform`、`weighted`） | D5 |
+| `stop_exit_type`、`stop_exit_price`、`stop_order_type`、`stop_limit_delta`、`stop_entry_price`、`upon_stop_update` | **有**（名字沿用 vectorbt 1.x，没有 PRO 的别名） | D5 |
 | `generate_ohlc_stop_exits` | 无 | D6 |
 | 全部仓位类型、`*100` 变体、`valuepercent` | 部分 | B5、D7 |
 | `order_mode=True` | 无 | D7 |

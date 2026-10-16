@@ -1117,6 +1117,11 @@ fn deposits_view<'a>(
     initial_margin = None,
     margin_basis = "notional",
     multiplier = None,
+    price_type = None,
+    from_ago = 0,
+    bid_price = None,
+    ask_price = None,
+    price_area_vio_mode = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1144,6 +1149,13 @@ fn deposits_view<'a>(
     upon_opp_limit_conflict = None,
     upon_adj_stop_conflict = None,
     upon_opp_stop_conflict = None,
+    tsl_stop = None,
+    tsl_th = None,
+    td_stop = None,
+    dt_stop = None,
+    stop_ladder = None,
+    stop_order_type = None,
+    stop_limit_delta = None,
     val_price = None,
     cash_deposits = None,
     cash_dividends = None,
@@ -1198,6 +1210,11 @@ fn from_signals(
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
+    price_type: Option<&str>,
+    from_ago: usize,
+    bid_price: Option<&Bound<'_, PyAny>>,
+    ask_price: Option<&Bound<'_, PyAny>>,
+    price_area_vio_mode: Option<&str>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1225,6 +1242,13 @@ fn from_signals(
     upon_opp_limit_conflict: Option<&str>,
     upon_adj_stop_conflict: Option<&str>,
     upon_opp_stop_conflict: Option<&str>,
+    tsl_stop: Option<&Bound<'_, PyAny>>,
+    tsl_th: Option<&Bound<'_, PyAny>>,
+    td_stop: Option<&Bound<'_, PyAny>>,
+    dt_stop: Option<&Bound<'_, PyAny>>,
+    stop_ladder: Option<&str>,
+    stop_order_type: Option<&Bound<'_, PyAny>>,
+    stop_limit_delta: Option<&Bound<'_, PyAny>>,
     val_price: Option<&Bound<'_, PyAny>>,
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
@@ -1294,10 +1318,17 @@ fn from_signals(
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
+    let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
+    let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
     let limit_delta_b = borrow_opt_f64(limit_delta, "limit_delta")?;
+    let tsl_stop_b = borrow_opt_f64(tsl_stop, "tsl_stop")?;
+    let tsl_th_b = borrow_opt_f64(tsl_th, "tsl_th")?;
+    let td_stop_b = borrow_opt_f64(td_stop, "td_stop")?;
+    let dt_stop_b = borrow_opt_f64(dt_stop, "dt_stop")?;
+    let stop_limit_delta_b = borrow_opt_f64(stop_limit_delta, "stop_limit_delta")?;
     let limit_tif_b = borrow_opt_f64(limit_tif, "limit_tif")?;
     let limit_expiry_b = borrow_opt_f64(limit_expiry, "limit_expiry")?;
     let limit_reverse_b = array::borrow_opt_bool(limit_reverse, "limit_reverse")?;
@@ -1385,6 +1416,18 @@ fn from_signals(
     let upon_opp_limit_conflict = conflict(upon_opp_limit_conflict, d.upon_opp_limit_conflict)?;
     let upon_adj_stop_conflict = conflict(upon_adj_stop_conflict, d.upon_adj_stop_conflict)?;
     let upon_opp_stop_conflict = conflict(upon_opp_stop_conflict, d.upon_opp_stop_conflict)?;
+    let stop_ladder = stop_ladder
+        .map(parse::stop_ladder)
+        .transpose()
+        .map_err(bad)?
+        .unwrap_or(d.stop_ladder);
+    let stop_order_types = per_column(
+        stop_order_type,
+        n_cols,
+        "stop_order_type",
+        "'market', 'limit', or one of them per column",
+        parse::order_type,
+    )?;
     let delta_format = delta_format
         .map(parse::delta_format)
         .transpose()
@@ -1436,6 +1479,18 @@ fn from_signals(
     )?;
     let borrow = market("borrow_rate", &h.borrow_rate, d.borrow_rate)?;
     let mark = market("mark_price", &h.mark_price, d.mark_price)?;
+    let bid = market("bid_price", &bid_b, d.bid_price)?;
+    let ask = market("ask_price", &ask_b, d.ask_price)?;
+    let price_type = price_type
+        .map(parse::price_type)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.price_type, FlexArray::Scalar);
+    let price_area_vio_mode = price_area_vio_mode
+        .map(parse::price_area_vio_mode)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.price_area_vio_mode, FlexArray::Scalar);
     // The account's cost of cash, so a parameter: a 1-D array is per bar.
     let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
@@ -1508,13 +1563,44 @@ fn from_signals(
             OneDim::PerColumn,
             d.multiplier,
         )?,
+        price_type,
+        from_ago,
+        bid_price: bid,
+        ask_price: ask,
+        price_area_vio_mode,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,
         log: flex_or_bool(&p.log, n_rows, n_cols, d.log)?,
-        sl_stop: flex_or_f64(&sl_stop_b, n_rows, n_cols, per_col, d.sl_stop)?,
+        // With a ladder, the rows of the stops are its steps.
+        sl_stop: if stop_ladder == phasor_model::StopLadderMode::Disabled {
+            flex_or_f64(&sl_stop_b, n_rows, n_cols, per_col, d.sl_stop)?
+        } else {
+            array::ladder_steps(&sl_stop_b, n_cols, "sl_stop", d.sl_stop)?
+        },
         sl_trail: flex_or_bool(&sl_trail_b, n_rows, n_cols, d.sl_trail)?,
-        tp_stop: flex_or_f64(&tp_stop_b, n_rows, n_cols, per_col, d.tp_stop)?,
+        tp_stop: if stop_ladder == phasor_model::StopLadderMode::Disabled {
+            flex_or_f64(&tp_stop_b, n_rows, n_cols, per_col, d.tp_stop)?
+        } else {
+            array::ladder_steps(&tp_stop_b, n_cols, "tp_stop", d.tp_stop)?
+        },
+        tsl_stop: flex_or_f64(&tsl_stop_b, n_rows, n_cols, per_col, d.tsl_stop)?,
+        tsl_th: flex_or_f64(&tsl_th_b, n_rows, n_cols, per_col, d.tsl_th)?,
+        td_stop: flex_or_f64(&td_stop_b, n_rows, n_cols, per_col, d.td_stop)?,
+        dt_stop: flex_or_f64(&dt_stop_b, n_rows, n_cols, per_col, d.dt_stop)?,
+        stop_ladder,
+        stop_order_type: stop_order_types
+            .as_ref()
+            .map_or(Ok(d.stop_order_type), |types| {
+                FlexArray::per_column(types, n_cols).map_err(to_py_err)
+            })?,
+        stop_limit_delta: flex_or_f64(
+            &stop_limit_delta_b,
+            n_rows,
+            n_cols,
+            per_col,
+            d.stop_limit_delta,
+        )?,
         stop_entry_price,
         stop_exit_price,
         upon_stop_exit,
@@ -1655,6 +1741,11 @@ fn from_signals(
     initial_margin = None,
     margin_basis = "notional",
     multiplier = None,
+    price_type = None,
+    from_ago = 0,
+    bid_price = None,
+    ask_price = None,
+    price_area_vio_mode = None,
     cash_limit = None,
     reject_prob = None,
     seed = 0,
@@ -1714,6 +1805,11 @@ fn from_orders(
     initial_margin: Option<&Bound<'_, PyAny>>,
     margin_basis: &str,
     multiplier: Option<&Bound<'_, PyAny>>,
+    price_type: Option<&str>,
+    from_ago: usize,
+    bid_price: Option<&Bound<'_, PyAny>>,
+    ask_price: Option<&Bound<'_, PyAny>>,
+    price_area_vio_mode: Option<&str>,
     cash_limit: Option<&Bound<'_, PyAny>>,
     reject_prob: Option<&Bound<'_, PyAny>>,
     seed: u64,
@@ -1774,6 +1870,8 @@ fn from_orders(
     )?;
     let lq = Liquidation::borrow(maintenance_margin, liquidation_fee)?;
     let multiplier_b = borrow_opt_f64(multiplier, "multiplier")?;
+    let bid_b = borrow_opt_f64(bid_price, "bid_price")?;
+    let ask_b = borrow_opt_f64(ask_price, "ask_price")?;
     let p = Shared::borrow(
         size,
         price,
@@ -1845,6 +1943,18 @@ fn from_orders(
     )?;
     let borrow = market("borrow_rate", &h.borrow_rate, d.borrow_rate)?;
     let mark = market("mark_price", &h.mark_price, d.mark_price)?;
+    let bid = market("bid_price", &bid_b, d.bid_price)?;
+    let ask = market("ask_price", &ask_b, d.ask_price)?;
+    let price_type = price_type
+        .map(parse::price_type)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.price_type, FlexArray::Scalar);
+    let price_area_vio_mode = price_area_vio_mode
+        .map(parse::price_area_vio_mode)
+        .transpose()
+        .map_err(bad)?
+        .map_or(d.price_area_vio_mode, FlexArray::Scalar);
     // The account's cost of cash, so a parameter: a 1-D array is per bar.
     let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
@@ -1891,6 +2001,11 @@ fn from_orders(
             OneDim::PerColumn,
             d.multiplier,
         )?,
+        price_type,
+        from_ago,
+        bid_price: bid,
+        ask_price: ask,
+        price_area_vio_mode,
         lock_cash: flex_or_bool(&p.lock_cash, n_rows, n_cols, d.lock_cash)?,
         allow_partial: flex_or_bool(&p.allow_partial, n_rows, n_cols, d.allow_partial)?,
         raise_reject: flex_or_bool(&p.raise_reject, n_rows, n_cols, d.raise_reject)?,

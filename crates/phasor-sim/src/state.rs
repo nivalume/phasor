@@ -79,6 +79,30 @@ pub struct StopState {
     pub tp_price: f64,
     /// The take-profit distance, as a fraction; `NaN` is none.
     pub tp_stop: f64,
+    /// The trailing stop's best price since the entry. See [`crate::stops`].
+    pub tsl_price: f64,
+    /// The trailing stop's distance from it, as a fraction; `NaN` is none.
+    pub tsl_stop: f64,
+    /// How far the price must first move from `tsl_anchor` for the trailing
+    /// stop to be live.
+    pub tsl_th: f64,
+    /// The price the trailing stop's threshold is measured from.
+    pub tsl_anchor: f64,
+    /// Whether the trailing stop is live.
+    pub tsl_active: bool,
+    /// The first row a `td_stop` exits on; `usize::MAX` is none.
+    pub td_row: usize,
+    /// The first row a `dt_stop` exits on; `usize::MAX` is none.
+    pub dt_row: usize,
+    /// The stop-loss ladder's current step.
+    pub sl_step: usize,
+    /// The take-profit ladder's current step.
+    pub tp_step: usize,
+    /// The size of the position the ladders were armed on.
+    pub ladder_base: f64,
+    /// Whether the stops were armed by [`crate::stops`], which a trailing
+    /// stop, a time stop or a ladder needs.
+    pub extended: bool,
 }
 
 impl StopState {
@@ -91,13 +115,24 @@ impl StopState {
             sl_trail: false,
             tp_price: f64::NAN,
             tp_stop: f64::NAN,
+            tsl_price: f64::NAN,
+            tsl_stop: f64::NAN,
+            tsl_th: f64::NAN,
+            tsl_anchor: f64::NAN,
+            tsl_active: false,
+            td_row: usize::MAX,
+            dt_row: usize::MAX,
+            sl_step: 0,
+            tp_step: 0,
+            ladder_base: 0.0,
+            extended: false,
         }
     }
 
-    /// Whether either stop is armed.
+    /// Whether any stop is armed.
     #[must_use]
     pub const fn armed(&self) -> bool {
-        !self.sl_stop.is_nan() || !self.tp_stop.is_nan()
+        !self.sl_stop.is_nan() || !self.tp_stop.is_nan() || self.extended
     }
 }
 

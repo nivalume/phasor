@@ -50,9 +50,11 @@ mod holding;
 mod limit;
 mod liquidation;
 mod margin;
+mod prices;
 mod random;
 pub mod signals;
 pub mod state;
+mod stops;
 
 /// How many cells of `array` over `cols` satisfy `pred`, without expanding it.
 ///

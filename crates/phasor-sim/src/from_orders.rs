@@ -23,6 +23,7 @@ use phasor_exec::{
     AccountType, Direction, LeverageMode, MarginBasis, MarginMode, Order, OrderStatus,
     ProcessOrderState, SizeType, ValidatedOrder, execute_validated,
 };
+use phasor_model::{PriceAreaVioMode, PriceType};
 use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordSink, SinkBuffer};
 
 use crate::groups::{CallSeq, Groups, approx_order_value};
@@ -56,6 +57,18 @@ pub struct FromOrders<'a> {
     pub size: FlexArray<'a, f64>,
     /// Requested price. `+inf` means this bar's close, `-inf` the previous one.
     pub price: FlexArray<'a, f64>,
+    /// Whether an order executes at `price`, or at the bar's open or close.
+    /// See [`crate::prices`].
+    pub price_type: FlexArray<'a, PriceType>,
+    /// How many bars before the one an order executes on it was decided:
+    /// its size, size type, direction and an explicit price are read there.
+    pub from_ago: usize,
+    /// Where given, what a sell executes at in place of the order price.
+    pub bid_price: FlexArray<'a, f64>,
+    /// Where given, what a buy executes at in place of the order price.
+    pub ask_price: FlexArray<'a, f64>,
+    /// What to do with an order price outside the bar's low–high range.
+    pub price_area_vio_mode: FlexArray<'a, PriceAreaVioMode>,
     /// How to interpret `size`.
     pub size_type: FlexArray<'a, SizeType>,
     /// Which sides a column may take.
@@ -248,6 +261,18 @@ impl FromOrders<'_> {
         }
     }
 
+    /// The price inputs beyond `price`.
+    fn quotes(&self) -> crate::prices::Quotes<'_, '_> {
+        crate::prices::Quotes {
+            price_type: &self.price_type,
+            bid: &self.bid_price,
+            ask: &self.ask_price,
+            vio: &self.price_area_vio_mode,
+            low: &self.low,
+            high: &self.high,
+        }
+    }
+
     /// The inputs of the liquidation test.
     fn liquidation(&self) -> crate::liquidation::Inputs<'_, '_> {
         crate::liquidation::Inputs {
@@ -342,6 +367,11 @@ impl Default for FromOrders<'_> {
             low: FlexArray::Scalar(f64::NAN),
             size: FlexArray::Scalar(f64::INFINITY),
             price: FlexArray::Scalar(f64::INFINITY),
+            price_type: FlexArray::Scalar(PriceType::Price),
+            from_ago: 0,
+            bid_price: FlexArray::Scalar(f64::NAN),
+            ask_price: FlexArray::Scalar(f64::NAN),
+            price_area_vio_mode: FlexArray::Scalar(PriceAreaVioMode::Ignore),
             size_type: FlexArray::Scalar(SizeType::Amount),
             direction: FlexArray::Scalar(Direction::Both),
             fees: FlexArray::Scalar(0.0),
@@ -547,6 +577,19 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             || !crate::cash::is_off(&args.cash_dividends));
     let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
     let charges = LEV && !args.rates().all_off();
+    // Prices other than `price`'s, and the order decided `from_ago` bars
+    // back: see `crate::prices`.
+    let quotes = args.quotes();
+    let quotes_on = quotes.on();
+    let ago = args.from_ago;
+    // Neither: the order is this bar's and its price is `price`'s, read as
+    // the loop always did.
+    let plain = ago == 0 && !quotes_on;
+    let mut raw_price = if quotes_on {
+        vec![f64::NAN; group_len]
+    } else {
+        Vec::new()
+    };
 
     for i in 0..args.n_rows {
         if at_open {
@@ -580,7 +623,11 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             // Resolve the order price. Infinities are sentinels: +inf means
             // this bar's close, -inf the previous bar's close (and there is
             // no previous one on the first bar).
-            let mut p = args.price.get(i, col);
+            let mut p = if plain {
+                args.price.get(i, col)
+            } else {
+                requested_price(args, i, col, ago, quotes_on)
+            };
             if p.is_infinite() {
                 p = if p > 0.0 {
                     args.close.get(i, col)
@@ -591,6 +638,9 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 };
             }
             price[k] = p;
+            if quotes_on {
+                raw_price[k] = p;
+            }
 
             // Resolve the valuation price, whose +inf means "the order price".
             let mut val_price = args.val_price.get(i, col);
@@ -664,10 +714,19 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             }
             if args.call_seq == CallSeq::Auto {
                 for (k, col) in cols.clone().enumerate() {
+                    let (size, size_type, direction) = if plain {
+                        (
+                            args.size.get(i, col),
+                            args.size_type.get(i, col),
+                            args.direction.get(i, col),
+                        )
+                    } else {
+                        order_at(args, i, col, ago)
+                    };
                     order_value[k] = approx_order_value(
-                        args.size.get(i, col),
-                        args.size_type.get(i, col),
-                        args.direction.get(i, col),
+                        size,
+                        size_type,
+                        direction,
                         cash,
                         state[k].position,
                         free_cash,
@@ -704,13 +763,26 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             }
             let value = group_value;
 
+            let (size, size_type, direction) = if plain {
+                (
+                    args.size.get(i, col),
+                    args.size_type.get(i, col),
+                    args.direction.get(i, col),
+                )
+            } else {
+                order_at(args, i, col, ago)
+            };
+            let mut order_price = price[k];
+            if quotes_on {
+                let buy =
+                    crate::prices::buys(size, size_type, st.position, st.last_val_price, value);
+                order_price = quotes.order_price(i, col, raw_price[k], buy)?;
+                if LEV {
+                    order_price *= mult[k];
+                }
+            }
             let order = &mut orders[k];
-            order.set_bar(
-                args.size.get(i, col),
-                price[k],
-                args.size_type.get(i, col),
-                args.direction.get(i, col),
-            );
+            order.set_bar(size, order_price, size_type, direction);
 
             let process = ProcessOrderState {
                 cash,
@@ -890,6 +962,57 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
     }
 
     Ok(())
+}
+
+/// The requested price of the order executing on bar `i`, before its
+/// `±inf` conventions are resolved: `price` on the row the order was decided
+/// on, or the executing bar's open or close under `price_type`.
+#[inline(never)]
+fn requested_price(
+    args: &FromOrders<'_>,
+    i: usize,
+    col: usize,
+    from_ago: usize,
+    quotes_on: bool,
+) -> f64 {
+    let p = crate::prices::source_row(i, from_ago).map_or(f64::NAN, |r| args.price.get(r, col));
+    if !quotes_on {
+        return p;
+    }
+    match args.price_type.get(i, col) {
+        PriceType::Price => p,
+        PriceType::Open => {
+            let open = args.open.get(i, col);
+            if !open.is_nan() {
+                open
+            } else if i > 0 {
+                args.close.get(i - 1, col)
+            } else {
+                f64::NAN
+            }
+        }
+        PriceType::Close => f64::INFINITY,
+    }
+}
+
+/// The size, size type and direction of the order executing on bar `i`:
+/// the one decided `from_ago` bars back, and a `NaN` size before there is
+/// one, which the kernel ignores.
+#[inline(never)]
+fn order_at(
+    args: &FromOrders<'_>,
+    i: usize,
+    col: usize,
+    from_ago: usize,
+) -> (f64, SizeType, Direction) {
+    match crate::prices::source_row(i, from_ago) {
+        Some(r) => (
+            args.size.get(r, col),
+            args.size_type.get(r, col),
+            args.direction.get(r, col),
+        ),
+        None => (f64::NAN, SizeType::Amount, Direction::Both),
+    }
 }
 
 /// Tests the group for liquidation on bar `row` and closes what fails, after

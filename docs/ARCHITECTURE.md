@@ -864,6 +864,64 @@ cash and free cash are still locals of the loops; they join it, and the
 state becomes something a run can be saved from and resumed with, when
 incremental runs (F) read them.
 
+### 8.12 Price options
+
+Both loops, `crates/phasor-sim/src/prices.rs`. All off by default and
+decided once per group, so a run without them reads none of their inputs.
+
+- **`price_type`**: `Price` (the default; `price` with its `±inf`
+  conventions), `Open` or `Close` of the executing bar.
+- **`from_ago`**: the order executing on bar `i` is the one decided on
+  `i − from_ago`: its signals (or size), size type, direction and an
+  explicit price are read there, and nothing executes before that row. A
+  named price — `±inf`, `Open`, `Close` — is still the executing bar's.
+  Python's `price="nextopen"` is `Open` with `from_ago = 1`: decided at one
+  close, executed at the next open, reading nothing it could not have known;
+  `"nextclose"` likewise.
+- **`bid_price`, `ask_price`**: where given, a buy executes at the ask and a
+  sell at the bid in place of the order price; slippage applies on top.
+  `from_signals` knows an order's side once it is sized; `from_orders`
+  reads it off the size and, for a target, off the position it moves away
+  from at the valuation price (`prices::buys`), the comparison the kernel's
+  size cascade makes.
+- **`price_area_vio_mode`**: an order price outside the bar's low–high
+  range is kept (`Ignore`), moved to the nearer bound (`Cap`) or refused
+  with an error naming it (`Error`). It applies to a market order's price
+  and a stop's `StopExitPrice::Price`; stop levels, gaps and limit fills are
+  inside the bar by construction.
+
+### 8.13 More stops
+
+`from_signals`, `crates/phasor-sim/src/stops.rs`.
+
+| Input | Fires | At |
+|---|---|---|
+| `tsl_stop`, `tsl_th` | `tsl_stop` below the best price since entry (above, for a short), once the price has first moved `tsl_th` in the position's favour (`NaN`/0: at once) | the level, or the open past it |
+| `td_stop` | `td_stop` bars after the entry bar | the open |
+| `dt_stop` | on row `dt_stop` | the open |
+
+- **Order within the bar.** The time stops first, at the open; then the
+  stop-loss, the trailing stop and the take-profit. The best price and the
+  activation are updated after the test, as `sl_trail` is. Rows, not times:
+  the engine has no timestamps.
+- **Ladders** (`stop_ladder = Uniform | Weighted`): the rows of `sl_stop`
+  and `tp_stop` are steps, increasing, `NaN` after the last. A step closes
+  an equal share of the position the ladder was armed on, or a share
+  proportional to its distance beyond the step before, and arms the next;
+  the last closes the rest. Adding to the position does not re-arm a
+  ladder.
+- **Stop-limit orders** (`stop_order_type = Limit`): a fired price stop
+  places a limit order at its level, `stop_limit_delta` (in `delta_format`)
+  worse, and fills it at once if the price it fired at reaches it. A gap
+  past the limit leaves it resting, as any limit order (§8.10).
+- **State and cost.** `StopState` carries the new stops, the ladder steps
+  and the base size. Only a group that arms one of them uses
+  `stops::arm`/`stops::update` and the extended `prepare_order`; otherwise
+  the reference's stop engine runs unchanged.
+
+`crates/phasor-sim/tests/price_options.rs` and `stop_extensions.rs` work
+each option by hand, with unit tests in `prices.rs` and `stops.rs`.
+
 ---
 
 ## 9. Records: phasor-records

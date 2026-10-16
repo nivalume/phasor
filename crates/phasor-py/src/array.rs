@@ -302,6 +302,41 @@ pub fn flex_or_f64<'a>(
     }
 }
 
+/// The steps of a stop ladder: a number is one step, a 1-D array the steps
+/// of every column, and an `(n_steps, n_cols)` array each column's own.
+///
+/// # Errors
+///
+/// A Python `ValueError` for a 2-D array with the wrong number of columns,
+/// or one that is not contiguous.
+pub fn ladder_steps<'a>(
+    value: &'a Option<Borrowed<'a>>,
+    n_cols: usize,
+    name: &str,
+    default: FlexArray<'a, f64>,
+) -> PyResult<FlexArray<'a, f64>> {
+    match value {
+        None => Ok(default),
+        Some(Borrowed::Scalar(v)) => Ok(FlexArray::Scalar(*v)),
+        Some(Borrowed::Row(a)) => {
+            let steps = a.as_slice().map_err(|e| {
+                PyValueError::new_err(format!("{name}'s steps are not contiguous: {e}"))
+            })?;
+            FlexArray::per_row(steps, steps.len()).map_err(to_py_err)
+        }
+        Some(Borrowed::Slice(a)) => {
+            let (data, rows, cols) = columns_of(a)?;
+            if cols != n_cols {
+                return Err(PyValueError::new_err(format!(
+                    "a {name} ladder must have one column of steps per column; got {cols} for \
+                     {n_cols}"
+                )));
+            }
+            FlexArray::full(data, rows, n_cols).map_err(to_py_err)
+        }
+    }
+}
+
 /// Reads an optional bool parameter, keeping the borrow alive.
 ///
 /// # Errors

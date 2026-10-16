@@ -322,6 +322,31 @@ def _multiplier(value: Any, column_map: Any) -> Any:
     return np.ascontiguousarray(array)
 
 
+_PRICE_OPTIONS = {
+    "open": ("open", 0),
+    "close": ("close", 0),
+    "nextopen": ("open", 1),
+    "nextclose": ("close", 1),
+}
+
+
+def _price_option(price: Any, from_ago: int) -> tuple[Any, Any, int]:
+    """``price`` as the engine takes it: an array or number, or one of the
+    bar's prices by name. ``nextopen`` and ``nextclose`` are the next bar's,
+    which ``from_ago=1`` reads the order from the bar before."""
+    if not isinstance(price, str):
+        return _param(price, "price"), None, from_ago
+    if price not in _PRICE_OPTIONS:
+        raise ValueError(
+            "price must be a number, an array, or 'open', 'close', 'nextopen' or 'nextclose'; "
+            f"got {price!r}"
+        )
+    price_type, ago = _PRICE_OPTIONS[price]
+    if ago and from_ago:
+        raise ValueError(f"price={price!r} sets from_ago=1; do not pass from_ago with it")
+    return None, price_type, from_ago or ago
+
+
 def from_signals(
     close,
     entries,
@@ -347,6 +372,10 @@ def from_signals(
     initial_margin=None,
     margin_basis="notional",
     multiplier=None,
+    from_ago=0,
+    bid_price=None,
+    ask_price=None,
+    price_area_vio_mode=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -374,6 +403,13 @@ def from_signals(
     upon_opp_limit_conflict=None,
     upon_adj_stop_conflict=None,
     upon_opp_stop_conflict=None,
+    tsl_stop=None,
+    tsl_th=None,
+    td_stop=None,
+    dt_stop=None,
+    stop_ladder=None,
+    stop_order_type=None,
+    stop_limit_delta=None,
     val_price=None,
     cash_deposits=None,
     cash_dividends=None,
@@ -498,6 +534,35 @@ def from_signals(
         ``opp`` default) cancels it and executes the signal, and
         ``"keepexecute"`` and ``"cancelignore"`` the other two. A kept order
         keeps the size it was placed with; a new limit order takes its place.
+    tsl_stop, tsl_th
+        A trailing stop ``tsl_stop`` below the best price since the entry (above
+        it for a short), live once the price has first moved ``tsl_th`` in the
+        position's favour (NaN or 0: at once).
+    td_stop, dt_stop
+        Time stops: exit at the open ``td_stop`` bars after the entry bar, or
+        at the open of row ``dt_stop``. Rows, not times.
+    stop_ladder
+        ``"uniform"`` or ``"weighted"`` makes ``sl_stop`` and ``tp_stop``
+        ladders: a 1-D array of increasing steps for every column, or
+        ``(n_steps, n_cols)``, NaN after the last. Each step closes an equal
+        share of the position (``uniform``) or a share proportional to its
+        distance from the step before (``weighted``); the last closes the rest.
+    stop_order_type, stop_limit_delta
+        ``"limit"`` turns a fired price stop into a limit order at its level,
+        ``stop_limit_delta`` (in ``delta_format``) worse: a stop-limit order,
+        which a gap past the limit leaves resting. A string or one per column.
+    from_ago, bid_price, ask_price, price_area_vio_mode
+        ``price`` may also name one of the bar's prices: ``"open"``,
+        ``"close"``, or ``"nextopen"``/``"nextclose"``, the next bar's, which
+        reads the order decided on the bar before (``from_ago=1``): a
+        decision at one close executed at the following open uses nothing it
+        could not have known. ``from_ago=n`` reads the order (its signals or
+        size, size type and an explicit price) ``n`` bars back; a named price
+        is still the executing bar's. ``bid_price`` and ``ask_price``, shaped
+        like ``close``, are what a sell and a buy execute at where given.
+        ``price_area_vio_mode`` decides what an order price outside the bar's
+        low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
+        range, or ``"error"``.
     upon_adj_stop_conflict, upon_opp_stop_conflict
         The same choice between a stop that fires and the bar's own signal.
         The default ``"keepignore"`` lets the stop replace the signal.
@@ -638,6 +703,7 @@ def from_signals(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    price, price_type, from_ago = _price_option(price, from_ago)
     return _phasor.from_signals(
         _matrix(close, "close"),
         _signals(entries, "entries"),
@@ -648,7 +714,7 @@ def from_signals(
         init_cash=_param(init_cash, "init_cash"),
         size=_param(size, "size"),
         size_type=size_type,
-        price=_param(price, "price"),
+        price=price,
         direction=direction,
         fees=_param(fees, "fees"),
         fixed_fees=_param(fixed_fees, "fixed_fees"),
@@ -662,6 +728,11 @@ def from_signals(
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
         multiplier=_multiplier(multiplier, column_map),
+        price_type=price_type,
+        from_ago=from_ago,
+        bid_price=_market(bid_price, "bid_price"),
+        ask_price=_market(ask_price, "ask_price"),
+        price_area_vio_mode=price_area_vio_mode,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
@@ -689,6 +760,13 @@ def from_signals(
         upon_opp_limit_conflict=upon_opp_limit_conflict,
         upon_adj_stop_conflict=upon_adj_stop_conflict,
         upon_opp_stop_conflict=upon_opp_stop_conflict,
+        tsl_stop=_param(tsl_stop, "tsl_stop"),
+        tsl_th=_param(tsl_th, "tsl_th"),
+        td_stop=_param(td_stop, "td_stop"),
+        dt_stop=_param(dt_stop, "dt_stop"),
+        stop_ladder=stop_ladder,
+        stop_order_type=stop_order_type,
+        stop_limit_delta=_param(stop_limit_delta, "stop_limit_delta"),
         val_price=_param(val_price, "val_price"),
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),
@@ -739,6 +817,10 @@ def from_orders(
     initial_margin=None,
     margin_basis="notional",
     multiplier=None,
+    from_ago=0,
+    bid_price=None,
+    ask_price=None,
+    price_area_vio_mode=None,
     cash_limit=None,
     reject_prob=None,
     seed=0,
@@ -807,6 +889,18 @@ def from_orders(
         ``from_signals``: an order's sign already says which way it goes.
     price
         ``inf`` (the default) is this bar's close, ``-inf`` the previous one.
+    from_ago, bid_price, ask_price, price_area_vio_mode
+        ``price`` may also name one of the bar's prices: ``"open"``,
+        ``"close"``, or ``"nextopen"``/``"nextclose"``, the next bar's, which
+        reads the order decided on the bar before (``from_ago=1``): a
+        decision at one close executed at the following open uses nothing it
+        could not have known. ``from_ago=n`` reads the order (its signals or
+        size, size type and an explicit price) ``n`` bars back; a named price
+        is still the executing bar's. ``bid_price`` and ``ask_price``, shaped
+        like ``close``, are what a sell and a buy execute at where given.
+        ``price_area_vio_mode`` decides what an order price outside the bar's
+        low–high range does: ``"ignore"`` (the default), ``"cap"`` it to the
+        range, or ``"error"``.
     val_price
         What the position is marked at when a value- or percent-sized order is
         resolved. ``inf`` (the default) is the order price.
@@ -947,6 +1041,7 @@ def from_orders(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    price, price_type, from_ago = _price_option(price, from_ago)
     return _phasor.from_orders(
         _matrix(close, "close"),
         size=_param(size, "size"),
@@ -954,7 +1049,7 @@ def from_orders(
         high=None if high is None else _matrix(high, "high"),
         low=None if low is None else _matrix(low, "low"),
         size_type=size_type,
-        price=_param(price, "price"),
+        price=price,
         direction=direction,
         init_cash=_param(init_cash, "init_cash"),
         fees=_param(fees, "fees"),
@@ -969,6 +1064,11 @@ def from_orders(
         initial_margin=_param(initial_margin, "initial_margin"),
         margin_basis=margin_basis,
         multiplier=_multiplier(multiplier, column_map),
+        price_type=price_type,
+        from_ago=from_ago,
+        bid_price=_market(bid_price, "bid_price"),
+        ask_price=_market(ask_price, "ask_price"),
+        price_area_vio_mode=price_area_vio_mode,
         cash_limit=_param(cash_limit, "cash_limit"),
         reject_prob=_param(reject_prob, "reject_prob"),
         seed=seed,
