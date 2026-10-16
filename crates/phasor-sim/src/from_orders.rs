@@ -124,6 +124,27 @@ pub struct FromOrders<'a> {
     /// A charge is capped at the free cash.
     pub cash_earnings: FlexArray<'a, f64>,
 
+    /// A perpetual's funding rate per bar: at the bar's close a position
+    /// pays `position × price × rate`, so a positive rate is paid by longs
+    /// and received by shorts. `price` is `mark_price`, or the close.
+    /// `NaN` or zero on bars that do not settle. See [`crate::holding`].
+    pub funding_rate: FlexArray<'a, f64>,
+    /// Overnight financing per bar on a long: at the bar's close it pays
+    /// `position × price × rate`. A negative rate is received.
+    pub long_financing_rate: FlexArray<'a, f64>,
+    /// Overnight financing per bar on a short, as `long_financing_rate`:
+    /// a positive rate is a cost to the short too.
+    pub short_financing_rate: FlexArray<'a, f64>,
+    /// Interest per bar on what a cash column's long borrowed, at the bar's
+    /// close. Margin columns borrow nothing and pay none.
+    pub debt_rate: FlexArray<'a, f64>,
+    /// The fee per bar for the shares a cash column's short borrowed:
+    /// `|position| × price × rate` at the bar's close.
+    pub borrow_rate: FlexArray<'a, f64>,
+    /// The price the holding charges are computed at. `NaN`, the default,
+    /// is the bar's close.
+    pub mark_price: FlexArray<'a, f64>,
+
     /// Carry the last non-`NaN` valuation price forward.
     pub ffill_val_price: bool,
     /// Mark to market after each fill rather than only at the bar's start.
@@ -184,6 +205,28 @@ impl FromOrders<'_> {
             || self.lock_cash.varies_by_row()
             || self.allow_partial.varies_by_row()
             || self.raise_reject.varies_by_row()
+    }
+
+    /// The inputs of the holding charges.
+    fn rates(&self) -> crate::holding::Rates<'_, '_> {
+        crate::holding::Rates {
+            funding: &self.funding_rate,
+            long_financing: &self.long_financing_rate,
+            short_financing: &self.short_financing_rate,
+            debt: &self.debt_rate,
+            borrow: &self.borrow_rate,
+            mark_price: &self.mark_price,
+            close: &self.close,
+        }
+    }
+
+    /// Whether the run's accounts may go below zero cash: whether any column
+    /// borrows or trades on margin, or any holding charge is on, which is
+    /// owed whatever the balance. Decided once for the run, because the
+    /// records keep balances for every fill of a run or for none.
+    fn levered(&self) -> bool {
+        crate::any_levered(&self.leverage, &self.account_type, self.n_rows, self.n_cols)
+            || !self.rates().all_off()
     }
 }
 
@@ -274,6 +317,12 @@ impl Default for FromOrders<'_> {
             cash_deposits: FlexArray::Scalar(0.0),
             cash_dividends: FlexArray::Scalar(0.0),
             cash_earnings: FlexArray::Scalar(0.0),
+            funding_rate: FlexArray::Scalar(0.0),
+            long_financing_rate: FlexArray::Scalar(0.0),
+            short_financing_rate: FlexArray::Scalar(0.0),
+            debt_rate: FlexArray::Scalar(0.0),
+            borrow_rate: FlexArray::Scalar(0.0),
+            mark_price: FlexArray::Scalar(f64::NAN),
             ffill_val_price: true,
             update_value: false,
             groups: Groups::ungrouped(0),
@@ -409,7 +458,7 @@ fn simulate_group<S: RecordSink + LogSink>(
 
 /// The loop of [`simulate_group`], in four copies: with `FLOWS` false it has
 /// no code for cash flows at all (see [`crate::cash::all_off`]), and with
-/// `LEV` false none for leverage.
+/// `LEV` false none for leverage, margin columns or holding charges.
 ///
 /// `LEV` values a long net of what it borrowed, and records each fill's
 /// balances so the analysis layer can rebuild the free cash. A column at
@@ -465,6 +514,7 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         && (!crate::cash::is_off(&args.cash_deposits)
             || !crate::cash::is_off(&args.cash_dividends));
     let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
+    let charges = LEV && !args.rates().all_off();
 
     for i in 0..args.n_rows {
         if at_open {
@@ -732,6 +782,22 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 sink,
             )?;
         }
+        if charges {
+            crate::holding::charge(
+                &args.rates(),
+                i,
+                cols.clone(),
+                |k| crate::holding::Held {
+                    position: state[k].position,
+                    debt: state[k].debt,
+                    margin: margin[k],
+                    val_price: state[k].last_val_price,
+                },
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
+        }
     }
 
     Ok(())
@@ -765,7 +831,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromOrders<'_>) -> Result<S> {
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
-    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
+    let levered = args.levered();
     for group in 0..args.groups.len() {
         simulate_group(args, group, levered, &mut sink, &mut fills)?;
     }
@@ -864,7 +930,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromOrders<'_>, n_threads: usize
     // Contiguous chunks keep each thread's columns adjacent in memory and
     // make the merge an ordered append.
     let ranges = args.groups.chunks(n_threads);
-    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
+    let levered = args.levered();
 
     let results: Vec<Result<S>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges

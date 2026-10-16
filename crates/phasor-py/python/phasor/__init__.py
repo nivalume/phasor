@@ -38,7 +38,7 @@ from typing import Any
 
 import numpy as np
 
-from . import _phasor, data, events, labels, robust, signals, synthetic, validation
+from . import _phasor, data, events, labels, rates, robust, signals, synthetic, validation
 from ._phasor import InstrumentId, BarType
 from ._phasor import Portfolio
 
@@ -51,6 +51,7 @@ __all__ = [
     "data",
     "events",
     "labels",
+    "rates",
     "robust",
     "signals",
     "synthetic",
@@ -334,6 +335,12 @@ def from_signals(
     cash_deposits=None,
     cash_dividends=None,
     cash_earnings=None,
+    funding_rate=None,
+    long_financing_rate=None,
+    short_financing_rate=None,
+    debt_rate=None,
+    borrow_rate=None,
+    mark_price=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -476,6 +483,37 @@ def from_signals(
         number, one value per bar (1-D), or ``(n_bars, n_cols)``. Part of the
         return. A charge is capped at the free cash. ``pf.cash_records()``
         lists what was applied.
+    funding_rate
+        A perpetual's funding rate per bar, shaped like ``close``
+        (``column_map`` applies), ``NaN`` or 0 on bars that do not settle. At
+        the bar's close, after its orders, a position pays ``position * price
+        * rate``: a positive rate is paid by longs and received by shorts. Put
+        each rate on the bar whose close is its funding time.
+    long_financing_rate, short_financing_rate
+        Overnight financing per bar for each side, shaped like ``close``: a
+        position pays ``abs(position) * price * rate`` at the bar's close. A
+        positive rate is a cost to either side, a negative one is received.
+    debt_rate
+        Interest per bar on what a cash column's long borrowed under
+        ``leverage``, charged at the bar's close. A number, one value per bar
+        (1-D) or ``(n_bars, n_cols)``.
+    borrow_rate
+        The fee per bar for the shares a cash column's short borrowed, shaped
+        like ``close``: ``abs(position) * price * rate`` at the bar's close.
+    mark_price
+        The ``price`` of the charges above, shaped like ``close``. ``None``
+        uses the close.
+
+        Every rate is per bar, for the time until the next bar;
+        ``phasor.rates.per_bar`` turns an annual rate into one from the bars'
+        timestamps. A charge is owed whatever the balance, so unlike a
+        ``cash_earnings`` charge it is not capped: any of these runs the
+        accounts as ones that may borrow, cash can go below zero, after which
+        only closing is allowed, and ``pf.orders()`` gains ``debt``,
+        ``locked_cash`` and ``margin``. Margin columns pay funding and
+        financing but no interest or borrow fee. ``pf.cash_flows("funding")``,
+        ``"financing"``, ``"interest"`` and ``"borrowfee"`` give what each
+        cost per bar and column; all are part of the return.
 
     Returns
     -------
@@ -524,6 +562,12 @@ def from_signals(
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),
         cash_earnings=_param(cash_earnings, "cash_earnings"),
+        funding_rate=_market(funding_rate, "funding_rate"),
+        long_financing_rate=_market(long_financing_rate, "long_financing_rate"),
+        short_financing_rate=_market(short_financing_rate, "short_financing_rate"),
+        debt_rate=_param(debt_rate, "debt_rate"),
+        borrow_rate=_market(borrow_rate, "borrow_rate"),
+        mark_price=_market(mark_price, "mark_price"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,
@@ -568,6 +612,12 @@ def from_orders(
     cash_deposits=None,
     cash_dividends=None,
     cash_earnings=None,
+    funding_rate=None,
+    long_financing_rate=None,
+    short_financing_rate=None,
+    debt_rate=None,
+    borrow_rate=None,
+    mark_price=None,
     ffill_val_price=True,
     update_value=False,
     ann_factor=365.0,
@@ -682,6 +732,37 @@ def from_orders(
         number, one value per bar (1-D), or ``(n_bars, n_cols)``. Part of the
         return. A charge is capped at the free cash. ``pf.cash_records()``
         lists what was applied.
+    funding_rate
+        A perpetual's funding rate per bar, shaped like ``close``
+        (``column_map`` applies), ``NaN`` or 0 on bars that do not settle. At
+        the bar's close, after its orders, a position pays ``position * price
+        * rate``: a positive rate is paid by longs and received by shorts. Put
+        each rate on the bar whose close is its funding time.
+    long_financing_rate, short_financing_rate
+        Overnight financing per bar for each side, shaped like ``close``: a
+        position pays ``abs(position) * price * rate`` at the bar's close. A
+        positive rate is a cost to either side, a negative one is received.
+    debt_rate
+        Interest per bar on what a cash column's long borrowed under
+        ``leverage``, charged at the bar's close. A number, one value per bar
+        (1-D) or ``(n_bars, n_cols)``.
+    borrow_rate
+        The fee per bar for the shares a cash column's short borrowed, shaped
+        like ``close``: ``abs(position) * price * rate`` at the bar's close.
+    mark_price
+        The ``price`` of the charges above, shaped like ``close``. ``None``
+        uses the close.
+
+        Every rate is per bar, for the time until the next bar;
+        ``phasor.rates.per_bar`` turns an annual rate into one from the bars'
+        timestamps. A charge is owed whatever the balance, so unlike a
+        ``cash_earnings`` charge it is not capped: any of these runs the
+        accounts as ones that may borrow, cash can go below zero, after which
+        only closing is allowed, and ``pf.orders()`` gains ``debt``,
+        ``locked_cash`` and ``margin``. Margin columns pay funding and
+        financing but no interest or borrow fee. ``pf.cash_flows("funding")``,
+        ``"financing"``, ``"interest"`` and ``"borrowfee"`` give what each
+        cost per bar and column; all are part of the return.
 
     Returns
     -------
@@ -717,6 +798,12 @@ def from_orders(
         cash_deposits=_param(cash_deposits, "cash_deposits"),
         cash_dividends=_market(cash_dividends, "cash_dividends"),
         cash_earnings=_param(cash_earnings, "cash_earnings"),
+        funding_rate=_market(funding_rate, "funding_rate"),
+        long_financing_rate=_market(long_financing_rate, "long_financing_rate"),
+        short_financing_rate=_market(short_financing_rate, "short_financing_rate"),
+        debt_rate=_param(debt_rate, "debt_rate"),
+        borrow_rate=_market(borrow_rate, "borrow_rate"),
+        mark_price=_market(mark_price, "mark_price"),
         ffill_val_price=ffill_val_price,
         update_value=update_value,
         ann_factor=ann_factor,

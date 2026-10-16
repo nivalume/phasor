@@ -22,7 +22,7 @@ use phasor_core::error::Result;
 use phasor_core::flex::FlexArray;
 use phasor_core::math::{add, is_close};
 use phasor_core::matrix::Matrix;
-use phasor_model::{Direction, OrderSide};
+use phasor_model::{CashFlowKind, Direction, OrderSide};
 use phasor_records::{ColMap, OrderRecords};
 
 /// The signed size a fill adds to a position.
@@ -166,6 +166,30 @@ pub fn deposits(orders: &OrderRecords, n_rows: usize, n_cols: usize) -> Option<M
         let matrix = out.get_or_insert_with(|| Matrix::zeros(n_rows, n_cols));
         let cell = &mut matrix.column_mut(cash.col[i] as usize)[cash.idx[i] as usize];
         *cell = add(*cell, cash.amount[i]);
+    }
+    out
+}
+
+/// The cash flows of one kind per bar and column: what was funded, financed,
+/// charged in interest, paid out in dividends.
+///
+/// Zero where nothing of that kind moved. Per column, as the records book
+/// them, so a shared account's funding stays attributed to the symbol that
+/// paid it; summing a group's columns gives the account's.
+#[must_use]
+pub fn cash_flow_by_kind(
+    orders: &OrderRecords,
+    kind: CashFlowKind,
+    n_rows: usize,
+    n_cols: usize,
+) -> Matrix {
+    let cash = &orders.cash;
+    let mut out = Matrix::zeros(n_rows, n_cols);
+    for i in 0..cash.len() {
+        if cash.kind[i] == kind as i8 {
+            let cell = &mut out.column_mut(cash.col[i] as usize)[cash.idx[i] as usize];
+            *cell = add(*cell, cash.amount[i]);
+        }
     }
     out
 }

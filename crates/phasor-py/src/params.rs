@@ -124,3 +124,50 @@ impl<'py> Shared<'py> {
         }
     }
 }
+
+/// The borrowed inputs of the holding charges, which both entry points share.
+///
+/// Every rate but `debt_rate` belongs to an instrument — a perpetual's funding
+/// history, a broker's swap rates, a stock's borrow fee — and so is market
+/// data, source-shaped through `column_map` like the prices; `mark_price` is
+/// a price. `debt_rate` is the account's cost of borrowing cash, a parameter.
+#[derive(Debug)]
+pub struct Holding<'py> {
+    /// A perpetual's funding rate per bar.
+    pub funding_rate: Option<Borrowed<'py>>,
+    /// Overnight financing per bar on a long.
+    pub long_financing_rate: Option<Borrowed<'py>>,
+    /// Overnight financing per bar on a short.
+    pub short_financing_rate: Option<Borrowed<'py>>,
+    /// Interest per bar on what a long borrowed.
+    pub debt_rate: Option<Borrowed<'py>>,
+    /// The fee per bar for the shares a short borrowed.
+    pub borrow_rate: Option<Borrowed<'py>>,
+    /// The price the charges are computed at.
+    pub mark_price: Option<Borrowed<'py>>,
+}
+
+impl<'py> Holding<'py> {
+    /// Reads them all, keeping each borrow alive in the returned value.
+    ///
+    /// # Errors
+    ///
+    /// A Python `TypeError` naming the first input that cannot be read.
+    pub fn borrow(
+        funding_rate: Option<&Bound<'py, PyAny>>,
+        long_financing_rate: Option<&Bound<'py, PyAny>>,
+        short_financing_rate: Option<&Bound<'py, PyAny>>,
+        debt_rate: Option<&Bound<'py, PyAny>>,
+        borrow_rate: Option<&Bound<'py, PyAny>>,
+        mark_price: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Self> {
+        Ok(Self {
+            funding_rate: borrow_opt_f64(funding_rate, "funding_rate")?,
+            long_financing_rate: borrow_opt_f64(long_financing_rate, "long_financing_rate")?,
+            short_financing_rate: borrow_opt_f64(short_financing_rate, "short_financing_rate")?,
+            debt_rate: borrow_opt_f64(debt_rate, "debt_rate")?,
+            borrow_rate: borrow_opt_f64(borrow_rate, "borrow_rate")?,
+            mark_price: borrow_opt_f64(mark_price, "mark_price")?,
+        })
+    }
+}

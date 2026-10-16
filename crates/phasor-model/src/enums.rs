@@ -371,6 +371,19 @@ pub enum CashFlowKind {
     /// A per-share dividend times the position held at the bar's open. A short
     /// position pays it.
     Dividend = 2,
+    /// A perpetual's funding payment at the bar's close: the position's
+    /// notional at the mark price times the funding rate, paid by longs and
+    /// received by shorts when the rate is positive.
+    Funding = 3,
+    /// Overnight financing at the bar's close, as a broker charges on a
+    /// forex, CFD or futures position: the notional at the mark price times
+    /// the rate for the position's side.
+    Financing = 4,
+    /// Interest at the bar's close on the cash a leveraged long borrowed.
+    Interest = 5,
+    /// The fee for borrowing the shares a cash column's short sold, at the
+    /// bar's close: the short's value at the mark price times the rate.
+    BorrowFee = 6,
 }
 
 #[cfg(test)]
@@ -389,6 +402,10 @@ mod tests {
         assert_eq!(CashFlowKind::Deposit as i8, 0);
         assert_eq!(CashFlowKind::Earning as i8, 1);
         assert_eq!(CashFlowKind::Dividend as i8, 2);
+        assert_eq!(CashFlowKind::Funding as i8, 3);
+        assert_eq!(CashFlowKind::Financing as i8, 4);
+        assert_eq!(CashFlowKind::Interest as i8, 5);
+        assert_eq!(CashFlowKind::BorrowFee as i8, 6);
         assert_eq!(AccountType::Margin as i8, 1);
         assert_eq!(MarginBasis::Unit as i8, 1);
     }

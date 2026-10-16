@@ -203,6 +203,20 @@ pub struct FromSignals<'a> {
     /// Cash credited (positive) or charged (negative) at each bar's close,
     /// per column. Booked on quiet bars too.
     pub cash_earnings: FlexArray<'a, f64>,
+    /// A perpetual's funding rate per bar, charged at the bar's close on
+    /// quiet bars too. See [`crate::FromOrders::funding_rate`].
+    pub funding_rate: FlexArray<'a, f64>,
+    /// Overnight financing per bar on a long. See
+    /// [`crate::FromOrders::long_financing_rate`].
+    pub long_financing_rate: FlexArray<'a, f64>,
+    /// Overnight financing per bar on a short.
+    pub short_financing_rate: FlexArray<'a, f64>,
+    /// Interest per bar on what a cash column's long borrowed.
+    pub debt_rate: FlexArray<'a, f64>,
+    /// The fee per bar for the shares a cash column's short borrowed.
+    pub borrow_rate: FlexArray<'a, f64>,
+    /// The price the holding charges are computed at. `NaN` is the close.
+    pub mark_price: FlexArray<'a, f64>,
     /// Carry the last non-`NaN` valuation price forward.
     pub ffill_val_price: bool,
     /// Mark to market after each fill rather than only at the bar's start.
@@ -268,6 +282,12 @@ impl Default for FromSignals<'_> {
             cash_deposits: FlexArray::Scalar(0.0),
             cash_dividends: FlexArray::Scalar(0.0),
             cash_earnings: FlexArray::Scalar(0.0),
+            funding_rate: FlexArray::Scalar(0.0),
+            long_financing_rate: FlexArray::Scalar(0.0),
+            short_financing_rate: FlexArray::Scalar(0.0),
+            debt_rate: FlexArray::Scalar(0.0),
+            borrow_rate: FlexArray::Scalar(0.0),
+            mark_price: FlexArray::Scalar(f64::NAN),
             ffill_val_price: true,
             update_value: false,
             groups: None,
@@ -471,6 +491,26 @@ impl FromSignals<'_> {
             || self.lock_cash.varies_by_row()
             || self.allow_partial.varies_by_row()
             || self.raise_reject.varies_by_row()
+    }
+
+    /// The inputs of the holding charges.
+    fn rates(&self) -> crate::holding::Rates<'_, '_> {
+        crate::holding::Rates {
+            funding: &self.funding_rate,
+            long_financing: &self.long_financing_rate,
+            short_financing: &self.short_financing_rate,
+            debt: &self.debt_rate,
+            borrow: &self.borrow_rate,
+            mark_price: &self.mark_price,
+            close: &self.close,
+        }
+    }
+
+    /// Whether the run's accounts may go below zero cash, as in
+    /// `from_orders`: leverage, a margin column or a holding charge.
+    fn levered(&self) -> bool {
+        crate::any_levered(&self.leverage, &self.account_type, self.n_rows, self.n_cols)
+            || !self.rates().all_off()
     }
 
     /// Resolves the default grouping and validates its width.
@@ -789,8 +829,9 @@ fn simulate_group<S: RecordSink + LogSink>(
 
 /// The loop of [`simulate_group`], in four copies: with `FLOWS` false it has
 /// no code for cash flows at all (see [`crate::cash::all_off`]), and with
-/// `LEV` false none for leverage — valuing a long net of its debt and
-/// recording each fill's balances, as in `from_orders`.
+/// `LEV` false none for leverage, margin columns or holding charges — valuing
+/// a long net of its debt and recording each fill's balances, as in
+/// `from_orders`.
 #[allow(
     clippy::too_many_lines,
     reason = "keep fill, stop state and log updates together"
@@ -864,6 +905,13 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
         && (!crate::cash::is_off(&args.cash_deposits)
             || !crate::cash::is_off(&args.cash_dividends));
     let earnings = FLOWS && !crate::cash::is_off(&args.cash_earnings);
+    let charges = LEV && !args.rates().all_off();
+    let held = |states: &[ColumnState], k: usize| crate::holding::Held {
+        position: states[k].position,
+        debt: states[k].debt,
+        margin: margin[k],
+        val_price: states[k].last_val_price,
+    };
     for i in 0..args.n_rows {
         if at_open {
             crate::cash::at_open(
@@ -901,12 +949,24 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
             }
         }
         if !any {
-            // A quiet bar still earns: interest does not wait for a signal.
+            // A quiet bar still earns and is charged: interest does not wait
+            // for a signal.
             if earnings {
                 crate::cash::earn(
                     &args.cash_earnings,
                     i,
                     cols.clone(),
+                    &mut cash,
+                    &mut free_cash,
+                    sink,
+                )?;
+            }
+            if charges {
+                crate::holding::charge(
+                    &args.rates(),
+                    i,
+                    cols.clone(),
+                    |k| held(&states, k),
                     &mut cash,
                     &mut free_cash,
                     sink,
@@ -1123,6 +1183,17 @@ fn group_loop<S: RecordSink + LogSink, const FLOWS: bool, const LEV: bool>(
                 sink,
             )?;
         }
+        if charges {
+            crate::holding::charge(
+                &args.rates(),
+                i,
+                cols.clone(),
+                |k| held(&states, k),
+                &mut cash,
+                &mut free_cash,
+                sink,
+            )?;
+        }
     }
     Ok(())
 }
@@ -1131,7 +1202,7 @@ fn simulate_into<S: SinkBuffer>(args: &FromSignals<'_>) -> Result<S> {
     let groups = args.resolved_groups()?;
     let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     let mut fills = 0_i64;
-    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
+    let levered = args.levered();
     for group in 0..groups.len() {
         simulate_group(args, &groups, group, levered, &mut sink, &mut fills)?;
     }
@@ -1208,7 +1279,7 @@ fn simulate_into_parallel<S: SinkBuffer>(args: &FromSignals<'_>, n_threads: usiz
     }
 
     let ranges = groups.chunks(n_threads);
-    let levered = crate::any_levered(&args.leverage, &args.account_type, args.n_rows, args.n_cols);
+    let levered = args.levered();
     let results: Vec<Result<S>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .iter()

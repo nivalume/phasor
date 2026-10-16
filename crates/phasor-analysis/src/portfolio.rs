@@ -672,6 +672,16 @@ impl<'a> Portfolio<'a> {
         &self.orders.cash
     }
 
+    /// The cash flows of one kind per bar and column: the funding a
+    /// perpetual paid or received, the interest a leveraged long paid.
+    ///
+    /// Per column, as booked, even in a shared account; not cached, since it
+    /// is one pass over the cash records.
+    #[must_use]
+    pub fn cash_flow_by_kind(&self, kind: phasor_model::CashFlowKind) -> Matrix {
+        series::cash_flow_by_kind(&self.orders, kind, self.n_rows, self.n_cols)
+    }
+
     /// How much of the account is in the position, per bar.
     ///
     /// Through free cash, not total value — the two agree on a long-only run

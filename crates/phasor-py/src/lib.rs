@@ -73,7 +73,7 @@ use array::{
     flex_or_bool, flex_or_f64, to_py_err,
 };
 use expr::PyFactorSet;
-use params::Shared;
+use params::{Holding, Shared};
 
 /// A completed run, and everything derivable from it.
 ///
@@ -546,10 +546,10 @@ impl PyPortfolio {
     /// Struct-of-arrays, as the record layer stores them, so a caller can build
     /// a DataFrame from it without a transpose.
     ///
-    /// A run with any column above leverage 1, or any margin column, adds
-    /// `debt`, `locked_cash` and `margin`: what each fill left the column
-    /// owing and tying up of its own cash, and whether the column trades on
-    /// margin. A margin column's `debt` is its position's cost basis and its
+    /// A run with any column above leverage 1, any margin column or any
+    /// holding charge adds `debt`, `locked_cash` and `margin`: what each fill
+    /// left the column owing and tying up of its own cash, and whether the
+    /// column trades on margin. A margin column's `debt` is its position's cost basis and its
     /// `locked_cash` the initial margin posted. Other runs leave them out
     /// rather than return them empty, so every array in the dict has one entry
     /// per fill.
@@ -575,10 +575,12 @@ impl PyPortfolio {
 
     /// Cash that moved without a fill, as a dict of NumPy arrays.
     ///
-    /// `amount` is what was applied, after any cap — a withdrawal or a charge
-    /// larger than the free cash is applied in part — so it can differ from
-    /// what was passed in. `kind` is 0 for a deposit or withdrawal, 1 for an
-    /// earning and 2 for a dividend. Rows are in column order, then bar order.
+    /// `amount` is what was applied, after any cap — a withdrawal or an
+    /// earning's charge larger than the free cash is applied in part — so it
+    /// can differ from what was passed in. `kind` is 0 for a deposit or
+    /// withdrawal, 1 for an earning, 2 for a dividend, 3 for funding, 4 for
+    /// financing, 5 for interest on a long's debt and 6 for a short's borrow
+    /// fee. Rows are in column order, then bar order.
     fn cash_records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let cash = &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash;
         let out = PyDict::new(py);
@@ -588,6 +590,21 @@ impl PyPortfolio {
         let kind: Vec<i64> = cash.kind.iter().map(|k| i64::from(*k)).collect();
         out.set_item("kind", kind.into_pyarray(py))?;
         Ok(out)
+    }
+
+    /// The cash flows of one kind, `(n_rows, n_cols)`: per bar and per
+    /// column, zero where nothing of that kind moved.
+    ///
+    /// `kind` is `deposit`, `earning`, `dividend`, `funding`, `financing`,
+    /// `interest` or `borrowfee`. Per column even in a shared account, so a
+    /// pair's funding stays with the perpetual that paid or received it.
+    ///
+    /// # Errors
+    ///
+    /// A Python `ValueError` for an unknown kind.
+    fn cash_flows<'py>(&self, py: Python<'py>, kind: &str) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let kind = parse::cash_flow_kind(kind).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        matrix_out(py, self.core()?.cash_flow_by_kind(kind))
     }
 
     /// Number of log rows, which is zero unless the run asked for them.
@@ -1031,6 +1048,12 @@ fn deposits_view<'a>(
     cash_deposits = None,
     cash_dividends = None,
     cash_earnings = None,
+    funding_rate = None,
+    long_financing_rate = None,
+    short_financing_rate = None,
+    debt_rate = None,
+    borrow_rate = None,
+    mark_price = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1090,6 +1113,12 @@ fn from_signals(
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
     cash_earnings: Option<&Bound<'_, PyAny>>,
+    funding_rate: Option<&Bound<'_, PyAny>>,
+    long_financing_rate: Option<&Bound<'_, PyAny>>,
+    short_financing_rate: Option<&Bound<'_, PyAny>>,
+    debt_rate: Option<&Bound<'_, PyAny>>,
+    borrow_rate: Option<&Bound<'_, PyAny>>,
+    mark_price: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1136,6 +1165,14 @@ fn from_signals(
     let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
     let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
     let dividends_b = borrow_opt_f64(cash_dividends, "cash_dividends")?;
+    let h = Holding::borrow(
+        funding_rate,
+        long_financing_rate,
+        short_financing_rate,
+        debt_rate,
+        borrow_rate,
+        mark_price,
+    )?;
     let sl_stop_b = borrow_opt_f64(sl_stop, "sl_stop")?;
     let tp_stop_b = borrow_opt_f64(tp_stop, "tp_stop")?;
     let sl_trail_b = array::borrow_opt_bool(sl_trail, "sl_trail")?;
@@ -1222,12 +1259,31 @@ fn from_signals(
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
     // Per share, so it is market data: source-shaped, through `column_map`.
     let dividends = market_optional(
+        "cash_dividends",
         &dividends_b,
         n_rows,
         source_cols,
         column_map.as_deref(),
         d.cash_dividends,
     )?;
+    let map = column_map.as_deref();
+    let market =
+        |name, value, default| market_optional(name, value, n_rows, source_cols, map, default);
+    let funding = market("funding_rate", &h.funding_rate, d.funding_rate)?;
+    let long_financing = market(
+        "long_financing_rate",
+        &h.long_financing_rate,
+        d.long_financing_rate,
+    )?;
+    let short_financing = market(
+        "short_financing_rate",
+        &h.short_financing_rate,
+        d.short_financing_rate,
+    )?;
+    let borrow = market("borrow_rate", &h.borrow_rate, d.borrow_rate)?;
+    let mark = market("mark_price", &h.mark_price, d.mark_price)?;
+    // The account's cost of cash, so a parameter: a 1-D array is per bar.
+    let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
     let args = FromSignals {
         groups: Some(groups.clone()),
@@ -1238,9 +1294,30 @@ fn from_signals(
         n_rows,
         n_cols,
         close: close_view,
-        open: market_optional(&open_b, n_rows, source_cols, column_map.as_deref(), d.open)?,
-        high: market_optional(&high_b, n_rows, source_cols, column_map.as_deref(), d.high)?,
-        low: market_optional(&low_b, n_rows, source_cols, column_map.as_deref(), d.low)?,
+        open: market_optional(
+            "open",
+            &open_b,
+            n_rows,
+            source_cols,
+            column_map.as_deref(),
+            d.open,
+        )?,
+        high: market_optional(
+            "high",
+            &high_b,
+            n_rows,
+            source_cols,
+            column_map.as_deref(),
+            d.high,
+        )?,
+        low: market_optional(
+            "low",
+            &low_b,
+            n_rows,
+            source_cols,
+            column_map.as_deref(),
+            d.low,
+        )?,
         entries: flex_bool(&entries_b, n_rows, n_cols)?,
         exits: flex_bool(&exits_b, n_rows, n_cols)?,
         init_cash: FlexArray::per_column(&account_cash, n_cols).map_err(to_py_err)?,
@@ -1282,6 +1359,12 @@ fn from_signals(
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,
+        funding_rate: funding,
+        long_financing_rate: long_financing,
+        short_financing_rate: short_financing,
+        debt_rate: debt,
+        borrow_rate: borrow,
+        mark_price: mark,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -1385,6 +1468,12 @@ fn from_signals(
     cash_deposits = None,
     cash_dividends = None,
     cash_earnings = None,
+    funding_rate = None,
+    long_financing_rate = None,
+    short_financing_rate = None,
+    debt_rate = None,
+    borrow_rate = None,
+    mark_price = None,
     ffill_val_price = true,
     update_value = false,
     ann_factor = 365.0,
@@ -1431,6 +1520,12 @@ fn from_orders(
     cash_deposits: Option<&Bound<'_, PyAny>>,
     cash_dividends: Option<&Bound<'_, PyAny>>,
     cash_earnings: Option<&Bound<'_, PyAny>>,
+    funding_rate: Option<&Bound<'_, PyAny>>,
+    long_financing_rate: Option<&Bound<'_, PyAny>>,
+    short_financing_rate: Option<&Bound<'_, PyAny>>,
+    debt_rate: Option<&Bound<'_, PyAny>>,
+    borrow_rate: Option<&Bound<'_, PyAny>>,
+    mark_price: Option<&Bound<'_, PyAny>>,
     ffill_val_price: bool,
     update_value: bool,
     ann_factor: f64,
@@ -1458,6 +1553,14 @@ fn from_orders(
     let deposits_b = borrow_opt_f64(cash_deposits, "cash_deposits")?;
     let earnings_b = borrow_opt_f64(cash_earnings, "cash_earnings")?;
     let dividends_b = borrow_opt_f64(cash_dividends, "cash_dividends")?;
+    let h = Holding::borrow(
+        funding_rate,
+        long_financing_rate,
+        short_financing_rate,
+        debt_rate,
+        borrow_rate,
+        mark_price,
+    )?;
     let p = Shared::borrow(
         size,
         price,
@@ -1505,12 +1608,31 @@ fn from_orders(
     let earnings = flex_or_f64(&earnings_b, n_rows, n_cols, OneDim::PerRow, d.cash_earnings)?;
     // Per share, so it is market data: source-shaped, through `column_map`.
     let dividends = market_optional(
+        "cash_dividends",
         &dividends_b,
         n_rows,
         source_cols,
         column_map.as_deref(),
         d.cash_dividends,
     )?;
+    let map = column_map.as_deref();
+    let market =
+        |name, value, default| market_optional(name, value, n_rows, source_cols, map, default);
+    let funding = market("funding_rate", &h.funding_rate, d.funding_rate)?;
+    let long_financing = market(
+        "long_financing_rate",
+        &h.long_financing_rate,
+        d.long_financing_rate,
+    )?;
+    let short_financing = market(
+        "short_financing_rate",
+        &h.short_financing_rate,
+        d.short_financing_rate,
+    )?;
+    let borrow = market("borrow_rate", &h.borrow_rate, d.borrow_rate)?;
+    let mark = market("mark_price", &h.mark_price, d.mark_price)?;
+    // The account's cost of cash, so a parameter: a 1-D array is per bar.
+    let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
     let args = FromOrders {
         n_rows,
@@ -1550,6 +1672,12 @@ fn from_orders(
         cash_deposits: deposits,
         cash_dividends: dividends,
         cash_earnings: earnings,
+        funding_rate: funding,
+        long_financing_rate: long_financing,
+        short_financing_rate: short_financing,
+        debt_rate: debt,
+        borrow_rate: borrow,
+        mark_price: mark,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -1616,7 +1744,11 @@ fn market_array<'a>(
     .map_err(to_py_err)
 }
 
+/// Market data beside the close — the rest of the bar, dividends, rates an
+/// instrument carries, a mark price — as the engine reads it: source-shaped,
+/// through `column_map` when there is one.
 fn market_optional<'a>(
+    name: &str,
     value: &'a Option<Borrowed<'a>>,
     rows: usize,
     cols: usize,
@@ -1627,14 +1759,14 @@ fn market_optional<'a>(
         Some(Borrowed::Slice(a)) => {
             let (data, r, c) = columns_of(a)?;
             if (r, c) != (rows, cols) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "OHLC arrays must have the source close shape",
-                ));
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must have the source close shape ({rows}, {cols}); got ({r}, {c})"
+                )));
             }
             market_array(data, rows, cols, map)
         }
         Some(Borrowed::Row(_)) if map.is_some() => Err(pyo3::exceptions::PyValueError::new_err(
-            "mapped OHLC must be a source-shaped matrix or scalar",
+            format!("a mapped {name} must be a source-shaped matrix or a scalar"),
         )),
         _ => flex_or_f64(value, rows, cols, OneDim::PerColumn, default),
     }

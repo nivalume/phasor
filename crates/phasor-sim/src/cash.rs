@@ -73,7 +73,7 @@ fn apply(amount: f64, cash: &mut f64, free_cash: &mut f64) -> f64 {
 }
 
 /// Reads one amount and rejects the values no balance can absorb.
-fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usize) -> Result<f64> {
+pub(crate) fn read(array: &FlexArray<'_, f64>, name: &str, row: usize, col: usize) -> Result<f64> {
     let amount = array.get(row, col);
     if amount.is_infinite() {
         return Err(Error::Invariant(format!(

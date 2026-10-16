@@ -351,6 +351,12 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         cash_limit: FlexArray::Scalar(f64::INFINITY),
         reject_prob: FlexArray::Scalar(0.0),
         seed: 0,
+        funding_rate: FlexArray::Scalar(0.0),
+        long_financing_rate: FlexArray::Scalar(0.0),
+        short_financing_rate: FlexArray::Scalar(0.0),
+        debt_rate: FlexArray::Scalar(0.0),
+        borrow_rate: FlexArray::Scalar(0.0),
+        mark_price: FlexArray::Scalar(f64::NAN),
         ffill_val_price: boolean(g("ffill_val_price")),
         update_value: boolean(g("update_value")),
     };

@@ -423,6 +423,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::float_cmp,
+        reason = "the balances are small integers, exact in binary"
+    )]
     fn balances_move_with_their_fills() {
         let mut r = OrderRecords::new();
         r.push_order(5, 1, 1.0, 1.0, 0.0, OrderSide::Buy);

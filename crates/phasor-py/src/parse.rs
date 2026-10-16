@@ -10,8 +10,8 @@
 //! tested without a Python interpreter; the caller wraps the message.
 
 use phasor_model::{
-    AccountType, AccumulationMode, Direction, LeverageMode, MarginBasis, SizeType, StopEntryPrice,
-    StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
+    AccountType, AccumulationMode, CashFlowKind, Direction, LeverageMode, MarginBasis, SizeType,
+    StopEntryPrice, StopExitMode, StopExitPrice, StopUpdateMode, TradesType,
 };
 
 /// Every accepted spelling of a size type, for the error message.
@@ -82,6 +82,27 @@ pub fn account_type(name: &str) -> Result<AccountType, String> {
         "margin" => Ok(AccountType::Margin),
         other => Err(format!(
             "account_type must be 'cash' or 'margin'; got {other:?}"
+        )),
+    }
+}
+
+/// What a cash record was: the name `Portfolio.cash_flows` takes.
+///
+/// # Errors
+///
+/// A message naming the accepted values.
+pub fn cash_flow_kind(name: &str) -> Result<CashFlowKind, String> {
+    match name {
+        "deposit" => Ok(CashFlowKind::Deposit),
+        "earning" => Ok(CashFlowKind::Earning),
+        "dividend" => Ok(CashFlowKind::Dividend),
+        "funding" => Ok(CashFlowKind::Funding),
+        "financing" => Ok(CashFlowKind::Financing),
+        "interest" => Ok(CashFlowKind::Interest),
+        "borrowfee" => Ok(CashFlowKind::BorrowFee),
+        other => Err(format!(
+            "kind must be deposit, earning, dividend, funding, financing, interest or \
+             borrowfee; got {other:?}"
         )),
     }
 }
@@ -226,6 +247,24 @@ mod tests {
         assert_eq!(direction("shortonly").unwrap(), Direction::ShortOnly);
         assert_eq!(direction("short").unwrap(), Direction::ShortOnly);
         assert_eq!(direction("both").unwrap(), Direction::Both);
+    }
+
+    #[test]
+    fn every_cash_flow_kind_maps_to_its_own_variant() {
+        assert_eq!(cash_flow_kind("deposit").unwrap(), CashFlowKind::Deposit);
+        assert_eq!(cash_flow_kind("earning").unwrap(), CashFlowKind::Earning);
+        assert_eq!(cash_flow_kind("dividend").unwrap(), CashFlowKind::Dividend);
+        assert_eq!(cash_flow_kind("funding").unwrap(), CashFlowKind::Funding);
+        assert_eq!(
+            cash_flow_kind("financing").unwrap(),
+            CashFlowKind::Financing
+        );
+        assert_eq!(cash_flow_kind("interest").unwrap(), CashFlowKind::Interest);
+        assert_eq!(
+            cash_flow_kind("borrowfee").unwrap(),
+            CashFlowKind::BorrowFee
+        );
+        assert!(cash_flow_kind("Funding").is_err());
     }
 
     #[test]

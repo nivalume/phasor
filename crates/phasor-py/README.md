@@ -145,7 +145,7 @@ free cash for its margin and fees, and is refused (`NoCashLong` /
 - `pf.orders()` gains `debt` (the cost basis), `locked_cash` (the margin) and
   `margin` per fill, and the logs gain `req_account_type`,
   `req_initial_margin` and `req_margin_basis`.
-- There is no maintenance margin, liquidation or funding yet.
+- There is no maintenance margin or liquidation yet.
 
 ```python
 # Spot long, perpetual short on 10% margin, one account: at 120 one gains
@@ -155,6 +155,42 @@ size = np.array([[5.0, -5.0], [np.nan, np.nan]])
 pf = phasor.from_orders(close, size=size, init_cash=1_000.0, cash_sharing=True,
                         account_type=["cash", "margin"],
                         initial_margin=np.array([np.nan, 0.1]))
+```
+
+## Holding charges
+
+What holding a position costs or earns, charged at each bar's close on the
+position the bar's orders left, quiet bars included:
+
+| Argument | Charged on | Amount | `pf.cash_flows(...)` |
+|---|---|---|---|
+| `funding_rate` | any position | `-position * price * rate`: longs pay a positive rate, shorts receive it | `"funding"` |
+| `long_financing_rate`, `short_financing_rate` | any position | `-abs(position) * price * rate`, the rate of its side | `"financing"` |
+| `debt_rate` | a cash column's leveraged long | `-debt * rate` | `"interest"` |
+| `borrow_rate` | a cash column's short | `-abs(position) * price * rate` | `"borrowfee"` |
+
+`price` is `mark_price`, or the close when it is not given. Every rate but
+`debt_rate` is shaped like `close`, through `column_map`, as an instrument's own
+data; `debt_rate` is a number, one value per bar or a matrix. Rates are per bar,
+for the time until the next bar: `phasor.rates.per_bar(annual, index)` converts
+an annual rate from the bars' timestamps, so Friday's daily bar charges three
+days. A funding rate needs no conversion: put it on the bar whose close is its
+funding time, `NaN` elsewhere.
+
+A charge is owed whatever the balance, so unlike a `cash_earnings` charge it is
+not capped: these runs keep balances like a leveraged one, cash can go below
+zero, and then only closing is allowed. Margin columns pay funding and
+financing, not interest or borrow fees. `pf.cash_records()` lists every charge;
+`pf.cash_flows(kind)` gives one kind per bar and column, and all of them are
+part of the return.
+
+```python
+# A spot long and a perpetual short in one account, the short collecting
+# the funding the exchange publishes every eight hours.
+pf = phasor.from_orders(close, size=size, init_cash=10_000.0, cash_sharing=True,
+                        account_type=["cash", "margin"], leverage=np.array([1.0, 5.0]),
+                        funding_rate=funding)     # (n_bars, 2), NaN off the hour
+pf.cash_flows("funding")[:, 1].sum()              # what the hedge earned
 ```
 
 ## Factor expressions
@@ -444,6 +480,9 @@ robust.deflated_sharpe(r[:, best], per_period_sharpes)
 simulation. `signals` and `synthetic` draw from `(seed, row, col)`, so a seed
 reproduces and a column does not change when others are added. Sharpe ratios
 in `robust` are per period, not annualized.
+
+`phasor.rates.per_bar` turns annual rates into the per-bar rates the holding
+charges take.
 
 Not yet: the rolling metrics and drawdown records in Python. Each is
 an addition on this scaffolding rather than a change to it.

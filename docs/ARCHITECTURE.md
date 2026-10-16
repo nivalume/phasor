@@ -534,7 +534,8 @@ of line where they would otherwise sit on the hot path.
 | short | reserves proceeds + value | reserves proceeds + `value / λ` (λ = 2 is Reg T's 150%); with `lock_cash` or a percentage the size limit is `(free_cash − fixed_fees) / (price × (1/λ + fees))` |
 | negative cash | invalid state | a long sold below its debt leaves the account owing; the account can sell, and its buys are rejected (`NoCashLeverage` if the order is leveraged, else `NoCashLong`) |
 
-Not yet: interest on debt, maintenance margin, liquidation and funding (plan C2–C4).
+Interest on what a long borrowed and a short's borrow fee are holding charges
+of the loop (§8.6). Not yet: maintenance margin and liquidation (plan C2).
 `CallSeq::Auto` sorts by `approx_order_value`, which does not account for
 leverage.
 
@@ -628,6 +629,7 @@ close), compute the bar-open value, resolve the call sequence, execute. With
 - Both loops build each column's `ValidatedOrder` once (a second, slippage-free one for stops resting at their level in `from_signals`) and rebuild per bar only when a parameter varies by row; a bar with no signal and no armed stop skips sizing.
 - Both loops are generic over `SinkBuffer` (§9.3).
 - Leverage: `any_levered` decides once per run whether any column's `leverage` exceeds 1. Each loop has a `const LEV: bool` copy, as `FLOWS` (§8.5), so a run without leverage has no code for it. With it, every order is marked `in_levered_account()` (accepts negative cash), the bar's value subtracts each long's debt, an `update_value` re-mark subtracts the debt a fill added, and each fill records its `debt` and `locked_cash` (§9.1). A column at leverage 1 in a leveraged run fills exactly as in a run without one.
+- Holding charges (§8.6) also put a run in the `LEV` copy: a charge is owed whatever the balance, so the account must accept cash below zero, and their code stays out of a run without them.
 - Margin columns (§7.8, `crates/phasor-sim/src/margin.rs`): `any_levered` also counts them, so they run in the `LEV` copy, which reads each group's account types once (`margin_columns`). Every bar, once the valuation price is resolved and before the group is valued, `settle` moves each margin position's profit since the last bar into the group's `cash` and `free_cash` and its cost basis to the price; `from_signals` does it on bars with no signal too, because a shared account's next order sizes from it. The group's value counts a margin position at `unsettled` (its profit against the basis) rather than `position × price`, and the `update_value` re-mark subtracts the basis a fill added, as it does a leveraged long's debt. A cash column in the same run keeps its §7.7 bookkeeping.
 
 ### 8.5 Cash flows outside fills
@@ -647,6 +649,28 @@ does no extra work per bar.
 - `NaN` means no flow; `±inf` is an error.
 - vectorbt 1.1.0 has no counterpart, so there is no fixture. `crates/phasor-analysis/tests/cash_flows.rs` checks hand-calculated accounts, checks that every logged order's cash and free cash equal the balances rebuilt from records (§10.2), ungrouped and shared, and checks thread invariance.
 
+### 8.6 Holding charges
+
+What holding a position costs or earns (`crates/phasor-sim/src/holding.rs`):
+four charges, booked per column at the bar's close after its orders and its
+`cash_earnings`, on the position the orders left, quiet `from_signals` bars
+included. Not in the reference, and not in PRO, which leaves funding to a
+callback.
+
+| Input | Charged on | Amount | Record kind |
+|---|---|---|---|
+| `funding_rate` | any position | `−position × price × rate`: longs pay a positive rate, shorts receive it | `Funding` |
+| `long_financing_rate`, `short_financing_rate` | any position | `−|position| × price × rate`, the rate of the position's side | `Financing` |
+| `debt_rate` | a cash column's long | `−debt × rate`, on what it borrowed (§7.7) | `Interest` |
+| `borrow_rate` | a cash column's short | `−|position| × price × rate` | `BorrowFee` |
+
+- `price` is `mark_price`, or the close where that is `NaN` (the default), or the column's last valuation price where both are; with none, the charge is skipped, as settlement is. The mark price is the charges' notional only: the loop still values and settles at `val_price`, and the analysis at the close.
+- A positive rate is a cost to the holder. A perpetual's funding is the case where the short's rate is minus the long's, so it is one input; financing has two because a broker's swap rates for the two sides differ and can both be costs. A margin column borrows neither cash nor shares, so it pays funding and financing but no interest or borrow fee.
+- **Every rate is per bar**, for the time until the next bar: the loop has no clock. `phasor.rates.per_bar(annual, index, days_per_year=365)` converts from the bars' timestamps, so Friday's daily bar charges three days and the last bar nothing. A funding rate is already per settlement: it goes on the bar whose close is the funding time, `NaN` elsewhere.
+- **A charge is not capped.** Unlike an earning it is owed whatever the balance, so any of these inputs runs the accounts in the `LEV` copy (§8.4): cash may go below zero, after which an account can close and not open, and the fills record their balances. A column at leverage 1 fills as it would without them; `crates/phasor-sim/tests/holding.rs` checks that bit for bit.
+- `NaN` or zero is no charge and leaves no record; an infinite rate is an error. The defaults are scalar zeros, detected once per run.
+- Each charge is a `CashRecords` row with the amount applied, so the analysis counts it in cash, free cash, value and returns with nothing new (§10.2). `crates/phasor-analysis/tests/holding.rs` checks that the rebuilt equity is, bar by bar, the value the loop sized against less the bar's fees plus the bar's charges, with leverage, margin columns and shared accounts.
+
 ---
 
 ## 9. Records: phasor-records
@@ -662,7 +686,7 @@ The contract between simulation and analysis, and between tiers. All struct-of-a
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | derived (§9.5) |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | derived (§9.6) |
 | `RangeRecords` | start / end / status | phasor-signals ranges |
-| `CashRecords` | `col, idx, amount, kind` | one cash flow that was not a fill (§8.5) |
+| `CashRecords` | `col, idx, amount, kind`; `kind` is `Deposit`, `Earning`, `Dividend` (§8.5), `Funding`, `Financing`, `Interest` or `BorrowFee` (§8.6) | one cash flow that was not a fill |
 
 `CashRecords` travel inside `OrderRecords` as its `cash` field, so sinks
 (`RecordSink::push_cash`), merges, sorting and the `Portfolio` constructors
@@ -727,7 +751,7 @@ groups), `from_orders` / `from_signals` (run the simulation).
 
 ![Balances are rebuilt from order records alone: asset_flow → assets per symbol, cash_flow → cash per group, value = cash + assets × close, then returns and metrics](img/en/rebuild.svg)
 
-- `cash_flow` and `free_cash_flow` add the `CashRecords` amounts to the fills' flows.
+- `cash_flow` and `free_cash_flow` add the `CashRecords` amounts to the fills' flows. Every kind but a deposit is part of the return, a holding charge included; `cash_flow_by_kind` (`Portfolio::cash_flow_by_kind`) gives one kind per bar and column.
 - A deposit is not a return: `returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`, the first bar measured from `init_cash + deposit[0]`. Without deposits the chain is unchanged, bit for bit.
 - With deposits, an account's total return compounds the per-bar returns instead of `end / init − 1`, and drawdowns are found on `init_cash × Π(1 + r)` instead of the value curve, so a withdrawal is not a drawdown.
 - Leverage: a fill's cash flow is its full price, so `cash()` is own cash less what longs borrowed and can go below zero, while `value()` stays equity. `free_cash` cannot be rebuilt from fills alone once a short's collateral depends on λ, so in a leveraged run `free_cash_flow` reads each fill's recorded `debt + locked_cash` as the short's reserve (a leveraged long reserves nothing). `gross_exposure` of a 2× long is therefore 2.
@@ -840,6 +864,11 @@ parameters, `leverage_mode` is `"lazy" | "eager"` (§7.7); in a leveraged run
 or one of them per column, `initial_margin` takes the usual shapes, and
 `margin_basis` is `"notional" | "unit"` (§7.8); a margin run's `orders()` also
 has `margin`, and `Portfolio.free_cash()` returns the rebuilt free cash.
+The holding charges (§8.6) take `funding_rate`, `long_financing_rate`,
+`short_financing_rate`, `borrow_rate` and `mark_price` as market data, shaped
+like `close` and read through `column_map`, and `debt_rate` as a parameter (1-D
+is per bar); `Portfolio.cash_flows(kind)` returns one kind as `(T, C)`, and
+`phasor.rates.per_bar` converts annual rates.
 
 ### 12.4 Other bindings
 
@@ -1127,6 +1156,7 @@ appears only in the optional `test` extra.
 | log row | one order considered, with before/after state (§9.1) |
 | rejection | an unfillable order, returned as a status, not an error (§3.5) |
 | margin column / settlement | a column that posts initial margin instead of paying in full / moving its profit into cash each bar (§7.8) |
+| holding charge | funding, financing, interest or a borrow fee charged at a bar's close on the position held (§8.6) |
 | factor | a named expression producing a time × symbol matrix (§5) |
 | node / slot | a deduplicated graph operation / its reusable scratch series (§5.3) |
 | `column_map` | logical column → source price column (§3.3) |
@@ -1142,10 +1172,10 @@ appears only in the optional `test` extra.
 | expressions | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | signals, sweeps, indicators | `crates/phasor/src/sweep.rs`, `crates/phasor-signals/src`, `crates/phasor-indicators/src`, `crates/phasor-py/python/phasor/strategy.py` | §6 |
 | execution kernel | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
-| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin}.rs` | §8 |
+| simulation | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding}.rs` | §8 |
 | records | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | analysis | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` | §12 |
+| Python bindings | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`, `crates/phasor-py/python/phasor/` (`rates.py`: per-bar rates) | §12 |
 | research protocol | `research/phasor_lab/` | §13 |
 | parity harness | `tests/parity/`, `tests/fixtures/`, `crates/*/tests/` | §14 |
 | benchmarks | `benchmarks/`, `crates/phasor-sim/examples/{bench,scaling}.rs`, `crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |

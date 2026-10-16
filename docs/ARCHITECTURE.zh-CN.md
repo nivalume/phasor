@@ -438,7 +438,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 | 做空 | 冻结卖出所得 + 市值 | 冻结卖出所得 + `市值 / λ`（λ = 2 就是 Reg T 的 150%）；`lock_cash` 或按百分比下单时，数量上限是 `(free_cash − fixed_fees) / (price × (1/λ + fees))` |
 | 现金为负 | 非法状态 | 多头卖出所得不够还债时账户欠款；账户还能卖出，买单被拒（订单带杠杆为 `NoCashLeverage`，否则 `NoCashLong`） |
 
-还没有做：借款利息、维持保证金、强平、资金费（计划 C2–C4）。`CallSeq::Auto` 按 `approx_order_value` 排序，它没有考虑杠杆。
+多头借款的利息和空头的借券费是循环收的持仓费（§8.6）。还没有做：维持保证金和强平（计划 C2）。`CallSeq::Auto` 按 `approx_order_value` 排序，它没有考虑杠杆。
 
 ### 7.8 保证金账户
 
@@ -498,6 +498,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - 两个循环都为每列只构建一次 `ValidatedOrder`（`from_signals` 另建一个无滑点的版本给挂在触发价上的止损用），只在参数逐行变化时每根 K 线重建；没有信号也没有布置止损的 K 线跳过数量计算。
 - 两个循环都对 `SinkBuffer` 泛型（§9.3）。
 - 杠杆：`any_levered` 每次运行只判断一次是否有列的 `leverage` 大于 1。两个循环各有一份 `const LEV: bool` 的实例，做法同 `FLOWS`（§8.5），不带杠杆的运行里没有这段代码。带杠杆时，每笔订单都标为 `in_levered_account()`（接受负现金），K 线净值减去每个多头的负债，`update_value` 重新估值时减去这笔成交新增的负债，每笔成交记下成交后的 `debt` 和 `locked_cash`（§9.1）。带杠杆的运行里，杠杆为 1 的列和不带杠杆时成交完全相同。
+- 持仓费（§8.6）也让一次运行走 `LEV` 那份实例：持仓费不管余额多少都要付，账户必须接受负现金；不用持仓费的运行里也就没有这段代码。
 - 保证金列（§7.8，`crates/phasor-sim/src/margin.rs`）：`any_levered` 也把它们算进去，所以它们走 `LEV` 那份实例，每个组只读一次各列的账户类型（`margin_columns`）。每根 K 线在估值价确定之后、计算组净值之前，`settle` 把每个保证金持仓上一根以来的盈亏挪进组的 `cash` 和 `free_cash`，把成本移到估值价；`from_signals` 在没有信号的 K 线上也结算，因为共享账户里下一笔订单按它定数量。组净值里保证金持仓按 `unsettled`（相对成本的盈亏）计，而不是 `position × price`；`update_value` 重新估值时减去这笔成交新增的成本，和带杠杆多头减去新增负债一样。同一次运行里的现金列仍按 §7.7 记账。
 
 ### 8.5 成交之外的现金流
@@ -515,6 +516,24 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 - `NaN` 表示没有现金流；`±inf` 报错。
 - vectorbt 1.1.0 没有对应功能，所以没有 fixture。`crates/phasor-analysis/tests/cash_flows.rs` 检查手算的账户；检查每一条订单日志里的现金和可用现金，等于从记录重建出来的余额（§10.2），覆盖独立账户和共享账户；并检查线程数不影响结果。
 
+### 8.6 持仓费
+
+持有仓位要付或收的钱（`crates/phasor-sim/src/holding.rs`）：四种费用，按列在 K 线收盘入账，在当根订单和 `cash_earnings` 之后，按订单之后的持仓计算；`from_signals` 没有信号的 K 线也入账。参考实现没有，PRO 也没有（PRO 让用户在回调里自己写资金费）。
+
+| 输入 | 对象 | 金额 | 记录类型 |
+|---|---|---|---|
+| `funding_rate` | 任何持仓 | `−position × price × rate`：费率为正时多头付、空头收 | `Funding` |
+| `long_financing_rate`、`short_financing_rate` | 任何持仓 | `−|position| × price × rate`，按持仓方向取费率 | `Financing` |
+| `debt_rate` | 现金列的多头 | `−debt × rate`，按借来的钱计（§7.7） | `Interest` |
+| `borrow_rate` | 现金列的空头 | `−|position| × price × rate` | `BorrowFee` |
+
+- `price` 取 `mark_price`；它是 `NaN`（默认）时取收盘价；两者都是 `NaN` 时取该列最近的估值价；都没有就不收，和结算一样。标记价格只用来算持仓费的名义价值：循环仍按 `val_price` 估值和结算，分析层仍按收盘价估值。
+- 费率为正表示持仓方付出。永续资金费是"空头费率 = −多头费率"的特例，所以只有一个输入；隔夜融资有两个，因为券商对多空两边的费率不同，两边都可能付钱。保证金列既不借钱也不借券，只付资金费和隔夜融资，不付利息和借券费。
+- **费率都是每根 K 线的**，覆盖到下一根 K 线为止的时间：循环里没有时钟。`phasor.rates.per_bar(annual, index, days_per_year=365)` 按 K 线的时间戳换算年化利率，所以日线周五那根算 3 天，最后一根算 0。资金费率本来就是每次结算的费率：放在收盘时刻等于结算时刻的那根 K 线上，其他 K 线为 `NaN`。
+- **持仓费不封顶。** 和 `cash_earnings` 的扣款不同，它不管余额多少都要付，所以只要用了其中任何一个输入，账户就走 `LEV` 那份实例（§8.4）：现金可以小于 0，此后只能平仓不能开仓，成交记录也带上余额。杠杆为 1 的列成交和不用持仓费时完全相同，`crates/phasor-sim/tests/holding.rs` 逐位检查了这一点。
+- `NaN` 或 0 表示不收，不留记录；无穷大的费率报错。默认值是标量 0，每次运行只判断一次。
+- 每笔持仓费都是一条 `CashRecords`，存实际入账的金额，所以分析层不用改就会把它算进现金、可用现金、净值和收益（§10.2）。`crates/phasor-analysis/tests/holding.rs` 逐根检查：重建出来的权益等于循环定下单量时用的净值，减去当根手续费，加上当根持仓费；覆盖杠杆、保证金列和共享账户。
+
 ---
 
 ## 9. 记录 phasor-records
@@ -530,7 +549,7 @@ pf = ma_cross.sweep(panel, params=[{"fast": 5, "slow": 20}, …], threads=4)
 | `TradeRecords` | `col, size, entry_*, exit_*, pnl, ret, direction, status, parent_id` | 推导得出（§9.5） |
 | `DrawdownRecords` | `col, peak/start/valley/end idx, peak/valley/end val, status` | 推导得出（§9.6） |
 | `RangeRecords` | start / end / status | phasor-signals 的区间 |
-| `CashRecords` | `col, idx, amount, kind` | 一笔不是成交的现金流（§8.5） |
+| `CashRecords` | `col, idx, amount, kind`；`kind` 是 `Deposit`、`Earning`、`Dividend`（§8.5），或 `Funding`、`Financing`、`Interest`、`BorrowFee`（§8.6） | 一笔不是成交的现金流 |
 
 `CashRecords` 作为 `OrderRecords` 的 `cash` 字段存放，所以 sink（`RecordSink::push_cash`）、合并、排序和 `Portfolio` 的构造函数不用新增接口就会带上它；`len()` 和 `ids()` 只数成交。
 
@@ -578,7 +597,7 @@ id 是隐式的（合并后的位置）。记录按列分组、行号递增；�
 
 ![余额只由订单记录重建：asset_flow → 按标的的 assets，cash_flow → 按组的 cash，value = cash + assets × close，再得到收益和指标](img/zh/rebuild.svg)
 
-- `cash_flow` 和 `free_cash_flow` 在成交的现金流上加上 `CashRecords` 的金额。
+- `cash_flow` 和 `free_cash_flow` 在成交的现金流上加上 `CashRecords` 的金额。除了入金，每种现金流都算收益，持仓费也是；`cash_flow_by_kind`（`Portfolio::cash_flow_by_kind`）按 K 线和列给出某一种。
 - 入金不算收益：`returns[t] = value[t] / (value[t−1] + deposit[t]) − 1`，第一根 K 线从 `init_cash + deposit[0]` 算起。没有入金时重建链不变，逐位一致。
 - 有入金时，账户总收益改为把每根 K 线的收益连乘，不再用 `end / init − 1`；回撤在 `init_cash × Π(1 + r)` 上计算，不在净值曲线上算，所以出金不算回撤。
 - 杠杆：成交的现金流按全价计，所以 `cash()` 是自有现金减去多头借款，可以小于 0，而 `value()` 仍是权益。空头的保证金随 λ 变化后，`free_cash` 无法只从成交重建，所以带杠杆的运行里 `free_cash_flow` 读取每笔成交记下的 `debt + locked_cash` 作为空头的占用（带杠杆的多头不占用）。因此 2 倍多头的 `gross_exposure` 是 2。
@@ -667,7 +686,7 @@ SIMD 适合因子和分析核心，先做好布局和自动向量化。
 
 ### 12.3 模拟入口
 
-`phasor.from_signals(close, entries, exits, *, …)` 和 `phasor.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。`cash_deposits` 和 `cash_earnings` 的一维数组表示每根 K 线一个值；共享账户的 `cash_deposits` 矩阵是 `(T, n_groups)`，不复制，直接映射到各列。`Portfolio.cash_records()` 返回实际入账的金额。`leverage` 和其他参数一样接受这几种形状，`leverage_mode` 取 `"lazy" | "eager"`（§7.7）；带杠杆的运行里 `orders()` 多出 `debt` 和 `locked_cash` 两列。`account_type` 取 `"cash" | "margin"` 或每列一个，`initial_margin` 接受同样几种形状，`margin_basis` 取 `"notional" | "unit"`（§7.8）；有保证金列的运行里 `orders()` 还有 `margin` 一列，`Portfolio.free_cash()` 返回重建的可用现金。
+`phasor.from_signals(close, entries, exits, *, …)` 和 `phasor.from_orders(close, *, size, …)` 对应 Rust 结构体：每个参数可以是标量、每列一维数组或 `(T, C)`；`cash_sharing` / `group_lens`；`call_seq` 取 `"default" | "auto"`；`column_map`（价格 `[T, S]`、信号 `[T, C]`，`Portfolio.price_nbytes` 报告保留的价格内存）；止损需要 `high` 和 `low`。`cash_deposits` 和 `cash_earnings` 的一维数组表示每根 K 线一个值；共享账户的 `cash_deposits` 矩阵是 `(T, n_groups)`，不复制，直接映射到各列。`Portfolio.cash_records()` 返回实际入账的金额。`leverage` 和其他参数一样接受这几种形状，`leverage_mode` 取 `"lazy" | "eager"`（§7.7）；带杠杆的运行里 `orders()` 多出 `debt` 和 `locked_cash` 两列。`account_type` 取 `"cash" | "margin"` 或每列一个，`initial_margin` 接受同样几种形状，`margin_basis` 取 `"notional" | "unit"`（§7.8）；有保证金列的运行里 `orders()` 还有 `margin` 一列，`Portfolio.free_cash()` 返回重建的可用现金。持仓费（§8.6）的 `funding_rate`、`long_financing_rate`、`short_financing_rate`、`borrow_rate` 和 `mark_price` 是市场数据，和 `close` 同形状，经过 `column_map`；`debt_rate` 是参数（一维表示每根 K 线一个值）。`Portfolio.cash_flows(kind)` 返回某一种的 `(T, C)` 矩阵，`phasor.rates.per_bar` 换算年化利率。
 
 ### 12.4 其他绑定
 
@@ -923,6 +942,7 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 | 日志行 | 一笔被考虑的订单，含执行前后状态（§9.1） |
 | 拒单 | 无法成交的订单，以状态返回而不是错误（§3.5） |
 | 保证金列 / 结算 | 只押初始保证金、不付全款的列 / 每根 K 线把它的盈亏挪进现金（§7.8） |
+| 持仓费 | K 线收盘按持仓收付的资金费、隔夜融资、借款利息或借券费（§8.6） |
 | 因子 | 产生"时间 × 标的"矩阵的具名表达式（§5） |
 | 节点 / 槽位 | 图中去重后的运算 / 可复用的暂存序列（§5.3） |
 | `column_map` | 逻辑列 → 源价格列（§3.3） |
@@ -938,10 +958,10 @@ phasor 采用 Apache-2.0。两个参考实现只作为规格和测试预言机�
 | 表达式 | `crates/phasor-expr/src/{parse,graph,eval,window,order,polars_backend,alpha158,alpha360}.rs` | §5 |
 | 信号、扫描、指标 | `crates/phasor/src/sweep.rs`、`crates/phasor-signals/src`、`crates/phasor-indicators/src`、`crates/phasor-py/python/phasor/strategy.py` | §6 |
 | 撮合内核 | `crates/phasor-exec/src/{types,kernel}.rs` | §7 |
-| 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin}.rs` | §8 |
+| 模拟 | `crates/phasor-sim/src/{from_orders,from_signals,signals,groups,cash,margin,holding}.rs` | §8 |
 | 记录 | `crates/phasor-records/src/{lib,cash,logs,trades,mapped,drawdowns}.rs` | §9 |
 | 分析 | `crates/phasor-analysis/src/{portfolio,series,metrics,benchmark,rolling,stats,trade_stats,aggregate}.rs` | §10 |
-| Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/` | §12 |
+| Python 绑定 | `crates/phasor-py/src/{lib,array,params,parse,expr,data,arrow}.rs`、`crates/phasor-py/python/phasor/`（`rates.py`：每根 K 线的费率） | §12 |
 | 研究协议 | `research/phasor_lab/` | §13 |
 | 一致性测试框架 | `tests/parity/`、`tests/fixtures/`、`crates/*/tests/` | §14 |
 | 基准测试 | `benchmarks/`、`crates/phasor-sim/examples/{bench,scaling}.rs`、`crates/phasor-expr/{examples/scale.rs,benches/backends.rs}` | §15 |
