@@ -4,7 +4,8 @@
 continuing the previous one's state (``resume=state, row_offset=``), so the
 records are bit for bit those of one run over all bars. After each chunk it
 can write a checkpoint (the state and the records so far); called again with
-the same checkpoint it skips the chunks already done::
+the same checkpoint it skips the chunks already done, which also extends a
+finished run when the history has grown (the bars it ran must be unchanged)::
 
     pf = phasor.chunked.run("from_signals", close, entries, exits,
                             chunk=50_000, checkpoint="run.ckpt", size=1.0, fees=0.001)
@@ -106,16 +107,23 @@ def run(
     one_column = close_a.ndim == 1
     from .cache import digest
 
-    # The checkpoint belongs to these inputs: the shape, the chunking and a
-    # digest of every argument, data included.
-    signature = (entry, close_a.shape, chunk, lookback, digest(close_a, args, kwargs))
+    # A checkpoint belongs to a run: the entry point, the columns and the
+    # chunking, plus a digest of every input on the bars it finished. A call
+    # with a longer history whose first bars and other arguments digest the
+    # same continues it.
+    signature = (entry, close_a.shape[1:], chunk, lookback)
+
+    def prefix(rows: int) -> str:
+        return digest(close_a[:rows], [_cut(a, "", n_rows, one_column, 0, rows) for a in args],
+                      {k: _cut(v, k, n_rows, one_column, 0, rows) for k, v in kwargs.items()})
 
     done, state, orders, cash = 0, None, [], []
     if checkpoint is not None and os.path.exists(checkpoint):
         with open(checkpoint, "rb") as f:
             saved = pickle.load(f)
-        if saved["signature"] != signature:
-            raise ValueError(f"checkpoint {checkpoint} is from another run: {saved['signature']}")
+        if saved["signature"] != signature or saved["done"] > n_rows or saved["inputs"] != prefix(saved["done"]):
+            raise ValueError(f"checkpoint {checkpoint} is from another run: {saved['signature']}, "
+                             f"{saved['done']} bars, or other inputs on them")
         done, orders, cash = saved["done"], saved["orders"], saved["cash"]
         state = phasor.SimState.from_bytes(saved["state"]) if saved["state"] is not None else None
 
@@ -134,8 +142,8 @@ def run(
         cash.append(dict(result.cash_records()))
         state = result.last_state
         if checkpoint is not None:
-            _save(os.fspath(checkpoint), {"signature": signature, "done": stop, "state": state.to_bytes(),
-                                          "orders": orders, "cash": cash})
+            _save(os.fspath(checkpoint), {"signature": signature, "done": stop, "inputs": prefix(stop),
+                                          "state": state.to_bytes(), "orders": orders, "cash": cash})
 
     template = first_pf if first_pf is not None else fn(close_a[:1], *[_cut(a, "", n_rows, one_column, 0, 1) for a in args],
                                                        **{k: _cut(v, k, n_rows, one_column, 0, 1) for k, v in kwargs.items()})
@@ -143,7 +151,7 @@ def run(
     n_cols = len(template.column_map) if template.column_map is not None else (1 if one_column else close_a.shape[1])
     group_of = np.repeat(np.arange(len(lens)), lens) if lens else np.arange(n_cols)
     return phasor.Portfolio.from_records(
-        _concat(orders, group_of), close_a if not one_column else close_a[:, None],
+        _concat(orders, group_of), np.asfortranarray(close_a if not one_column else close_a[:, None]),
         init_cash=template.init_cash, cash_records=_concat(cash, group_of),
         group_lens=template.group_lens() if template.cash_sharing else None,
         cash_sharing=template.cash_sharing, column_map=template.column_map,

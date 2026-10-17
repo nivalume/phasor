@@ -135,3 +135,17 @@ def test_the_cache_sees_an_edited_function(tmp_path):
         return x + 2
 
     assert phasor.cache.digest(f, (1,), {}) != key
+
+
+def test_a_checkpoint_extends_a_finished_run_over_new_bars(tmp_path):
+    close, entries, exits = _market()
+    ckpt = tmp_path / "run.ckpt"
+    first = phasor.chunked.run("from_signals", close[:120], entries[:120], exits[:120], chunk=50,
+                               checkpoint=ckpt, size=1.0)
+    _same(first, phasor.from_signals(close[:120], entries[:120], exits[:120], size=1.0))
+    longer = phasor.chunked.run("from_signals", close, entries, exits, chunk=50, checkpoint=ckpt, size=1.0)
+    _same(longer, phasor.from_signals(close, entries, exits, size=1.0))
+    edited = close.copy()
+    edited[10] *= 1.05
+    with pytest.raises(ValueError, match="another run"):
+        phasor.chunked.run("from_signals", edited, entries, exits, chunk=50, checkpoint=ckpt, size=1.0)
