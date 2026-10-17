@@ -37,5 +37,8 @@ Reusable skills live in `skills/` (Agent Skills format, one `SKILL.md` per direc
 |---|---|
 | `skills/docs-canvas` | Docs overview / architecture walkthrough / API reference as a navigable Cursor Canvas; requires Cursor Canvas SDK. |
 | `skills/mermaid-diagrams` | Any Markdown with a ```mermaid block: pick the diagram type, follow the house style, then run `python3 skills/mermaid-diagrams/scripts/check_mermaid.py <file-or-dir>` and fix every `FAIL` before committing. |
+| `skills/phasor-strategy` | Backtest an idea with the Python API: signals, runs, sweeps, and the checks before reporting a number. |
+| `skills/phasor-feature` | Implement anything under `crates/`: where code goes, the invariants, which checks to run and when, plan and knowledge-base updates. |
+| `skills/phasor-parity` | A parity test fails or a vectorbt-compatible feature needs coverage: replay, diagnose, extend fixtures; property and mutation checks. |
 
-Codex: `$docs-canvas`, `$mermaid-diagrams`, or `/skills`. Grok Build: `grok inspect` lists what was discovered. Claude Code: loads it automatically.
+Codex: `$docs-canvas`, `$mermaid-diagrams`, `$phasor-strategy`, ... or `/skills`. Grok Build: `grok inspect` lists what was discovered. Claude Code: loads it automatically.

@@ -27,8 +27,8 @@
 | 12 | [组合分析](#212-组合分析) | 🟡 | 记录、收益与风险指标、回撤、敞口、MAE/MFE、事件研究 | 切片拼接重采样、图表、形态搜索、部分 Python 接口 |
 | 13 | [参数优化与验证](#213-参数优化与验证) | 🟡 | 策略参数扫描、通用参数化（网格、条件网格、随机搜索）、邻近参数比较；交叉验证切分（含按日期、掩码、日历）；PSR、deflated Sharpe、PBO、置换检验、延迟信号检验、打乱价格重跑；组合优化（权重函数、调仓计划、第三方库包装、权重转订单） | `research/phasor_lab` 改用 `phasor.validation`（待决定） |
 | 14 | [性能与分布式](#214-性能与分布式) | ✅ | 账户组多线程（逐位一致），指令数回归检查；按行分块和断点续跑，按列分到多进程或 Ray（逐位一致），跨运行缓存（带命中率统计），新功能的开关对照工作负载 | — |
-| 15 | [工具链](#215-工具链) | ⬜ | — | 配置文件、CLI、定时任务、通知 |
-| 16 | [AI 接口](#216-ai-接口) | ⬜ | — | 文档检索、MCP 服务、agent skills |
+| 15 | [工具链](#215-工具链) | 🟡 | TOML 配置、CLI（`phasor run/sweep/schedule/help`）、定时任务和通知、研究对象持久化、`phasor.help`、`check_shapes` | `phasor data update`（依赖数据层的增量更新） |
+| 16 | [AI 接口](#216-ai-接口) | ✅ | 文档检索 `phasor.docs`、MCP 服务 `phasor mcp`（不能读 `research/`）、3 个 agent skills | — |
 
 ---
 
@@ -236,17 +236,18 @@
 
 ### 2.15 工具链
 
-- [ ] 配置文件（TOML 描述一次回测）
-- [ ] 研究对象持久化（复用 2.8 的 `save`/`load`）
-- [ ] 定时任务和通知（Telegram、Slack）
-- [ ] CLI：`phasor run`、`phasor data update`、`phasor sweep`
-- [ ] 开发者工具：`phasor.help(obj)`，检查广播后的输入形状
+- [x] 配置文件 `phasor.config`：TOML 的 `[data]`（`.npz`、长格式 CSV 或自定义 `loader = "模块:函数"`，不经数据层）、`[signals]`（因子表达式，`{name}` 占位）、`[backtest]`（`from_signals`/`from_orders` 的参数）、`[sweep]`（网格）、`[output]`（统计 JSON、组合文件）；`load` 检查节名、必需的信号、占位符都有取值
+- [x] 研究对象持久化：`phasor.save`/`load` 除组合外接受任意研究对象（`ParamResults`、`IndicatorResult`、数组字典、组合列表），其中的组合按版本化字节存；其他用 pickle，只读可信来源
+- [x] 定时任务和通知 `phasor.schedule`：`Job`（成功发摘要，失败发 traceback，通知失败不掩盖结果）、`every(job, at="06:30" | interval=)`、`crontab(config, at=, weekdays=)` 生成 cron 行；通知器是 `(subject, text)` 可调用对象，库里只有 `File` 和 `Command`（不联网），Telegram、Slack 在 `examples/notifiers.py`
+- [x] CLI：`phasor run config.toml`、`phasor sweep config.toml --set window=10,20,50`、`phasor schedule`、`phasor help NAME`，`--notify-file`、`--notify-command`
+- [ ] CLI `phasor data update`：没做，依赖数据层的增量更新（模块 9 暂不动）
+- [x] 开发者工具：`phasor.help(obj 或 "indicators.rsi")`（签名、文档首段、成员）；`phasor.check_shapes(close, **inputs)` 按引擎的广播规则报告每个输入是标量、逐根、逐列还是整块，一次列出所有不合规的输入
 
 ### 2.16 AI 接口
 
-- [ ] 文档检索
-- [ ] MCP 服务：查 API、读源码、跑小回测；不能接到 `research/phasor_lab` 的数据和账本（模型不能看到研究结果）
-- [ ] Agent skills：怎么写策略、怎么加功能、怎么跑对照测试
+- [x] 文档检索 `phasor.docs.search(query)`：已安装包里每个公开对象的文档字符串按段落建 BM25 索引（名字和标题加权，只收 phasor 自己的对象）；`Index(extra=[...])` 加上检出目录里的 Markdown，按标题切段；本地计算，不联网
+- [x] MCP 服务 `phasor mcp [--source 检出目录]`（或 `python -m phasor.mcp`）：stdio 上的 JSON-RPC 2.0，协议版本 2025-06-18，不依赖 SDK。工具：`search_docs`、`api_reference`、`read_source`（phasor 对象的 Python 源码，或检出目录里 `crates/`、`docs/`、`examples/`、`skills/`、`benchmarks/`、`tests/`、`README.md`、`AGENTS.md` 下的文件）、`run_backtest`（合成 GBM 或内联的小数组，至多 20 万格，信号写成因子表达式）。读不到 `research/`（`phasor_lab` 的数据和账本）和检出目录以外的路径，回测不接受文件输入；测试覆盖这些拒绝
+- [x] Agent skills：`skills/phasor-strategy`（写策略、扫参数、报告前的检验）、`skills/phasor-feature`（代码放哪里、约束、检查顺序、收尾）、`skills/phasor-parity`（重放和诊断对照测试、加覆盖、性质和变异测试），链接到 `.claude/`、`.agents/`、`.grok/`
 
 ### 2.17 工程维护
 

@@ -44,8 +44,10 @@ from . import (
     allocation,
     cache,
     chunked,
+    config,
     data,
     distributed,
+    docs,
     events,
     frames,
     futures,
@@ -61,9 +63,11 @@ from . import (
     resolution,
     returns,
     robust,
+    schedule,
     sessions,
     signals,
     synthetic,
+    tools,
     validation,
 )
 from ._phasor import InstrumentId, BarType
@@ -1285,19 +1289,78 @@ def _resume(resume, init_cash):
     return resume
 
 
-def save(pf, path):
-    """Writes ``pf`` to ``path``: its records, logs, the inputs its analysis
-    reads and its state, so ``load(path)`` gives a portfolio that analyses,
-    and continues with ``resume=``, as ``pf`` does. Callback states
-    (``in_outputs``) are not kept."""
+_OBJECT = b"PHOB\x01"
+
+
+def save(obj, path):
+    """Writes ``obj`` to ``path``.
+
+    A portfolio is written as its versioned bytes: its records, logs, the
+    inputs its analysis reads and its state, so ``load(path)`` gives a
+    portfolio that analyses, and continues with ``resume=``, as it does.
+    Callback states (``in_outputs``) are not kept. Any other research object
+    (``params.ParamResults``, an ``IndicatorResult``, a dict of arrays, a
+    list of portfolios) is pickled, portfolios inside it as their bytes.
+    Load pickles only from sources you trust."""
+    import pickle
+
     with open(path, "wb") as f:
-        f.write(pf.to_bytes())
+        if isinstance(obj, Portfolio):
+            f.write(obj.to_bytes())
+        else:
+            f.write(_OBJECT)
+            pickle.dump(_Persist(obj), f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def load(path) -> Portfolio:
-    """A portfolio ``save`` wrote."""
+def load(path):
+    """What ``save`` wrote."""
+    import pickle
+
     with open(path, "rb") as f:
-        return Portfolio.from_bytes(f.read())
+        data = f.read()
+    if data.startswith(_OBJECT):
+        return pickle.loads(data[len(_OBJECT):]).obj
+    return Portfolio.from_bytes(data)
+
+
+class _Persist:
+    """Pickles portfolios anywhere inside an object as their bytes."""
+
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __reduce__(self):
+        return (_Persist._restore, (_Persist._pack(self.obj),))
+
+    @staticmethod
+    def _pack(obj):
+        if isinstance(obj, Portfolio):
+            return ("__phasor_portfolio__", obj.to_bytes())
+        if isinstance(obj, dict):
+            return {k: _Persist._pack(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(_Persist._pack(v) for v in obj)
+        if hasattr(obj, "__dict__") and not isinstance(obj, type):
+            clone = object.__new__(type(obj))
+            clone.__dict__.update({k: _Persist._pack(v) for k, v in vars(obj).items()})
+            return clone
+        return obj
+
+    @staticmethod
+    def _unpack(obj):
+        if isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "__phasor_portfolio__":
+            return Portfolio.from_bytes(obj[1])
+        if isinstance(obj, dict):
+            return {k: _Persist._unpack(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return type(obj)(_Persist._unpack(v) for v in obj)
+        if hasattr(obj, "__dict__") and not isinstance(obj, type):
+            obj.__dict__.update({k: _Persist._unpack(v) for k, v in vars(obj).items()})
+        return obj
+
+    @staticmethod
+    def _restore(packed):
+        return _Persist(_Persist._unpack(packed))
 
 
 def _callbacks_of(**funcs):
@@ -1805,4 +1868,5 @@ def from_orders(
 
 
 from .stepper import Stepper
+from .tools import check_shapes, help
 from .strategy import crossed_above, factors, strategy

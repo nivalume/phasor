@@ -208,9 +208,10 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'plot'", specifier = ">=5" },
     { name = "pyarrow", marker = "extra == 'data'", specifier = ">=15" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'config'", specifier = ">=2" },
     { name = "vectorbt", marker = "extra == 'test'", specifier = "==1.1.0" },
 ]
-provides-extras = ["data", "pandas", "plot", "test"]
+provides-extras = ["config", "data", "pandas", "plot", "test"]
 
 [[package]]
 name = "phasor-dev"

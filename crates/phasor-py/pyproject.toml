@@ -13,10 +13,14 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+phasor = "phasor.cli:main"
+
 [project.optional-dependencies]
 data = ["pyarrow>=15"]
 plot = ["plotly>=5"]
 pandas = ["pandas>=1.5"]
+config = ["tomli>=2; python_version < '3.11'"]
 # The reference, for the differential tests. Not needed to use the package —
 # and pinned, because the tests assert what this version does, including which
 # size types it refuses.

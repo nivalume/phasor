@@ -12,8 +12,9 @@ the same checkpoint it skips the chunks already done::
 Every array argument with one row per bar is cut to the chunk, plus
 ``lookback`` bars before it for anything that reads past bars (a price
 ``from_ago``, the previous close an order price may read). 2-D arrays with
-one row per bar are cut; so are 1-D ones when ``close`` is 1-D, and
-``index``, ``force_exit`` and ``auto_deleverage`` always.
+one row per bar are cut; so are 1-D ones when ``close`` is 1-D, and the
+1-D arguments read per bar (``index``, ``force_exit``, ``auto_deleverage``,
+``cash_deposits``, ``cash_earnings``, ``debt_rate``) always.
 
 The result is rebuilt from the records with ``Portfolio.from_records``, so
 it carries what analysis reads from records: values, returns, trades,
@@ -33,7 +34,8 @@ import numpy as np
 
 __all__ = ["run"]
 
-_PER_ROW_1D = {"index", "force_exit", "auto_deleverage"}
+# 1-D arguments read one value per bar (the rest are one value per column).
+_PER_ROW_1D = {"index", "force_exit", "auto_deleverage", "cash_deposits", "cash_earnings", "debt_rate"}
 _ENTRY_POINTS = ("from_signals", "from_orders")
 
 
