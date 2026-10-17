@@ -42,6 +42,7 @@
 
 use phasor_model::{AccountType, MarginMode};
 
+pub mod builtin;
 pub mod callbacks;
 pub mod cash;
 pub mod from_orders;
@@ -247,6 +248,7 @@ pub(crate) fn isolated_columns(
 /// size is never dust.
 pub const DEFAULT_MIN_SIZE: f64 = 1e-8;
 
+pub use builtin::{Builtin, BuiltinState};
 pub use callbacks::{Context, Decision, Flow, NoCallbacks, OrderFunc, SignalFunc, risk_size};
 pub use from_orders::{
     FromOrders, Schedule, simulate_from_order_func, simulate_from_orders,

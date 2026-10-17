@@ -13,7 +13,7 @@
 
 | # | 功能 | 状态 | 已有 | 还缺 |
 |---|---|:-:|---|---|
-| 1 | [模拟入口与回调](#21-模拟入口与回调) | 🟡 | `from_orders`、`from_signals`（含 `order_mode`）、`from_order_func`（flex、`row_wise`）、两个循环的回调钩子、Python 回调（直接调用）；内核、止损判定、挂单判定、现金流入账、记录写入已公开 | 常见回调的表达式 DSL |
+| 1 | [模拟入口与回调](#21-模拟入口与回调) | ✅ | `from_orders`、`from_signals`（含 `order_mode`）、`from_order_func`（flex、`row_wise`）、两个循环的回调钩子、Python 回调（直接调用）、内置回调（按风险定仓位、移到保本、全局预算）；内核、止损判定、挂单判定、现金流入账、记录写入已公开 | — |
 | 2 | [订单与仓位](#22-订单与仓位) | ✅ | 全部仓位类型、下单约束、价格选项（含 `nextvalidopen`、按根的 `from_ago`）、买卖价、`call_seq`（auto 按现金影响、显式顺序） | — |
 | 3 | [限价单与挂单](#23-限价单与挂单) | 🟡 | 限价单、突破单、有效期（按行数或按时间）、挂单冲突 | 语义评审 |
 | 4 | [止损](#24-止损) | ✅ | 止损、止盈、移动止损、时间止损（按行数或按时间）、四种阶梯、`delta_format`、止损限价单、不经模拟的止损出场、回调里的动态阶梯 | — |
@@ -50,7 +50,7 @@
 - [x] `from_signals` 的回调（`simulate_from_signal_func`）：`adjust`（测试前改止损）、`signals`（四个信号和 `size`、`size_type`，照常走冲突、累加、止损、限价单、`order_mode`）、`post_order`、`post_segment`；和 `from_ago` 一起用报错
 - [x] 按风险算仓位：`risk_size(value, risk, entry, stop, multiplier)`，在 `order` 或 `signals` 回调里用（测试：1% 风险、保本止损）
 - [x] Python 回调，直接调用（每次调用拿 GIL，作调试和试规则用）：`phasor.from_order_func(close, order_func, flexible=, row_wise=, pre_group_func=, pre_segment_func=, post_order_func=, post_segment_func=)`，`from_signals(signal_func=, adjust_func=, post_order_func=, post_segment_func=, pre_group_func=)`；回调抛出的异常原样抛给调用方；组状态在 `pf.in_outputs`
-- [ ] 常见回调的表达式 DSL（Python 写、Rust 跑），见 [§4](#4-待决定)
+- [x] 常见回调做成内置回调加参数（不做表达式 DSL，见 [§4](#4-待决定)）：`phasor_sim::Builtin`，Python `from_signals(risk=, risk_stop=, breakeven=, max_positions=, max_exposure=)`，在 Rust 里跑、不拿 GIL，和 Python 回调不能同时用。按风险定仓位（开仓或反手时数量使 `risk_stop` 处止损亏 `risk` 的净值）；移到保本（上一根收盘浮盈达 `breakeven` 后把止损移到入场价，不放松更紧的止损，触发只读上一根，不偷看）；全局预算（持仓数达 `max_positions`，含同一根已放行的，或总敞口达 `max_exposure` 倍净值时丢掉开新仓的信号，平仓和反手不受限）。测试：和写成 Python 回调的同一规则逐笔一致；1 和 3 线程一致；5 个切点续跑和一次跑完一致
 
 ### 2.2 订单与仓位
 
@@ -322,7 +322,7 @@ PRO 闭源，没法差分测试，按功能来源对照：
 
 | 问题 | 建议 |
 |---|---|
-| Python 回调方式 | 直接调用已做（调试模式，每列每根 K 线拿一次 GIL）。Rust 插件就是 `OrderFunc`/`SignalFunc`。待定：常见回调（按风险定仓位、移动止损到保本、全局预算）做成表达式 DSL 还是做成内置回调加参数 |
+| Python 回调方式 | 已定：直接调用（调试模式，每列每根 K 线拿一次 GIL）；Rust 插件就是 `OrderFunc`/`SignalFunc`；常见回调做成内置回调加参数（`Builtin`），不做表达式 DSL |
 | 联网代码放哪里 | 单独的可选 Python 包（如 `phasor-connectors`），保持库不联网；数据库读写放 `phasor-store` 或 Python 层 |
 | 能否用 PRO 的输出做对照 | 先确认 PRO 许可条款 |
 | 负价格下 `percent` 仓位和收益率的语义 | 先写说明，评审后实现 |

@@ -26,7 +26,7 @@ uv sync && uv run --with pytest python -m pytest crates/phasor-py/tests -q   # P
 - Library crates never download or write files; network code lives in `examples/`.
 - Analysis rebuilds balances from records only: anything that changes cash or a position must be a record.
 - The knowledge base (nivalume/phasor-docs) cites code as links to one pinned commit of this repository, with
-  line numbers checked against it; when code a page describes changes, update the page there (see its README).
+  line numbers checked against it; when code a page describes changes, update the page there (each page names its commit in the "行号对应" row of its source table; re-check every line reference when re-pinning).
 
 ## Skills
 

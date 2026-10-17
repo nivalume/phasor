@@ -19,13 +19,11 @@
 //! return, its metrics, its statistics table, its exposures and trade
 //! excursions, and its order, trade and log records as NumPy arrays. Factor
 //! expressions, Alpha158, and Alpha360 are exposed through the Python shell
-//! over this module's compiled [`expr::PyFactorSet`]. Event studies,
-//! overfitting statistics, labels, random signals and synthetic prices are in
-//! [`research`].
-//!
-//! Not exposed yet: the rolling metrics, drawdown
-//! records, and the indicator sweep. Each is a small addition on this
-//! scaffolding, and none of them changes it.
+//! over this module's compiled [`expr::PyFactorSet`], with WorldQuant 101 and
+//! batched evaluation. Event studies, overfitting statistics, labels, random
+//! signals and synthetic prices are in [`research`]; the indicator sweep and
+//! streams in [`indicators`]; signal tools in [`signal_fns`]; rolling
+//! metrics and drawdown records in [`returns_fns`].
 //!
 //! # Two things worth knowing before using it
 //!
@@ -1373,6 +1371,7 @@ fn deposits_view<'a>(
     call_seq = None,
     column_map = None,
     callbacks = None,
+    builtin = None,
     flexible = false,
     row_wise = false,
     resume = None,
@@ -1481,6 +1480,7 @@ fn from_signals(
     call_seq: Option<&Bound<'_, PyAny>>,
     column_map: Option<Vec<usize>>,
     callbacks: Option<&Bound<'_, PyDict>>,
+    builtin: Option<&Bound<'_, PyDict>>,
     flexible: bool,
     row_wise: bool,
     resume: Option<&Bound<'_, PyAny>>,
@@ -1951,9 +1951,19 @@ fn from_signals(
         ));
     }
     let cbs = callbacks.map(callbacks::PyCallbacks::new).transpose()?;
+    let builtin = builtin.map(builtin_of).transpose()?;
+    if builtin.is_some() && cbs.is_some() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "the built-in rules (risk, breakeven, max_positions, max_exposure) and Python \
+             callbacks cannot be combined; write the rule in the callback",
+        ));
+    }
     let logged = p.wants_logs();
     let run = py
-        .detach(|| signals_run(&args, cbs.as_ref(), threads, logged))
+        .detach(|| match &builtin {
+            Some(b) => builtin_run(&args, b, threads, logged),
+            None => signals_run(&args, cbs.as_ref(), threads, logged),
+        })
         .map_err(|e| failed(cbs.as_ref(), e))?;
 
     // The starting cash is materialized per column so the portfolio can be
@@ -2547,6 +2557,46 @@ fn signals_run(
         (Some(cbs), false) => func::<OrderRecords, _>(args, cbs, threads).map(unlogged_py_run),
         (None, true) => plain(args, threads).map(logged_py_run),
         (None, false) => plain::<OrderRecords>(args, threads).map(as_py_run),
+    }
+}
+
+/// The built-in rules from their Python parameters.
+fn builtin_of(d: &Bound<'_, PyDict>) -> PyResult<phasor_sim::Builtin> {
+    let get = |name: &str| -> PyResult<f64> {
+        d.get_item(name)?
+            .filter(|v| !v.is_none())
+            .map_or(Ok(f64::NAN), |v| v.extract())
+    };
+    let b = phasor_sim::Builtin {
+        risk: get("risk")?,
+        risk_stop: get("risk_stop")?,
+        breakeven: get("breakeven")?,
+        max_positions: d
+            .get_item("max_positions")?
+            .filter(|v| !v.is_none())
+            .map_or(Ok(0), |v| v.extract())?,
+        max_exposure: get("max_exposure")?,
+    };
+    b.validate().map_err(to_py_err)?;
+    Ok(b)
+}
+
+/// `from_signals` with the built-in rules; their states are not kept.
+fn builtin_run(
+    args: &FromSignals<'_>,
+    b: &phasor_sim::Builtin,
+    threads: usize,
+    logged: bool,
+) -> phasor_core::error::Result<PyRun> {
+    use phasor_sim::simulate_from_signal_func as func;
+    if logged {
+        func::<phasor_records::Journal, _>(args, b, threads).map(|run| phasor_sim::Run {
+            records: run.records,
+            states: Vec::new(),
+            last_state: run.last_state,
+        })
+    } else {
+        func::<OrderRecords, _>(args, b, threads).map(as_py_run)
     }
 }
 

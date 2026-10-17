@@ -759,6 +759,11 @@ def from_signals(
     adjust_func=None,
     post_order_func=None,
     post_segment_func=None,
+    risk=None,
+    risk_stop=None,
+    breakeven=None,
+    max_positions=None,
+    max_exposure=None,
 ) -> Portfolio:
     """Runs a signal-driven backtest and returns the portfolio.
 
@@ -1157,6 +1162,20 @@ def from_signals(
         ``group``, ``cash``, ``free_cash``, ``value`` and per-column
         ``position``, ``debt``, ``val_price``.
 
+    risk, risk_stop, breakeven, max_positions, max_exposure
+        Built-in rules, run in Rust without Python callbacks (and not
+        combined with them); each is off until set. ``risk`` with
+        ``risk_stop``: an order that opens or reverses a position takes the
+        size whose loss at ``risk_stop`` (a fraction of the bar's close)
+        against it is ``risk`` of the account's value. ``breakeven``: once
+        the last close is that fraction past the entry in the position's
+        favour, the stop-loss moves to the entry price (never loosening a
+        tighter one). ``max_positions``: a signal that would open a new
+        position is dropped while the account holds that many (counting
+        ones opened earlier on the bar); ``max_exposure``: likewise while
+        its gross exposure is at least that multiple of its value. Exits are
+        never dropped.
+
     Returns
     -------
     Portfolio
@@ -1276,7 +1295,15 @@ def from_signals(
             post_order=post_order_func,
             post_segment=post_segment_func,
         ),
+        builtin=_builtin(risk, risk_stop, breakeven, max_positions, max_exposure),
     )
+
+
+def _builtin(risk, risk_stop, breakeven, max_positions, max_exposure):
+    rules = {"risk": risk, "risk_stop": risk_stop, "breakeven": breakeven,
+             "max_positions": max_positions, "max_exposure": max_exposure}
+    rules = {k: v for k, v in rules.items() if v is not None}
+    return rules or None
 
 
 def _resume(resume, init_cash):

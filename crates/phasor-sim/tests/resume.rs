@@ -12,7 +12,10 @@ use phasor_model::{AccountType, OrderType};
 use phasor_records::{Journal, OrderRecords};
 use phasor_sim::groups::{CallSeq, Groups};
 use phasor_sim::snapshot::{Run, SimState};
-use phasor_sim::{FromOrders, FromSignals, simulate_from_orders_run, simulate_from_signals_run};
+use phasor_sim::{
+    FromOrders, FromSignals, simulate_from_orders_run, simulate_from_signal_func,
+    simulate_from_signals_run,
+};
 
 const N: usize = 90;
 const C: usize = 6;
@@ -407,4 +410,54 @@ fn a_state_that_does_not_fit_is_refused() {
     )
     .unwrap_err();
     assert!(err.to_string().contains("did not"), "{err}");
+}
+
+#[test]
+fn the_built_in_rules_continue_and_ignore_the_thread_count() {
+    let data = Data::new(5);
+    let rules = phasor_sim::Builtin {
+        risk: 0.02,
+        risk_stop: 0.03,
+        breakeven: 0.01,
+        max_positions: 2,
+        ..phasor_sim::Builtin::default()
+    };
+    for case in [1, 3] {
+        let whole = signals_args(&data, case);
+        let groups = group_of(&whole.resolved_groups().unwrap());
+        let one: Run<Journal, _> = simulate_from_signal_func(&whole, &rules, 1).unwrap();
+        let expected = shown(&one.records, &one.last_state);
+        let plain: Run<Journal> = simulate_from_signals_run(&whole, 1).unwrap();
+        assert_ne!(
+            shown(&plain.records, &plain.last_state),
+            expected,
+            "case {case}: the rules act"
+        );
+        let threaded: Run<Journal, _> = simulate_from_signal_func(&whole, &rules, 3).unwrap();
+        assert_eq!(
+            shown(&threaded.records, &threaded.last_state),
+            expected,
+            "case {case}: threads"
+        );
+        for cut in CUTS {
+            let head: Run<Journal, _> =
+                simulate_from_signal_func(&signals_args(&data.rows(0..cut), case), &rules, 1)
+                    .unwrap();
+            let rest = FromSignals {
+                resume: Some(&head.last_state),
+                ..signals_args(&data, case)
+            };
+            let tail: Run<Journal, _> = simulate_from_signal_func(&rest, &rules, 1).unwrap();
+            let strip = |r: Run<Journal, _>| Run {
+                records: r.records,
+                states: Vec::new(),
+                last_state: r.last_state,
+            };
+            assert_eq!(
+                chained([strip(head), strip(tail)], &groups),
+                expected,
+                "case {case}, cut {cut}"
+            );
+        }
+    }
 }

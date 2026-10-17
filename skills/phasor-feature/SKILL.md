@@ -78,4 +78,4 @@ python3 benchmarks/instructions.py --base <base>      # only if phasor-exec or p
 - Commit with a message that says what changed and why; push to the working
   branch.
 - Update the knowledge base pages that describe the changed code, pinned to
-  the new commit with line numbers checked (see its README).
+  the new commit with line numbers checked (each page names its commit in the "行号对应" row of its source table; re-check every line reference when re-pinning).

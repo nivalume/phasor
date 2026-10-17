@@ -292,10 +292,11 @@ fn param<'py, T: pyo3::conversion::FromPyObjectOwned<'py>>(
 #[pymethods]
 impl PyStream {
     /// `kind` is an indicator name; `params` its parameters, as the batch
-    /// function takes them but one value each.
+    /// function takes them but one value each, with the Python functions'
+    /// defaults (`adjust=True`; `ddof=1` for `mstd`, `0` for `bbands`).
     #[new]
     fn new(kind: &str, n_cols: usize, params: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let adjust = param(params, "adjust", false)?;
+        let adjust = param(params, "adjust", true)?;
         let window = param(params, "window", 14usize)?;
         let ewm = param(params, "ewm", false)?;
         let ma = MaParams { window, ewm };
@@ -310,7 +311,7 @@ impl PyStream {
                         alpha: param(params, "alpha", 2.0)?,
                     },
                     adjust,
-                    param(params, "ddof", 1usize)?,
+                    param(params, "ddof", 0usize)?,
                 ),
                 "rsi" => Stream::rsi(ma, adjust),
                 "stoch" => Stream::stoch(
