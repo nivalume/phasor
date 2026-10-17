@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use phasor_core::flex::FlexArray;
-use phasor_model::{Direction, SizeType};
+use phasor_model::{AccountType, Direction, OrderType, SizeType};
 use phasor_sim::groups::Groups;
 use phasor_sim::{
     FromOrders, FromSignals, simulate_from_orders, simulate_from_orders_parallel,
@@ -154,6 +154,10 @@ struct SignalWorkload {
     sl_stop: f64,
     tp_stop: f64,
     fees: f64,
+    /// Features switched on, from the optional `features` column: `limit`,
+    /// `leverage`, `margin`, `timestop`. Each feature row has a row without
+    /// it to compare against.
+    features: Vec<String>,
 }
 
 /// Generates close/high/low and an entry/exit pattern for `from_signals`.
@@ -206,6 +210,7 @@ fn parse_signal_workloads(path: &Path) -> Vec<SignalWorkload> {
     let (c_name, c_rows, c_cols) = (col("name"), col("n_rows"), col("n_cols"));
     let (c_every, c_hold, c_dir) = (col("entry_every"), col("hold"), col("direction"));
     let (c_sl, c_tp, c_fees) = (col("sl_stop"), col("tp_stop"), col("fees"));
+    let c_features = header.iter().position(|h| *h == "features");
     lines
         .map(|line| {
             let f: Vec<&str> = line.split('\t').collect();
@@ -224,6 +229,11 @@ fn parse_signal_workloads(path: &Path) -> Vec<SignalWorkload> {
                 sl_stop: f[c_sl].parse().unwrap(),
                 tp_stop: f[c_tp].parse().unwrap(),
                 fees: f[c_fees].parse().unwrap(),
+                features: c_features
+                    .and_then(|c| f.get(c))
+                    .filter(|v| **v != "-")
+                    .map(|v| v.split(',').map(str::to_owned).collect())
+                    .unwrap_or_default(),
             }
         })
         .collect()
@@ -376,6 +386,14 @@ fn main() {
         let sum = checksum(&close)
             .wrapping_add(entries.iter().filter(|e| **e).count() as u64)
             .wrapping_add(exits.iter().filter(|e| **e).count() as u64);
+        let on = |name: &str| w.features.iter().any(|f| f == name);
+        for f in &w.features {
+            assert!(
+                ["limit", "leverage", "margin", "timestop"].contains(&f.as_str()),
+                "unknown feature {f:?} in workload {}",
+                w.name
+            );
+        }
         let args = FromSignals {
             n_rows: w.n_rows,
             n_cols: w.n_cols,
@@ -388,8 +406,24 @@ fn main() {
             direction: FlexArray::Scalar(w.direction),
             sl_stop: FlexArray::Scalar(w.sl_stop),
             tp_stop: FlexArray::Scalar(w.tp_stop),
-            use_stops: !(w.sl_stop.is_nan() && w.tp_stop.is_nan()),
             fees: FlexArray::Scalar(w.fees),
+            order_type: FlexArray::Scalar(if on("limit") {
+                OrderType::Limit
+            } else {
+                OrderType::Market
+            }),
+            limit_delta: FlexArray::Scalar(if on("limit") { 0.002 } else { f64::NAN }),
+            leverage: FlexArray::Scalar(if on("leverage") { 2.0 } else { 1.0 }),
+            account_type: FlexArray::Scalar(if on("margin") {
+                AccountType::Margin
+            } else {
+                AccountType::Cash
+            }),
+            initial_margin: FlexArray::Scalar(if on("margin") { 0.1 } else { f64::NAN }),
+            maintenance_margin: FlexArray::Scalar(if on("margin") { 0.05 } else { 0.0 }),
+            funding_rate: FlexArray::Scalar(if on("margin") { 0.0001 } else { 0.0 }),
+            td_stop: FlexArray::Scalar(if on("timestop") { 7.0 } else { f64::NAN }),
+            use_stops: !(w.sl_stop.is_nan() && w.tp_stop.is_nan()) || on("timestop"),
             ..Default::default()
         };
         measure(

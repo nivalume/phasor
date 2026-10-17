@@ -26,7 +26,7 @@
 | 11 | [信号与标签](#211-信号与标签) | 🟡 | 带种子随机信号，信号区间，4 种 ML 标签 | Python 接口、日历信号、统计表 |
 | 12 | [组合分析](#212-组合分析) | 🟡 | 记录、收益与风险指标、回撤、敞口、MAE/MFE、事件研究 | 切片拼接重采样、图表、形态搜索、部分 Python 接口 |
 | 13 | [参数优化与验证](#213-参数优化与验证) | 🟡 | 策略参数扫描、通用参数化（网格、条件网格、随机搜索）、邻近参数比较；交叉验证切分（含按日期、掩码、日历）；PSR、deflated Sharpe、PBO、置换检验、延迟信号检验、打乱价格重跑；组合优化（权重函数、调仓计划、第三方库包装、权重转订单） | `research/phasor_lab` 改用 `phasor.validation`（待决定） |
-| 14 | [性能与分布式](#214-性能与分布式) | 🟡 | 账户组多线程（逐位一致），指令数回归检查 | 分块、断点续跑、多进程、Ray、缓存 |
+| 14 | [性能与分布式](#214-性能与分布式) | ✅ | 账户组多线程（逐位一致），指令数回归检查；按行分块和断点续跑，按列分到多进程或 Ray（逐位一致），跨运行缓存（带命中率统计），新功能的开关对照工作负载 | — |
 | 15 | [工具链](#215-工具链) | ⬜ | — | 配置文件、CLI、定时任务、通知 |
 | 16 | [AI 接口](#216-ai-接口) | ⬜ | — | 文档检索、MCP 服务、agent skills |
 
@@ -229,10 +229,10 @@
 
 - [x] 账户组多线程，串行和多线程逐位一致
 - [x] 功能关闭时的回归检查：`benchmarks/instructions.py`（callgrind 指令数，超过 3% 失败）
-- [ ] 分块执行和断点续跑
-- [ ] 多进程和 Ray，结果和单进程一致
-- [ ] 跨运行缓存（先测复用率）
-- [ ] 新功能写进 `benchmarks/workloads*.tsv`，开启和关闭各测一次
+- [x] 分块执行和断点续跑：`phasor.chunked.run("from_signals" | "from_orders", close, ..., chunk=, lookback=, checkpoint=path)`，每块用 `resume=SimState, row_offset=` 接上一块，记录按账户稳定排序后和一次跑完逐位一致（块长 1、37、100、300 测过）；每块后写检查点（状态和已有记录），中断后同一调用从下一块继续，检查点来自别的形状或块长时报错。结果用 `Portfolio.from_records` 重建，不支持杠杆和保证金账户的分析
+- [x] 多进程和 Ray：`phasor.distributed.run(..., n_chunks=, backend="process" | "thread" | "ray" | "serial")` 按整个账户组切列，每列的数组跟着切，进程间用 `Portfolio.to_bytes` 传，`portfolios.column_stack` 拼回；共享现金和不共享都和单进程逐位一致（Ray 未装，没有在 Ray 上跑过）
+- [x] 跨运行缓存：`phasor.cache.Cache(directory, max_items)`，`memoize` 按函数和参数的摘要（数组按字节、形状、dtype）缓存，内存 LRU 加可选磁盘，`stats()` 给命中、磁盘命中、未命中和命中率，用来先测复用率；组合存为版本化字节
+- [x] 新功能的开关对照：`benchmarks/workloads_signals.tsv` 加 `features` 列和 4 行（`limit`、`leverage`、`margin`、`timestop`），都和形状相同、功能关闭的 `signals_both` 比。单线程，整个进程（含生成数据）交替跑 7 轮的中位数：`signals_both` 127 ms，限价单 +42%，杠杆 +11%，保证金账户加资金费 +187%（每根结算和计费），时间止损 +68%
 
 ### 2.15 工具链
 
