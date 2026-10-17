@@ -1,0 +1,28 @@
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python (thin shell)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.so
+.pytest_cache/
+.hypothesis/
+
+# Benchmark runs are machine-specific and regenerated; the committed
+# baseline.tsv is the part that is tracked.
+/benchmarks/results/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+data
+.data
+
+
+# Wiki build dependencies
+wiki/node_modules/

@@ -1,0 +1,5 @@
+{
+  "_comment": "Example puppeteer config for mermaid-cli: `mmdc -p puppeteer.json ...`. check_mermaid.py writes its own; use this only when running mmdc by hand.",
+  "executablePath": "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+  "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"]
+}

@@ -1,0 +1,22 @@
+# from_signals workloads, read by crates/phasor-sim/examples/bench.rs.
+#
+# These rows feed the regression gate.
+# Prices follow the from_orders formula; an entry fires every entry_every bars
+# (staggered by column) and its exit `hold` bars later. sl_stop/tp_stop are
+# fractions, NaN disables; with either set the stop engine runs every bar.
+# `features` switches on one feature against signals_both's shape (`-` for
+# none): limit (limit orders 0.2% away), leverage (2x), margin (margin
+# account, 10% initial and 5% maintenance margin, funding), timestop (exit
+# after 7 bars). Each is measured against signals_both, which has it off.
+#
+name	n_rows	n_cols	entry_every	hold	direction	sl_stop	tp_stop	fees	features
+signals_single_long	200000	1	20	10	LongOnly	NaN	NaN	0.0	-
+signals_sweep_small	2000	500	20	10	LongOnly	NaN	NaN	0.0	-
+signals_sweep_wide	1000	2000	20	10	LongOnly	NaN	NaN	0.0	-
+signals_dense	20000	100	2	1	LongOnly	NaN	NaN	0.0	-
+signals_both	20000	100	20	10	Both	NaN	NaN	0.001	-
+signals_stops	20000	100	20	10	LongOnly	0.05	0.1	0.0	-
+signals_limit	20000	100	20	10	Both	NaN	NaN	0.001	limit
+signals_leverage	20000	100	20	10	Both	NaN	NaN	0.001	leverage
+signals_margin	20000	100	20	10	Both	NaN	NaN	0.001	margin
+signals_timestop	20000	100	20	10	Both	NaN	NaN	0.001	timestop

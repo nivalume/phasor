@@ -1,0 +1,77 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/phasor",
+  "crates/phasor-core",
+  "crates/phasor-data",
+  "crates/phasor-model",
+  "crates/phasor-exec",
+  "crates/phasor-generic",
+  "crates/phasor-indicators",
+  "crates/phasor-sim",
+  "crates/phasor-py",
+  "crates/phasor-records",
+  "crates/phasor-signals",
+  "crates/phasor-analysis",
+  "crates/phasor-expr",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/nivalume/phasor"
+description = "Parallel factor-driven vectorized backtesting engine"
+
+[workspace.dependencies]
+phasor-data = { path = "crates/phasor-data", version = "0.1.0" }
+arrow-array = "59"
+arrow-schema = "59"
+rayon = "1.10"
+
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+polars = { version = "0.46", default-features = false, features = [
+  "abs",
+  "cov",
+  "cse",
+  "ewma",
+  "fused",
+  "lazy",
+  "log",
+  "rolling_window",
+  "sign",
+] }
+phasor-analysis = { path = "crates/phasor-analysis", version = "0.1.0" }
+phasor-core = { path = "crates/phasor-core", version = "0.1.0" }
+phasor-exec = { path = "crates/phasor-exec", version = "0.1.0" }
+phasor-generic = { path = "crates/phasor-generic", version = "0.1.0" }
+phasor-indicators = { path = "crates/phasor-indicators", version = "0.1.0" }
+phasor-expr = { path = "crates/phasor-expr", version = "0.1.0" }
+phasor-model = { path = "crates/phasor-model", version = "0.1.0" }
+phasor-records = { path = "crates/phasor-records", version = "0.1.0" }
+phasor-signals = { path = "crates/phasor-signals", version = "0.1.0" }
+phasor-sim = { path = "crates/phasor-sim", version = "0.1.0" }
+
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# The simulation kernels keep their arithmetic exactly, not idiomatic Rust.
+# These lints fire constantly on it and hide real findings.
+too_many_arguments = "allow"
+# Deliberate: financial comparisons go through `phasor_core::math`, never `==`.
+float_cmp = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+# Benchmarks must not be built in debug; debug builds of the
+# simulation kernels are ~50x slower and produce meaningless numbers.
+[profile.bench]
+inherits = "release"
+debug = true

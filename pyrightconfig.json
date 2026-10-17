@@ -1,0 +1,18 @@
+{
+  "include": ["examples", "research", "crates/phasor-py/python"],
+  "exclude": [".venv", "target", "research/tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": "examples",
+      "extraPaths": ["crates/phasor-py/python"]
+    },
+    {
+      "root": "research",
+      "extraPaths": ["crates/phasor-py/python"]
+    }
+  ]
+}
