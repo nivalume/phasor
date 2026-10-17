@@ -25,7 +25,7 @@
 | 10 | [指标](#210-指标) | ✅ | 8 个 Rust 指标和参数扫描、流式版本，Python 接口、指标工厂、第三方库；因子 DSL（Alpha158、Alpha360、WorldQuant 101），截面算子分阶段执行，分批输出，窄面板按因子并行 | — |
 | 11 | [信号与标签](#211-信号与标签) | 🟡 | 带种子随机信号，信号区间，4 种 ML 标签 | Python 接口、日历信号、统计表 |
 | 12 | [组合分析](#212-组合分析) | 🟡 | 记录、收益与风险指标、回撤、敞口、MAE/MFE、事件研究 | 切片拼接重采样、图表、形态搜索、部分 Python 接口 |
-| 13 | [参数优化与验证](#213-参数优化与验证) | 🟡 | 策略参数扫描，交叉验证切分，PSR、deflated Sharpe、PBO | 通用参数化、日历切分、置换检验、组合优化 |
+| 13 | [参数优化与验证](#213-参数优化与验证) | 🟡 | 策略参数扫描、通用参数化（网格、条件网格、随机搜索）、邻近参数比较；交叉验证切分（含按日期、掩码、日历）；PSR、deflated Sharpe、PBO、置换检验、延迟信号检验、打乱价格重跑；组合优化（权重函数、调仓计划、第三方库包装、权重转订单） | `research/phasor_lab` 改用 `phasor.validation`（待决定） |
 | 14 | [性能与分布式](#214-性能与分布式) | 🟡 | 账户组多线程（逐位一致），指令数回归检查 | 分块、断点续跑、多进程、Ray、缓存 |
 | 15 | [工具链](#215-工具链) | ⬜ | — | 配置文件、CLI、定时任务、通知 |
 | 16 | [AI 接口](#216-ai-接口) | ⬜ | — | 文档检索、MCP 服务、agent skills |
@@ -216,14 +216,14 @@
 - [x] 策略参数扫描：`@strategy` 的 `sweep` 接受参数组合列表，按列平铺一次跑完；`signal_delay`
 - [x] 交叉验证切分：`rolling`、`expanding`、带 purge 和 embargo 的 `purged_kfold`、`walk_forward`、自定义 `Split`
 - [x] 稳健性：`probabilistic_sharpe`、`deflated_sharpe`、`expected_max_sharpe`、`pbo_cscv`
-- [ ] 通用参数化：任意 Python 函数按网格、条件网格、随机搜索扫参数，结果带参数标签
-- [ ] 从日期区间或掩码生成切分，含按日历切分
-- [ ] `research/phasor_lab` 的 walk-forward 改用 `phasor.validation`（先处理不完整窗口、零波动和 NaN、重跑还是切片）
-- [ ] 置换检验
-- [ ] 邻近参数比较
-- [ ] 延迟信号检验：并排比较 `signal_delay=k` 和 `k+1`
-- [ ] 在打乱的价格上重跑（依赖 `randomize`）
-- [ ] 组合优化：自定义权重函数和调仓计划；PyPortfolioOpt、Riskfolio-Lib、Universal Portfolios 包装；权重转 `from_orders(targetpercent)`；等权基线
+- [x] 通用参数化 `phasor.params`：`grid(..., where=)`（条件网格）、`random(n, seed=, a=IntUniform(...), b=LogUniform(...), c=[...])`（随机搜索，同种子同结果）、`run(func, combos, n_jobs=, executor="thread"|"process")`，结果 `ParamResults` 按网格顺序，带参数标签：`table()`、`to_frame()`、`best()`、`select()`
+- [x] 从日期区间或掩码生成切分：`validation.from_ranges(index, [(train_start, train_stop, test_start, test_stop)])`、`from_masks`；按日历：`validation.calendar(index, "M", train=6, test=1, expanding=)`（周、月、季、年，按实际有 K 线的周期）
+- [ ] `research/phasor_lab` 的 walk-forward 改用 `phasor.validation`：没做。lab 的选择规则是预注册协议的一部分，换实现会改变已登记 spec 的结果，要由 lab 的维护者决定（见 [§4](#4-待决定)）
+- [x] 置换检验 `validation.permutation_test(positions, returns, statistic=, n=, block=)`：按块打乱收益、保留持仓时间，p 值 `(1 + #null ≥ observed) / (n + 1)`
+- [x] 邻近参数比较 `params.neighbors(results)`：每个点和网格上相邻点（某一参数差一档）的均值、最小值、比值
+- [x] 延迟信号检验 `validation.signal_delay_test(strategy, data, params, delays=(0, 1, 2))`：同一策略各个 `signal_delay` 的指标并排
+- [x] 在打乱的价格上重跑：`validation.shuffled_prices`（按块打乱对数收益，所有列同一排列，保留截面相关）、`shuffled_test(fn, close, n)`。放在验证层，不依赖数据层的 `randomize`
+- [x] 组合优化 `phasor.allocation`：权重函数（`equal_weight`、`inverse_volatility`、`min_variance`、`max_sharpe`、`risk_parity`，或任意函数）只看调仓 K 线之前的收益；调仓计划 `rebalance_mask(every=|freq=)`、`weights(close, fn, every=, lookback=)`；`from_pypfopt`、`from_riskfolio`、`universal_weights` 包装，用到时才导入；`from_weights` 转 `from_orders(size_type="targetpercent")`，共享现金、先卖后买；等权基线就是 `weights(close, equal_weight, ...)`
 
 ### 2.14 性能与分布式
 
@@ -327,4 +327,5 @@ PRO 闭源，没法差分测试，按功能来源对照：
 | 负价格下 `percent` 仓位和收益率的语义 | 先写说明，评审后实现 |
 | 图表依赖 | Plotly，作为可选 extra |
 | 限价单语义（已按此实现，待评审） | 每列每根 K 线只执行一笔：已触发的止损 > 本根被触及的挂单 > 本根新信号。挂单按挂出时的持仓定数量，本列有其他成交就撤单。跳空越过限价按开盘价（`limit`）、限价（`hardlimit`）或收盘价（`close`）成交，不加滑点 |
+| `research/phasor_lab` 的 walk-forward 是否改用 `phasor.validation` | lab 维护者决定：换实现会改变已登记 spec 的结果。若换，先定不完整窗口、零波动、NaN 的处理，以及每个窗口重跑还是切片 |
 | 其他市场需要、计划里没有的功能 | 多币种账户、币本位（反向）合约、期货换月、A 股 T+1 和涨跌停、期权。有需要时单独立项 |

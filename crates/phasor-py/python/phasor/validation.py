@@ -30,7 +30,20 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["Split", "rolling", "expanding", "purged_kfold", "walk_forward"]
+__all__ = [
+    "Split",
+    "calendar",
+    "expanding",
+    "from_masks",
+    "from_ranges",
+    "permutation_test",
+    "purged_kfold",
+    "rolling",
+    "shuffled_prices",
+    "shuffled_test",
+    "signal_delay_test",
+    "walk_forward",
+]
 
 
 @dataclass(frozen=True, eq=False)
@@ -343,3 +356,213 @@ def walk_forward(
             }
         )
     return results
+
+
+# ------------------------------------------------------- splits from dates
+
+
+def _times(index: Any) -> np.ndarray:
+    index = np.asarray(index)
+    if index.ndim != 1 or index.size == 0:
+        raise ValueError("index must be a non-empty 1-D array of times")
+    if index.dtype.kind != "M":
+        index = index.astype("datetime64[ns]")
+    if (np.diff(index.astype(np.int64)) < 0).any():
+        raise ValueError("index must be sorted")
+    return index
+
+
+def _rows(index: np.ndarray, start: Any, stop: Any) -> np.ndarray:
+    """Rows with ``start <= time < stop``."""
+    lo = np.searchsorted(index, np.datetime64(start, "ns").astype(index.dtype), "left")
+    hi = np.searchsorted(index, np.datetime64(stop, "ns").astype(index.dtype), "left")
+    return _range(int(lo), int(hi))
+
+
+def from_ranges(index: Any, ranges: Iterable[tuple[Any, Any, Any, Any]]) -> list[Split]:
+    """Splits from date ranges: each ``(train_start, train_stop, test_start,
+    test_stop)``, half-open, in any type ``numpy.datetime64`` accepts
+    (``"2024-01-01"``, a ``datetime``). ``index`` is the bars' times.
+
+    Raises
+    ------
+    ValueError
+        A range with no bars, or train and test sharing a bar.
+    """
+    index = _times(index)
+    out = []
+    for i, (a, b, c, d) in enumerate(ranges):
+        split = Split(_rows(index, a, b), _rows(index, c, d))
+        if split.train.size == 0 or split.test.size == 0:
+            raise ValueError(f"ranges[{i}] covers no bars on one side")
+        if np.intersect1d(split.train, split.test).size:
+            raise ValueError(f"ranges[{i}] puts the same bars in train and test")
+        out.append(split)
+    return out
+
+
+def from_masks(train: Any, test: Any) -> list[Split]:
+    """Splits from boolean masks, one row per split (or one 1-D mask each)."""
+    train = np.atleast_2d(np.asarray(train, dtype=bool))
+    test = np.atleast_2d(np.asarray(test, dtype=bool))
+    if train.shape != test.shape:
+        raise ValueError(f"train and test masks differ in shape: {train.shape} and {test.shape}")
+    if (train & test).any():
+        raise ValueError("a row is in both train and test")
+    return [Split(np.flatnonzero(a).astype(np.int64), np.flatnonzero(b).astype(np.int64))
+            for a, b in zip(train, test)]
+
+
+_PERIODS = {"W": "W", "M": "M", "ME": "M", "Q": "Q", "QE": "Q", "Y": "Y", "YE": "Y", "A": "Y"}
+
+
+def _period_ids(index: np.ndarray, freq: str) -> np.ndarray:
+    unit = _PERIODS.get(freq.upper())
+    if unit is None:
+        raise ValueError(f"freq must be one of W, M, Q, Y; got {freq!r}")
+    days = index.astype("datetime64[D]")
+    if unit == "W":
+        # Weeks starting Monday: 1970-01-01 was a Thursday.
+        return (days.astype(np.int64) + 3) // 7
+    months = days.astype("datetime64[M]").astype(np.int64)
+    return {"M": months, "Q": months // 3, "Y": months // 12}[unit]
+
+
+def calendar(index: Any, freq: str, train: int, test: int = 1, step: int | None = None,
+             expanding: bool = False) -> list[Split]:
+    """Splits on calendar periods: train on ``train`` whole periods (weeks,
+    months, quarters or years, as ``freq``), test on the next ``test``,
+    advance by ``step`` periods (default ``test``). With ``expanding`` the
+    train window keeps its first period. Periods are those the bars fall in,
+    so a month without bars is not a period."""
+    index = _times(index)
+    train = _int("train", train, 1)
+    test = _int("test", test, 1)
+    step = test if step is None else _int("step", step, 1)
+    ids = _period_ids(index, freq)
+    starts = np.flatnonzero(np.r_[True, ids[1:] != ids[:-1]])
+    bounds = np.r_[starts, len(index)]
+    n_periods = len(starts)
+    out = []
+    for first in range(0, n_periods - train - test + 1, step):
+        lo = 0 if expanding else first
+        mid, hi = first + train, first + train + test
+        out.append(Split(_range(int(bounds[lo]), int(bounds[mid])), _range(int(bounds[mid]), int(bounds[hi]))))
+    if not out:
+        raise ValueError(f"{n_periods} periods cannot hold {train} train and {test} test periods")
+    return out
+
+
+# ------------------------------------------------------- significance tests
+
+
+def permutation_test(
+    positions: Any,
+    returns: Any,
+    *,
+    statistic: str | Callable[[np.ndarray], float] = "total",
+    n: int = 1000,
+    block: int = 1,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Is the strategy's edge more than chance alignment?
+
+    ``positions[t]`` is the exposure held over bar ``t``'s return
+    ``returns[t]`` (both 1-D, same length; ``NaN`` returns count as zero).
+    The statistic of ``positions * returns`` is compared with its value when
+    the returns are shuffled in blocks of ``block`` bars (``block > 1``
+    keeps short-range autocorrelation), which keeps the positions' timing and
+    the returns' distribution but breaks their alignment.
+
+    ``statistic`` is ``"total"`` (sum), ``"mean"``, ``"sharpe"`` (mean / std)
+    or a function of the strategy's returns.
+
+    Returns ``observed``, the ``null`` distribution and ``p_value`` =
+    ``(1 + #null >= observed) / (n + 1)``.
+    """
+    pos = np.asarray(positions, dtype=float).ravel()
+    ret = np.nan_to_num(np.asarray(returns, dtype=float).ravel())
+    if pos.shape != ret.shape:
+        raise ValueError(f"positions and returns differ in length: {pos.size} and {ret.size}")
+    n = _int("n", n, 1)
+    block = _int("block", block, 1)
+    stats = {
+        "total": np.sum,
+        "mean": np.mean,
+        "sharpe": lambda r: float(np.mean(r) / np.std(r, ddof=1)) if np.std(r, ddof=1) > 0 else 0.0,
+    }
+    f = stats.get(statistic) if isinstance(statistic, str) else statistic
+    if f is None:
+        raise ValueError(f"statistic must be one of {sorted(stats)} or a function")
+    observed = float(f(pos * ret))
+    rng = np.random.default_rng(seed)
+    blocks = [ret[i:i + block] for i in range(0, ret.size, block)]
+    null = np.empty(n)
+    for k in range(n):
+        shuffled = np.concatenate([blocks[j] for j in rng.permutation(len(blocks))])
+        null[k] = f(pos * shuffled)
+    p = (1 + int((null >= observed).sum())) / (n + 1)
+    return {"observed": observed, "null": null, "p_value": p}
+
+
+def signal_delay_test(
+    strategy: Any,
+    data: Any,
+    params: Mapping[str, Any] | None = None,
+    *,
+    delays: Iterable[int] = (0, 1, 2),
+    metric: str = "total_return",
+    **options: Any,
+) -> dict[int, np.ndarray]:
+    """Runs a ``@phasor.strategy`` with each ``signal_delay`` and returns
+    ``{delay: metric per column}``, side by side. A result that holds at
+    delay 1 and collapses at delay 2 trades a one-bar effect that execution
+    latency would eat; one that is much better at delay 0 than at 1 is
+    probably reading its own bar's close."""
+    out = {}
+    for d in delays:
+        pf = strategy.run(data, params=params, signal_delay=int(d), **options)
+        out[int(d)] = np.asarray(getattr(pf, metric)())
+    return out
+
+
+def shuffled_prices(close: Any, n: int, *, block: int = 1, seed: int = 0) -> np.ndarray:
+    """``n`` price paths with ``close``'s bar-to-bar log returns in a random
+    order, shuffled in blocks of ``block`` bars, each path starting at the
+    first close. All columns share one permutation, so the cross-section's
+    correlation survives; trends, cycles and any order the strategy could
+    exploit do not. Missing prices stay missing where they were.
+
+    Returns an array ``(n, rows, columns)`` (``(n, rows)`` for 1-D input).
+    """
+    c = np.asarray(close, dtype=float)
+    flat = c.ndim == 1
+    c = c[:, None] if flat else c
+    n = _int("n", n, 1)
+    block = _int("block", block, 1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logret = np.diff(np.log(c), axis=0)
+    gaps = np.isnan(logret)
+    logret = np.where(gaps, 0.0, logret)
+    starts = list(range(0, len(logret), block))
+    rng = np.random.default_rng(seed)
+    out = np.empty((n, *c.shape))
+    for k in range(n):
+        order = np.concatenate([np.arange(s, min(s + block, len(logret))) for s in rng.permutation(starts)])
+        path = c[0] * np.exp(np.vstack([np.zeros((1, c.shape[1])), np.cumsum(logret[order], axis=0)]))
+        path[np.isnan(c)] = np.nan
+        out[k] = path
+    return out[:, :, 0] if flat else out
+
+
+def shuffled_test(fn: Callable[[np.ndarray], float], close: Any, n: int = 100, *,
+                  block: int = 1, seed: int = 0) -> dict[str, Any]:
+    """Reruns ``fn(prices) -> score`` (a whole backtest, say) on
+    :func:`shuffled_prices` and compares the real score with them. Returns
+    ``observed``, ``null`` and ``p_value`` = ``(1 + #null >= observed) /
+    (n + 1)``. A strategy that scores as well on shuffled prices is not
+    using the order of returns, which is what it claims to trade."""
+    observed = float(fn(np.asarray(close, dtype=float)))
+    null = np.array([float(fn(path)) for path in shuffled_prices(close, n, block=block, seed=seed)])
+    p = (1 + int((null >= observed).sum())) / (n + 1)
+    return {"observed": observed, "null": null, "p_value": p}

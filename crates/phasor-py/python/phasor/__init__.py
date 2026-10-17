@@ -41,6 +41,7 @@ import numpy as np
 from . import (
     _phasor,
     _timing,
+    allocation,
     data,
     events,
     frames,
@@ -48,6 +49,7 @@ from . import (
     fx,
     indicators,
     labels,
+    params,
     patterns,
     plotting,
     portfolios,
