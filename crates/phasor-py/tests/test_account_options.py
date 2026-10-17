@@ -58,6 +58,16 @@ def test_auto_cash_is_what_the_strategy_needed():
     assert (auto.cash(0)[0], auto.cash(1)[0]) == (0.0, 0.0)
     aligned = phasor.from_orders(close, size, init_cash="autoalign")
     assert (aligned.cash(0)[0], aligned.cash(1)[0]) == (20.0, 0.0)
+
+
+def test_auto_cash_with_shared_cash_is_the_group_total():
+    # One account holding both columns: the first bar buys 1 + 3 shares at 10.
+    close = np.array([[10.0, 10.0], [10.0, 10.0]])
+    size = np.array([[1.0, 3.0], [N, N]])
+    shared = phasor.from_orders(close, size, init_cash="auto", cash_sharing=True, group_lens=[2])
+    assert shared.group_lens == (2,)
+    assert shared.cash(group=0)[0] == 0.0
+    np.testing.assert_array_equal(shared.init_cash, [40.0, 40.0])
     with pytest.raises(ValueError, match="do not depend on the cash"):
         phasor.from_orders(close, size, size_type="percent", init_cash="auto")
 

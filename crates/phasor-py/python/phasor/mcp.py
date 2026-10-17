@@ -185,7 +185,7 @@ class Server:
         from .config import _plain
 
         stats = {f"column {k}": _plain(pf.stats(k)) for k in range(pf.n_cols)} if not pf.cash_sharing else \
-            {f"group {g}": _plain(pf.stats(group=g)) for g in range(len(pf.group_lens()))}
+            {f"group {g}": _plain(pf.stats(group=g)) for g in range(len(pf.group_lens))}
         return json.dumps({"bars": int(c.shape[0]), "columns": int(c.shape[1]),
                            "orders": int(len(pf.orders()["idx"])), "stats": stats}, indent=1)
 

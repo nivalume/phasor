@@ -152,7 +152,7 @@ def run(cfg: dict | str | Path) -> dict[str, Any]:
         else:
             pf = phasor.from_orders(fields["close"], values["size"], **market, **backtest)
         portfolios.append(pf)
-        n_accounts = len(pf.group_lens()) if pf.cash_sharing else pf.n_cols
+        n_accounts = len(pf.group_lens) if pf.cash_sharing else pf.n_cols
         stats.append([_plain(pf.stats(group=a) if pf.cash_sharing else pf.stats(a)) for a in range(n_accounts)])
     out = cfg.get("output", {})
     if "stats" in out:

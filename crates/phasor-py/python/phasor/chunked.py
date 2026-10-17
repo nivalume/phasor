@@ -147,13 +147,18 @@ def run(
 
     template = first_pf if first_pf is not None else fn(close_a[:1], *[_cut(a, "", n_rows, one_column, 0, 1) for a in args],
                                                        **{k: _cut(v, k, n_rows, one_column, 0, 1) for k, v in kwargs.items()})
-    lens = list(template.group_lens()) if template.cash_sharing else []
+    lens = list(template.group_lens) if template.cash_sharing else []
     n_cols = len(template.column_map) if template.column_map is not None else (1 if one_column else close_a.shape[1])
     group_of = np.repeat(np.arange(len(lens)), lens) if lens else np.arange(n_cols)
+    # `init_cash` reads per column (a group's cash repeated over its columns);
+    # `from_records` takes one value per account, so a shared run hands over
+    # each group's first column.
+    from .portfolios import _group_init_cash
+
     return phasor.Portfolio.from_records(
         _concat(orders, group_of), np.asfortranarray(close_a if not one_column else close_a[:, None]),
-        init_cash=template.init_cash, cash_records=_concat(cash, group_of),
-        group_lens=template.group_lens() if template.cash_sharing else None,
+        init_cash=_group_init_cash(template), cash_records=_concat(cash, group_of),
+        group_lens=template.group_lens if template.cash_sharing else None,
         cash_sharing=template.cash_sharing, column_map=template.column_map,
         allow_negative_price=bool(kwargs.get("allow_negative_price", False)),
         **{k: kwargs[k] for k in ("ann_factor", "risk_free", "trades", "incl_open") if k in kwargs},

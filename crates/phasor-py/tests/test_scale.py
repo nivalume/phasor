@@ -31,6 +31,15 @@ def test_chunked_runs_are_the_one_run(chunk):
     _same(phasor.chunked.run("from_orders", close, size, chunk=chunk), phasor.from_orders(close, size))
 
 
+def test_chunked_runs_with_shared_cash():
+    close, entries, exits = _market()
+    kw = dict(size=1.0, cash_sharing=True, group_lens=[4, 2])
+    one = phasor.from_signals(close, entries, exits, **kw)
+    out = phasor.chunked.run("from_signals", close, entries, exits, chunk=37, **kw)
+    assert out.cash_sharing and out.group_lens == (4, 2)
+    _same(out, one)
+
+
 def test_a_checkpoint_resumes_where_it_stopped(tmp_path, monkeypatch):
     close, entries, exits = _market()
     one = phasor.from_signals(close, entries, exits, size=1.0)

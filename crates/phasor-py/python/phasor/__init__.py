@@ -413,7 +413,7 @@ def _cash_needed(pf: Any) -> np.ndarray:
     np.add.at(flow, (o["idx"], o["col"]), sign * o["size"] * o["price"] * mult - o["fees"])
     c = pf.cash_records()
     np.add.at(flow, (c["idx"], c["col"]), c["amount"])
-    lens = list(pf.group_lens()) if pf.cash_sharing else [1] * n_cols
+    lens = list(pf.group_lens) if pf.cash_sharing else [1] * n_cols
     starts = np.concatenate([[0], np.cumsum(lens)[:-1]]).astype(np.intp)
     accounts = np.add.reduceat(flow, starts, axis=1)
     lowest = np.minimum.accumulate(np.cumsum(accounts, axis=0), axis=0)[-1] if n_rows else 0.0

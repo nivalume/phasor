@@ -187,19 +187,29 @@ def max_sharpe(window: np.ndarray, risk_free: float = 0.0, long_only: bool = Tru
 
 def risk_parity(window: np.ndarray, iterations: int = 1000, tol: float = 1e-12) -> np.ndarray:
     """Equal risk contributions, ``w_i (S w)_i`` the same for every asset,
-    long only, summing to one."""
+    long only, summing to one.
+
+    Solved by cyclical coordinate descent on ``½ wᵀSw - Σ log(w_i) / k``
+    (Spinu, 2013): each pass sets every ``w_i`` to the positive root of its
+    own quadratic, so a weight is never negative and no square root of a
+    negative risk contribution is ever taken, whatever the covariances'
+    signs. The minimizer has ``w_i (S w)_i`` equal for every asset; it is
+    then scaled to sum to one.
+    """
     s = _cov(window)
     k = len(s)
+    b = 1.0 / k
     w = np.full(k, 1.0 / k)
+    diag = np.diag(s)
     for _ in range(iterations):
-        contrib = w * (s @ w)
-        target = contrib.sum() / k
-        new = w * np.sqrt(target / contrib)
-        new /= new.sum()
-        if np.abs(new - w).max() < tol:
-            return new
-        w = new
-    return w
+        before = w / w.sum()
+        for i in range(k):
+            alpha = s[i] @ w - diag[i] * w[i]
+            w[i] = (-alpha + np.sqrt(alpha * alpha + 4.0 * diag[i] * b)) / (2.0 * diag[i])
+        after = w / w.sum()
+        if np.abs(after - before).max() < tol:
+            return after
+    return w / w.sum()
 
 
 # ------------------------------------------------------------ library wrappers

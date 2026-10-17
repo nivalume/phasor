@@ -249,17 +249,24 @@ def purged_kfold(n: int, k: int, purge: int = 0, embargo: int = 0) -> list[Split
 
 
 def _argmax(scores: Mapping[Hashable, float]) -> Hashable:
-    """The key with the highest score; NaN scores never win, ties go first."""
+    """The key with the highest finite score; NaN and infinite scores never
+    win, ties go first.
+
+    Infinity is skipped for the same reason as NaN: it is not a measurement.
+    A Sharpe ratio is ``+inf`` for a window whose returns never moved — a
+    parameter that never traded there — and letting it win would select the
+    one combination that did nothing.
+    """
     best_key, best = None, -math.inf
     found = False
     for key, score in scores.items():
         score = float(score)
-        if math.isnan(score):
+        if not math.isfinite(score):
             continue
         if not found or score > best:
             best_key, best, found = key, score, True
     if not found:
-        raise ValueError("every train score is NaN; nothing to select")
+        raise ValueError("every train score is NaN or infinite; nothing to select")
     return best_key
 
 
@@ -298,7 +305,7 @@ def walk_forward(
         From ``rolling``, ``expanding``, ``purged_kfold``, or hand-built.
     select : callable, optional
         ``select(train_scores) -> key``. Defaults to the key with the highest
-        score (NaN never wins; ties go to the first key in ``fn``'s order).
+        score (NaN and ±inf never win; ties go to the first key in ``fn``'s order).
         Pass e.g. ``lambda s: min(s, key=s.get)`` to minimize a loss.
 
     Returns

@@ -146,6 +146,8 @@ def test_walk_forward_errors():
         validation.walk_forward(lambda rows: {}, 10, splits)
     with pytest.raises(ValueError, match="NaN"):
         validation.walk_forward(lambda rows: {"a": math.nan}, 10, splits)
+    with pytest.raises(ValueError, match="infinite"):
+        validation.walk_forward(lambda rows: {"a": math.inf, "b": -math.inf}, 10, splits)
     with pytest.raises(ValueError, match="not a train score key"):
         validation.walk_forward(good, 10, splits, select=lambda s: "zz")
     missing = lambda rows: {"a": 1.0} if rows.size == 4 else {"b": 1.0}  # noqa: E731
@@ -153,6 +155,15 @@ def test_walk_forward_errors():
         validation.walk_forward(missing, 10, splits)
     with pytest.raises(ValueError, match="must be a Split"):
         validation.walk_forward(good, 10, [(np.arange(2), np.arange(2, 4))])
+
+
+def test_walk_forward_never_selects_an_infinite_score():
+    # A parameter that never traded has a flat curve and a +inf Sharpe; it
+    # must not beat the finite scores of the ones that did.
+    splits = validation.rolling(n=10, train=4, test=2)
+    scores = {"idle": math.inf, "slow": 0.5, "fast": 1.5}
+    result = validation.walk_forward(lambda rows: scores, 10, splits)
+    assert [r["chosen"] for r in result] == ["fast"] * len(splits)
 
 
 @pytest.mark.parametrize(

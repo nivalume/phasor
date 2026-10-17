@@ -137,6 +137,21 @@ def test_weight_functions():
     assert ms.sum() == pytest.approx(1) or (ms == 0).all()
 
 
+def test_risk_parity_with_negative_covariances():
+    # Two assets that move against each other and a small independent one:
+    # the equal-weight marginal risk of the hedged pair is negative, which the
+    # multiplicative update turned into the square root of a negative number.
+    rng = np.random.default_rng(1)
+    a = rng.normal(0, 0.05, 60)
+    r = np.column_stack([a, -0.9 * a + rng.normal(0, 0.005, 60), rng.normal(0, 0.01, 60)])
+    s = np.cov(r, rowvar=False)
+    assert (np.full(3, 1 / 3) * (s @ np.full(3, 1 / 3)) <= 0).any()
+    rp = al.risk_parity(r)
+    assert np.isfinite(rp).all() and (rp > 0).all() and rp.sum() == pytest.approx(1)
+    contrib = rp * (s @ rp)
+    np.testing.assert_allclose(contrib / contrib.sum(), 1 / 3, atol=1e-6)
+
+
 def test_weights_on_a_schedule_and_their_backtest():
     c = _close(300)
     w = al.weights(c, al.equal_weight, every=20, lookback=30)
