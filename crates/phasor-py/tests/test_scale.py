@@ -106,3 +106,32 @@ def test_distributed_on_ray_when_installed():
               phasor.from_signals(close, entries, exits, size=1.0))
     finally:
         ray.shutdown()
+
+
+def test_a_checkpoint_from_other_data_is_refused(tmp_path):
+    close, entries, exits = _market()
+    ckpt = tmp_path / "run.ckpt"
+    phasor.chunked.run("from_signals", close, entries, exits, chunk=100, checkpoint=ckpt, size=1.0)
+    with pytest.raises(ValueError, match="another run"):
+        phasor.chunked.run("from_signals", close * 1.01, entries, exits, chunk=100, checkpoint=ckpt, size=1.0)
+
+
+def test_shared_deposits_follow_their_groups():
+    close, entries, exits = _market()
+    deposits = np.zeros((close.shape[0], 3))
+    deposits[50] = [100.0, 200.0, 300.0]
+    kw = dict(size=1.0, cash_sharing=True, group_lens=[2, 2, 2], cash_deposits=deposits)
+    _same(phasor.distributed.run("from_signals", close, entries, exits, n_chunks=3, backend="serial", **kw),
+          phasor.from_signals(close, entries, exits, **kw))
+
+
+def test_the_cache_sees_an_edited_function(tmp_path):
+    def f(x):
+        return x + 1
+
+    key = phasor.cache.digest(f, (1,), {})
+
+    def f(x):  # noqa: F811 - the edit
+        return x + 2
+
+    assert phasor.cache.digest(f, (1,), {}) != key

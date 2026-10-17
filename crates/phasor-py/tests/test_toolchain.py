@@ -84,6 +84,10 @@ def test_cli_run_sweep_schedule_and_help(tmp_path, capsys):
     _bars(tmp_path)
     (tmp_path / "bt.toml").write_text(CONFIG)
     log = tmp_path / "runs.log"
+    (tmp_path / "notify.toml").write_text(CONFIG + '\n[notify]\nfile = "from_config.log"\n')
+    cli.main(["run", str(tmp_path / "notify.toml")])
+    assert "done" in (tmp_path / "from_config.log").read_text()
+    capsys.readouterr()
     assert cli.main(["run", str(tmp_path / "bt.toml"), "--notify-file", str(log)]) == 0
     out = capsys.readouterr().out
     assert "window=5" in out and "window=20" in out
@@ -141,6 +145,8 @@ def test_check_shapes_and_help():
         phasor.check_shapes(close, fees=np.ones((1, 3)))
     with pytest.raises(ValueError, match="one value per column"):
         phasor.check_shapes(close, size=np.ones(10))
+    with pytest.raises(ValueError, match="funding_rate"):
+        phasor.check_shapes(close, funding_rate=np.ones(3))
     text = phasor.help("from_signals")
     assert text.startswith("from_signals(")
     assert "members:" in phasor.help(phasor.allocation)

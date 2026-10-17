@@ -19,7 +19,9 @@ one row per bar are cut; so are 1-D ones when ``close`` is 1-D, and the
 The result is rebuilt from the records with ``Portfolio.from_records``, so
 it carries what analysis reads from records: values, returns, trades,
 statistics. Like ``portfolios.row_slice``, that rebuild does not cover
-leverage or margin accounts. Library code never writes files; the
+leverage or margin accounts, and the result has no ``last_state``: continue
+a chunked run by running ``chunked.run`` again over the longer history with
+the same checkpoint, which picks up after the last finished chunk. Library code never writes files; the
 checkpoint is written here, in Python.
 """
 
@@ -102,7 +104,11 @@ def run(
     close_a = np.asarray(close, dtype=float)
     n_rows = close_a.shape[0]
     one_column = close_a.ndim == 1
-    signature = (entry, close_a.shape, chunk, lookback)
+    from .cache import digest
+
+    # The checkpoint belongs to these inputs: the shape, the chunking and a
+    # digest of every argument, data included.
+    signature = (entry, close_a.shape, chunk, lookback, digest(close_a, args, kwargs))
 
     done, state, orders, cash = 0, None, [], []
     if checkpoint is not None and os.path.exists(checkpoint):

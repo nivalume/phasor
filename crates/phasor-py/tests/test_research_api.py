@@ -264,3 +264,8 @@ def test_indicator_streams_match_the_batch():
             np.testing.assert_array_equal(got, batch.outputs[name], err_msg=f"{kind}.{name}")
     with pytest.raises(TypeError, match="no parameter"):
         phasor.indicators.Stream("rsi", span=3)
+    # The binding's own defaults are the Python functions'.
+    raw = phasor._phasor._IndicatorStream("bbands", 3, {})
+    bb = phasor.indicators.bbands(c)
+    rows = [raw.update(list(c[i]), None, None, None) for i in range(len(c))]
+    np.testing.assert_array_equal(np.array([r["middle"] for r in rows]), bb.outputs["middle"])

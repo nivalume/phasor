@@ -27,10 +27,19 @@ def _value(text: str) -> Any:
     return {"true": True, "false": False}.get(text.lower(), text)
 
 
-def _notifiers(args: argparse.Namespace) -> list:
+def _notifiers(args: argparse.Namespace, cfg: dict) -> list:
+    """The ``[notify]`` section's ``file`` and ``command``, then the
+    command line's."""
+    from pathlib import Path
+
     from .schedule import Command, File
 
     out: list = []
+    section = cfg.get("notify", {})
+    if "file" in section:
+        out.append(File(str(Path(cfg.get("_base", ".")) / section["file"])))
+    if "command" in section:
+        out.append(Command(section["command"]))
     if args.notify_file:
         out.append(File(args.notify_file))
     if args.notify_command:
@@ -99,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 name, _, values = item.partition("=")
                 cfg.setdefault("sweep", {})[name] = [_value(v) for v in values.split(",")]
         job = Job(lambda: config.run(cfg), name=f"phasor {args.command} {args.config}",
-                  notify=_notifiers(args))
+                  notify=_notifiers(args, cfg))
         result = job()
         print(_table(result, args.metric))
     elif args.command == "schedule":

@@ -253,7 +253,7 @@ def neighbors(results: ParamResults, key: str = "value", names: Sequence[str] | 
     axes = {}
     for name in names:
         try:
-            axes[name] = sorted({p[name] for p in results.params})
+            axes[name] = sorted({p[name] for p in results.params if name in p})
         except TypeError:
             continue
     index = {tuple(sorted(p.items(), key=lambda kv: kv[0])): i for i, p in enumerate(results.params)}
@@ -262,6 +262,8 @@ def neighbors(results: ParamResults, key: str = "value", names: Sequence[str] | 
     for i, p in enumerate(results.params):
         found = []
         for name, values in axes.items():
+            if name not in p:
+                continue
             k = values.index(p[name])
             for step in (-1, 1):
                 if 0 <= k + step < len(values):

@@ -12,7 +12,8 @@ __all__ = ["check_shapes", "help"]
 
 # Market data beside the close: a 1-D array is one column, like close.
 _MARKET = {"open", "high", "low", "close", "price", "val_price", "mark_price", "bid_price", "ask_price",
-           "cash_dividends", "entries", "exits", "long_entries", "long_exits", "short_entries", "short_exits"}
+           "cash_dividends", "funding_rate", "long_financing_rate", "short_financing_rate", "borrow_rate",
+           "entries", "exits", "long_entries", "long_exits", "short_entries", "short_exits"}
 # Parameters whose 1-D form is one value per bar.
 _PER_ROW = {"cash_deposits", "cash_earnings", "debt_rate", "force_exit", "auto_deleverage", "index"}
 
@@ -60,7 +61,11 @@ def help(obj: Any, *, full: bool = False, echo: bool = True) -> str:
 def check_shapes(close: Any, **inputs: Any) -> dict[str, str]:
     """How each input would broadcast against ``close``, before a run:
     ``scalar``, ``per bar``, ``per column``, ``full``, or the error the
-    run would raise. Raises ``ValueError`` listing every bad input."""
+    run would raise. Raises ``ValueError`` listing every bad input.
+
+    Checks plain runs: with ``column_map`` the run's columns are the map's,
+    and shared ``cash_deposits`` are ``(bars, groups)``; neither is
+    modelled here."""
     c = np.asarray(close)
     n_rows = c.shape[0]
     n_cols = 1 if c.ndim == 1 else c.shape[1]

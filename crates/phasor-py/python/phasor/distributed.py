@@ -16,7 +16,8 @@ unless there are exactly as many bars as columns: then pass it 2-D. With ``cash_
 ``"thread"``, ``"ray"`` (needs ``ray``, started with ``ray.init()``
 or here), or ``"serial"``. Results are stacked with
 ``phasor.portfolios.column_stack``, which rebuilds from records: leverage
-and margin accounts are not supported.
+and margin accounts are not supported, and a result stacked from several
+chunks has no ``last_state`` to continue with ``resume=``.
 """
 
 from __future__ import annotations
@@ -97,6 +98,11 @@ def run(entry: str, close: Any, *args: Any, n_chunks: int = 4, backend: str = "p
         init = kw.get("init_cash")
         if isinstance(init, np.ndarray) and init.ndim == 1 and len(init) == len(lens) and len(lens) != n_cols:
             kw["init_cash"] = init[g0:g1]
+        # Shared deposits are one column per group.
+        dep = kwargs.get("cash_deposits")
+        if (sharing and isinstance(dep, np.ndarray) and dep.ndim == 2 and dep.shape[1] == len(lens)
+                and len(lens) != n_cols):
+            kw["cash_deposits"] = dep[:, g0:g1]
         jobs.append((entry, c[:, c0:c1], tuple(_cut(a, n_rows, n_cols, c0, c1) for a in args), kw))
     if backend == "serial":
         parts = [_job(*j) for j in jobs]

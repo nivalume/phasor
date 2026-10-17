@@ -20,7 +20,7 @@ that never hits only adds hashing and storage. Portfolios are stored as their
 versioned bytes (``Portfolio.to_bytes``), anything else with pickle. Inputs
 must not change in place between calls with the same object: the digest is
 of the contents at call time, so a change gives a new key, but a function
-that reads globals is keyed only by its arguments.
+that reads globals is keyed only by its arguments and its own code.
 """
 
 from __future__ import annotations
@@ -57,6 +57,12 @@ def _feed(h: Any, value: Any) -> None:
             _feed(h, value[k])
     elif callable(value) and hasattr(value, "__qualname__"):
         h.update(f"fn:{getattr(value, '__module__', '')}.{value.__qualname__}".encode())
+        # Its code too, so an edited function does not find its old results;
+        # what the code reads from globals or closures is not seen.
+        code = getattr(value, "__code__", None)
+        if code is not None:
+            h.update(code.co_code)
+            _feed(h, [c for c in code.co_consts if not hasattr(c, "co_code")])
     elif hasattr(value, "to_bytes") and not isinstance(value, int):
         h.update(b"bytes")
         h.update(value.to_bytes())

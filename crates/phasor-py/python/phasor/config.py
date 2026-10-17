@@ -23,6 +23,10 @@
     stats = "stats.json"         # statistics per parameter set and account
     portfolio = "run.phasor"     # phasor.save of the last (or only) run
 
+    [notify]                     # read by `phasor run` and `phasor sweep`
+    file = "runs.log"            # append each outcome
+    command = "mail -s phasor me@example.com"   # or pipe it to a command
+
 Paths are relative to the file. ``entry = "from_orders"`` under
 ``[backtest]`` takes a ``size`` expression under ``[signals]`` instead.
 ``load`` reads and checks a file; ``run`` runs one; the ``phasor`` command

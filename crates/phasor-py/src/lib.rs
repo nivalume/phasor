@@ -1952,6 +1952,9 @@ fn from_signals(
     }
     let cbs = callbacks.map(callbacks::PyCallbacks::new).transpose()?;
     let builtin = builtin.map(builtin_of).transpose()?;
+    if let Some(b) = &builtin {
+        b.validate(args.use_stops).map_err(to_py_err)?;
+    }
     if builtin.is_some() && cbs.is_some() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "the built-in rules (risk, breakeven, max_positions, max_exposure) and Python \
@@ -2577,7 +2580,6 @@ fn builtin_of(d: &Bound<'_, PyDict>) -> PyResult<phasor_sim::Builtin> {
             .map_or(Ok(0), |v| v.extract())?,
         max_exposure: get("max_exposure")?,
     };
-    b.validate().map_err(to_py_err)?;
     Ok(b)
 }
 

@@ -65,9 +65,15 @@ impl Builtin {
     ///
     /// # Errors
     ///
-    /// `risk` without `risk_stop` or the reverse, or a negative or
-    /// non-finite parameter that is set.
-    pub fn validate(&self) -> Result<()> {
+    /// `risk` without `risk_stop` or the reverse, a negative or non-finite
+    /// parameter that is set, or `breakeven` in a run that does not test
+    /// stops (`use_stops = false`), where the moved stop would never fire.
+    pub fn validate(&self, use_stops: bool) -> Result<()> {
+        if !self.breakeven.is_nan() && !use_stops {
+            return Err(Error::Invariant(
+                "breakeven moves a stop, and this run does not test stops (use_stops)".into(),
+            ));
+        }
         if self.risk.is_nan() != self.risk_stop.is_nan() {
             return Err(Error::Invariant(
                 "risk sizing needs both risk and risk_stop".into(),
@@ -86,12 +92,6 @@ impl Builtin {
             }
         }
         Ok(())
-    }
-
-    /// Whether the break-even rule is on, which needs the run to test stops.
-    #[must_use]
-    pub fn moves_stops(&self) -> bool {
-        !self.breakeven.is_nan()
     }
 }
 

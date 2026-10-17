@@ -46,6 +46,8 @@ def test_neighbors_find_isolated_peaks():
     assert nb["count"][i] == 4 and nb["mean"][i] == 1.0 and nb["ratio"][i] == pytest.approx(0.1)
     corner = g.index({"a": 1, "b": 1})
     assert nb["count"][corner] == 2 and nb["min"][corner] == 1.0
+    mixed = P.ParamResults(g + [{"a": 2, "b": 2, "c": 5}], res.values + [3.0])
+    assert P.neighbors(mixed)["count"][-1] == 0
 
 
 def test_backtests_run_over_a_grid():
