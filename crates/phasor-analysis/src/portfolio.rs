@@ -957,6 +957,49 @@ impl<'a> Portfolio<'a> {
         phasor_records::edge_ratio_by_column(&ex, &self.account_trades()?.col, self.n_groups())
     }
 
+    /// MAE and MFE by side for account `account`: the mean of each, as
+    /// returns, and the edge ratio, for its long trades and its short ones.
+    /// NaN for a side without trades. The keys are the stats table's.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::excursions`], and an account out of range.
+    pub fn excursion_stats(
+        &self,
+        high: &FlexArray<'_, f64>,
+        low: &FlexArray<'_, f64>,
+        account: usize,
+    ) -> Result<Vec<(&'static str, f64)>> {
+        if account >= self.n_groups() {
+            return Err(Error::Invariant(format!(
+                "account {account} out of range 0..{}",
+                self.n_groups()
+            )));
+        }
+        let ex = self.excursions(high, low)?;
+        let trades = self.account_trades()?;
+        let mut out = Vec::with_capacity(6);
+        for (side, names) in [
+            (0_i8, ["avg_mae_long", "avg_mfe_long", "edge_ratio_long"]),
+            (1_i8, ["avg_mae_short", "avg_mfe_short", "edge_ratio_short"]),
+        ] {
+            let mine: Vec<usize> = (0..trades.col.len())
+                .filter(|&i| trades.col[i] == account as i64 && trades.direction[i] == side)
+                .collect();
+            let mean = |v: &[f64]| {
+                if mine.is_empty() {
+                    f64::NAN
+                } else {
+                    mine.iter().map(|&i| v[i]).sum::<f64>() / mine.len() as f64
+                }
+            };
+            let (mae, mfe) = (mean(&ex.mae_ret), mean(&ex.mfe_ret));
+            let edge = if mae < 0.0 { mfe / -mae } else { f64::NAN };
+            out.extend([(names[0], mae), (names[1], mfe), (names[2], edge)]);
+        }
+        Ok(out)
+    }
+
     // --- per-account metrics ------------------------------------------------
 
     /// Applies a reduction to every column's returns.

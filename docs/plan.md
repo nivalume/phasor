@@ -173,9 +173,9 @@
 
 - [x] 8 个 Rust 指标（MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV）和参数扫描
 - [x] 因子表达式 DSL，`FactorSet`，Alpha158、Alpha360
-- [ ] Rust 指标接到 Python
-- [ ] 指标工厂：自定义指标做参数网格、带参数标签输出
-- [ ] 第三方库包装：TA-Lib、pandas-ta、ta、smartmoneyconcepts
+- [x] Rust 指标接到 Python：`phasor.indicators.ma/mstd/bbands/rsi/stoch/macd/atr/obv/true_range`，参数列表做乘积（或 `product=False` 逐位配对），`IndicatorResult` 带每列参数标签和 `select(...)`
+- [x] 指标工厂：`IndicatorFactory(func, inputs, params, outputs).run(...)`，任意 Python 函数按参数网格跑，输出布局和内置指标相同
+- [x] 第三方库包装：`from_talib`、`from_pandas_ta`、`from_ta`、`from_smc`，用到时才导入；TA-Lib 的 SMA 和内置 MA 相差 2e-13（测试在装了 TA-Lib 时跑）
 - [ ] 截面算子（`CSRank`、`CSZScore`、`Scale`、中性化），按图分阶段执行
 - [ ] WorldQuant 101，对照公开公式手算 fixture
 - [ ] 流式指标：逐根更新，结果和批量计算一致
@@ -188,12 +188,12 @@
 - [x] 带种子随机信号 `random_by_prob`、`random_n`、`random_entries_exits`
 - [x] 信号区间和长度：`partition_ranges`、`between_ranges`、`duration` 等（Rust）
 - [x] ML 标签 `fixed_horizon_returns`、`trend_labels`、`triple_barrier`、`pivot_labels`
-- [ ] 信号清洗和区间函数接到 Python
-- [ ] 按日历生成信号（每月第一个交易日等）
-- [ ] 信号汇总统计表（次数、间隔和长度的均值与分位数）
-- [ ] 匹配型随机基线：信号数量和分布与原策略相同，只打乱位置
-- [ ] 均值类标签
-- [ ] 用模型预测值回测并和简单基线比较
+- [x] 信号清洗和区间函数接到 Python：`phasor.signals.clean`、`exit_after`、`exit_on`、`ranges`、`rank`、`nth_index`、`normalized_average_index`
+- [x] 按日历生成信号：`calendar(index, "ME", which="first"|"last", n=)`，按实际有的 K 线数（每月第一个交易日就是当月第一根）
+- [x] 信号汇总统计表：`signals.stats`（次数、频率、首末位置、间隔和连续长度的均值、中位数、10% 和 90% 分位、平均位置）
+- [x] 匹配型随机基线：`random_like(keep="count")` 保持每列次数，`keep="gaps"` 还保持间隔分布，只打乱顺序和起点
+- [x] 均值类标签：`labels.mean_labels(close, window, wait=)`
+- [x] 用模型预测值回测并和基线比较：`phasor.predictions.backtest`（模型、一直持有、匹配随机信号）和 `compare`
 
 ### 2.12 组合分析
 
@@ -203,13 +203,13 @@
 - [x] 敞口：`allocations`、`long_exposure`、`short_exposure`、`net_exposure`、`gross_long_short`、`position_coverage`
 - [x] MAE/MFE、edge ratio
 - [x] 事件研究 `phasor.events`
-- [ ] 回撤记录、滚动指标接到 Python
-- [ ] MAE/MFE 多空分开统计，加进统计表
-- [ ] 外部收益序列分析：Python 入口，以及不需要交易记录的统计表
-- [ ] 组合切片、拼接、重采样（含 `Portfolio.resample`）
-- [ ] 形态搜索
-- [ ] 图表：可选 extra `phasor[plot]`（Plotly）
-- [ ] 结果转 pandas
+- [x] 回撤记录、滚动指标接到 Python：`pf.drawdowns()`（含派生的回撤幅度、持续、下跌和恢复时长）、`pf.rolling(metric, window)`（18 个指标，含对买入持有的 beta、alpha 等）
+- [x] MAE/MFE 多空分开统计：`pf.stats(high=, low=)` 加 `avg_mae_long`、`avg_mfe_long`、`edge_ratio_long` 和空头三项
+- [x] 外部收益序列分析：`phasor.returns.metric/rolling/drawdowns/stats/value`，和组合用同一套 Rust 指标，结果一致
+- [x] 组合切片、拼接、重采样：`Portfolio.from_records` 从记录建组合；`phasor.portfolios.select`（按账户）、`column_stack`、`row_slice`（从切点前的现金和持仓接着算，不支持杠杆和保证金）、`resample`（`resample_bars(index, "W")`）；日志不带过去
+- [x] 形态搜索：`phasor.patterns.search`（滑动窗口，min-max 或 z-score 缩放，可多个窗口长度，默认不重叠），`patterns.signals` 在形态完成后一根给信号
+- [x] 图表：`phasor.plotting`（净值和回撤、成交标记、最深回撤、滚动指标），可选 extra `phasor[plot]`
+- [x] 结果转 pandas：`phasor.frames`（记录、净值、收益、统计表），可选 extra `phasor[pandas]`
 
 ### 2.13 参数优化与验证
 

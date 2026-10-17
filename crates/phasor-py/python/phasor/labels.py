@@ -22,7 +22,7 @@ import numpy as np
 from . import _phasor
 from ._columns import columns, restore
 
-__all__ = ["fixed_horizon_returns", "pivot_labels", "trend_labels", "triple_barrier"]
+__all__ = ["fixed_horizon_returns", "mean_labels", "pivot_labels", "trend_labels", "triple_barrier"]
 
 
 def fixed_horizon_returns(close: Any, horizon: int) -> np.ndarray:
@@ -77,3 +77,23 @@ def pivot_labels(close: Any, threshold: float) -> np.ndarray:
     """
     arr, one_d = columns(close, "close")
     return restore(_phasor.pivot_labels(arr, float(threshold)), one_d)
+
+
+def mean_labels(close: Any, window: int, *, wait: int = 1) -> np.ndarray:
+    """The mean of the ``window`` closes starting ``wait`` bars ahead, over
+    this close, less 1: ``mean(close[t + wait : t + wait + window]) / close[t]
+    - 1``. Smoother than one forward return, so a label less driven by the
+    one bar the horizon ends on. NaN where the window runs past the end, or
+    has a NaN in it. Looks ``wait + window - 1`` bars ahead."""
+    if window < 1 or wait < 0:
+        raise ValueError("window must be 1 or more and wait 0 or more")
+    c, one_d = columns(close, "close")
+    n = c.shape[0]
+    out = np.full_like(c, np.nan)
+    csum = np.vstack([np.zeros((1, c.shape[1])), np.cumsum(c, axis=0)])
+    last = n - wait - window
+    if last >= 0:
+        t = np.arange(last + 1)
+        mean = (csum[t + wait + window] - csum[t + wait]) / window
+        out[t] = mean / c[t] - 1
+    return restore(np.asfortranarray(out), one_d)

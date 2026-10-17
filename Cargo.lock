@@ -1158,6 +1158,7 @@ dependencies = [
  "phasor-exec",
  "phasor-expr",
  "phasor-generic",
+ "phasor-indicators",
  "phasor-model",
  "phasor-records",
  "phasor-signals",

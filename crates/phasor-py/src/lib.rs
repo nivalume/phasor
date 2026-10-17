@@ -50,10 +50,13 @@ mod arrow;
 mod callbacks;
 pub mod data;
 pub mod expr;
+mod indicators;
 pub mod params;
 pub mod parse;
 pub mod research;
 mod resume;
+mod returns_fns;
+mod signal_fns;
 
 use std::sync::OnceLock;
 
@@ -230,6 +233,99 @@ impl PyPortfolio {
         pyo3::types::PyBytes::new(py, &resume::to_bytes(self))
     }
 
+    /// The closes it was valued at, `(n_rows, source columns)`.
+    #[getter]
+    fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        columns_out(py, self.close.clone(), self.n_rows, self.source_cols)
+    }
+
+    /// The run column -> close column map, or `None`.
+    #[getter]
+    fn column_map(&self) -> Option<Vec<usize>> {
+        self.column_map.clone()
+    }
+
+    /// Starting cash per column (per group, repeated, when cash is shared).
+    #[getter]
+    fn init_cash<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.init_cash.clone().into_pyarray(py)
+    }
+
+    /// What `from_records` needs besides the records to analyse as this
+    /// portfolio does: `ann_factor`, `risk_free`, `trades`, `incl_open`,
+    /// `allow_negative_price`.
+    #[getter]
+    fn scoring<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        d.set_item("ann_factor", self.ann_factor)?;
+        d.set_item("risk_free", self.risk_free)?;
+        d.set_item(
+            "trades",
+            match self.trades_type {
+                TradesType::EntryTrades => "entry",
+                TradesType::ExitTrades => "exit",
+                TradesType::Positions => "positions",
+            },
+        )?;
+        d.set_item("incl_open", self.incl_open)?;
+        d.set_item("allow_negative_price", self.orders.allow_negative_price)?;
+        Ok(d)
+    }
+
+    /// A portfolio from fill records: `phasor.Portfolio.from_records`.
+    #[staticmethod]
+    #[pyo3(signature = (
+        orders,
+        close,
+        *,
+        init_cash = None,
+        cash_records = None,
+        group_lens = None,
+        cash_sharing = false,
+        column_map = None,
+        allow_negative_price = false,
+        ann_factor = 365.0,
+        risk_free = 0.0,
+        trades = "exit",
+        incl_open = false,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one argument per input of the analysis"
+    )]
+    fn from_records(
+        orders: &Bound<'_, PyDict>,
+        close: &Bound<'_, PyAny>,
+        init_cash: Option<&Bound<'_, PyAny>>,
+        cash_records: Option<&Bound<'_, PyDict>>,
+        group_lens: Option<Vec<usize>>,
+        cash_sharing: bool,
+        column_map: Option<Vec<usize>>,
+        allow_negative_price: bool,
+        ann_factor: f64,
+        risk_free: f64,
+        trades: &str,
+        incl_open: bool,
+    ) -> PyResult<Self> {
+        records_portfolio(
+            orders,
+            close,
+            init_cash,
+            cash_records,
+            group_lens,
+            cash_sharing,
+            column_map,
+            allow_negative_price,
+            Scoring {
+                ann_factor,
+                risk_free,
+                trades_type: parse::trades_type(trades)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?,
+                incl_open,
+            },
+        )
+    }
+
     /// A portfolio from `to_bytes`.
     #[staticmethod]
     fn from_bytes(bytes: &[u8]) -> PyResult<Self> {
@@ -284,23 +380,38 @@ impl PyPortfolio {
     /// be diffed. A metric with no answer comes back as `float('nan')`; one
     /// whose inputs were not supplied comes back as `None`, which is a
     /// different statement.
-    #[pyo3(signature = (col = None, *, group = None))]
+    ///
+    /// With the bars' `high` and `low` (shaped like `close`), the table adds
+    /// MAE and MFE by side: `avg_mae_long`, `avg_mfe_long`,
+    /// `edge_ratio_long` and the same for short trades, as returns.
+    #[pyo3(signature = (col = None, *, group = None, high = None, low = None))]
     fn stats<'py>(
         &self,
         py: Python<'py>,
         col: Option<usize>,
         group: Option<usize>,
+        high: Option<&Bound<'py, PyAny>>,
+        low: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let col = self.account_index(col, group)?;
-        let table = py.detach(|| -> PyResult<_> {
+        let excursions = high.is_some() || low.is_some();
+        let high = self.bar_field(high, "high")?;
+        let low = self.bar_field(low, "low")?;
+        let (table, split) = py.detach(|| -> PyResult<_> {
             let pf = self.core()?;
+            let split = if excursions {
+                let (high, low) = (self.bar_view(&high)?, self.bar_view(&low)?);
+                pf.excursion_stats(&high, &low, col).map_err(to_py_err)?
+            } else {
+                Vec::new()
+            };
             let pf = if self.cash_sharing {
                 pf
             } else {
                 let benchmark = self.benchmark.get_or_init(|| pf.buy_and_hold());
                 pf.with_benchmark_ref(benchmark).map_err(to_py_err)?
             };
-            pf.stats(col, &Select::all()).map_err(to_py_err)
+            Ok((pf.stats(col, &Select::all()).map_err(to_py_err)?, split))
         })?;
         let out = PyDict::new(py);
         for (title, value) in table {
@@ -312,6 +423,9 @@ impl PyPortfolio {
                 // inputs for it.
                 Value::Missing => out.set_item(title, py.None())?,
             }
+        }
+        for (key, value) in split {
+            out.set_item(key, value)?;
         }
         Ok(out)
     }
@@ -429,6 +543,68 @@ impl PyPortfolio {
         Ok(py
             .detach(|| self.core().map(|pf| pf.returns().column(index).to_vec()))?
             .into_pyarray(py))
+    }
+
+    /// Drawdown episodes of each account's value, as a dict of arrays:
+    /// where each peaked, bottomed and recovered (`peak_idx`, `valley_idx`,
+    /// `end_idx`), the values there, `status` (0 still open, 1 recovered),
+    /// and derived `drawdown`, `duration`, `decline_duration`,
+    /// `recovery_duration`, `recovery_return` and `recovered`.
+    fn drawdowns<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = py.detach(|| self.core().map(|pf| pf.drawdowns().clone()))?;
+        returns_fns::drawdowns_dict(py, &d)
+    }
+
+    /// A metric of each account over each trailing `window` bars,
+    /// `(n_rows, n_accounts)`: one of `total_return`, `annualized_return`,
+    /// `annualized_volatility`, `max_drawdown`, `calmar_ratio`,
+    /// `omega_ratio`, `sharpe_ratio`, `downside_risk`, `sortino_ratio`,
+    /// `tail_ratio`, `value_at_risk`, `cond_value_at_risk`, or against
+    /// buy-and-hold `information_ratio`, `beta`, `alpha`, `capture`,
+    /// `up_capture`, `down_capture`. `min_periods` (a full window by
+    /// default) counts bars with a return.
+    #[pyo3(signature = (metric, window, *, min_periods = None, required_return = 0.0, cutoff = 0.05, ddof = 1))]
+    fn rolling<'py>(
+        &self,
+        py: Python<'py>,
+        metric: &str,
+        window: usize,
+        min_periods: Option<usize>,
+        required_return: f64,
+        cutoff: f64,
+        ddof: usize,
+    ) -> PyResult<Bound<'py, PyArray2<f64>>> {
+        let paired = returns_fns::PAIRED.contains(&metric);
+        if paired && self.cash_sharing {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "a benchmark metric needs one instrument per account; this run shares cash",
+            ));
+        }
+        let o = returns_fns::Opts {
+            ann_factor: self.ann_factor,
+            risk_free: self.risk_free,
+            required_return,
+            cutoff,
+            ddof,
+        };
+        let (data, n_rows, n_cols) = py.detach(|| -> PyResult<_> {
+            let pf = self.core()?;
+            let returns = pf.returns();
+            let bench = paired.then(|| pf.buy_and_hold());
+            let mut out = Vec::with_capacity(returns.n_rows() * returns.n_cols());
+            for c in 0..returns.n_cols() {
+                out.extend(returns_fns::rolling(
+                    metric,
+                    returns.column(c),
+                    bench.as_ref().map(|b| b.column(c)),
+                    window,
+                    min_periods,
+                    o,
+                )?);
+            }
+            Ok((out, returns.n_rows(), returns.n_cols()))
+        })?;
+        columns_out(py, data, n_rows, n_cols)
     }
 
     /// Cash held by an account at the end of each bar.
@@ -2482,6 +2658,178 @@ fn cash_dict<'py>(
     Ok(out)
 }
 
+/// One field of a records dict, `None` when it is not there.
+fn field<'py, T: FromPyObjectOwned<'py>>(
+    d: &Bound<'py, PyDict>,
+    name: &str,
+) -> PyResult<Option<Vec<T>>> {
+    d.get_item(name)?.map(|v| v.extract()).transpose()
+}
+
+/// A field a records dict must have.
+fn required<'py, T: FromPyObjectOwned<'py>>(
+    d: &Bound<'py, PyDict>,
+    name: &str,
+) -> PyResult<Vec<T>> {
+    field(d, name)?.ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("the records have no {name:?}"))
+    })
+}
+
+/// [`PyPortfolio::from_records`].
+#[allow(clippy::too_many_arguments, reason = "the inputs of the analysis")]
+fn records_portfolio(
+    orders: &Bound<'_, PyDict>,
+    close: &Bound<'_, PyAny>,
+    init_cash: Option<&Bound<'_, PyAny>>,
+    cash_records: Option<&Bound<'_, PyDict>>,
+    group_lens: Option<Vec<usize>>,
+    cash_sharing: bool,
+    column_map: Option<Vec<usize>>,
+    allow_negative_price: bool,
+    scoring: Scoring,
+) -> PyResult<PyPortfolio> {
+    let bad = |m: String| pyo3::exceptions::PyValueError::new_err(m);
+    let close_b = borrow_f64(close, "close")?;
+    let Borrowed::Slice(close_arr) = &close_b else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "close must be a 2-D float64 array",
+        ));
+    };
+    let (close_flat, n_rows, source_cols) = columns_of(close_arr)?;
+    if let Some(map) = &column_map {
+        if let Some(&c) = map.iter().find(|&&c| c >= source_cols) {
+            return Err(bad(format!(
+                "column_map names close column {c} of {source_cols}"
+            )));
+        }
+    }
+    let n_cols = column_map.as_ref().map_or(source_cols, Vec::len);
+    let init_cash_b = borrow_opt_f64(init_cash, "init_cash")?;
+    let (groups, cash) = account_inputs(
+        cash_sharing,
+        group_lens,
+        &init_cash_b,
+        n_rows,
+        n_cols,
+        FlexArray::Scalar(100.0),
+    )?;
+    let mut rec = OrderRecords::new();
+    rec.col = required(orders, "col")?;
+    rec.idx = required(orders, "idx")?;
+    rec.size = required(orders, "size")?;
+    rec.price = required(orders, "price")?;
+    rec.fees = required(orders, "fees")?;
+    rec.side = required::<i64>(orders, "side")?
+        .into_iter()
+        .map(|s| i8::try_from(s).unwrap_or(-1))
+        .collect();
+    if let Some(debt) = field(orders, "debt")? {
+        rec.debt = debt;
+        rec.locked_cash = required(orders, "locked_cash")?;
+        rec.margin = required(orders, "margin")?;
+        rec.isolated = field(orders, "isolated")?.unwrap_or_else(|| vec![false; rec.col.len()]);
+        rec.liquidation =
+            field(orders, "liquidation")?.unwrap_or_else(|| vec![false; rec.col.len()]);
+        rec.multiplier = field(orders, "multiplier")?.unwrap_or_else(|| vec![1.0; rec.col.len()]);
+    }
+    let n = rec.col.len();
+    let lens = [
+        rec.idx.len(),
+        rec.size.len(),
+        rec.price.len(),
+        rec.fees.len(),
+        rec.side.len(),
+    ];
+    let balances = [
+        rec.debt.len(),
+        rec.locked_cash.len(),
+        rec.margin.len(),
+        rec.isolated.len(),
+        rec.liquidation.len(),
+        rec.multiplier.len(),
+    ];
+    if lens.iter().any(|&l| l != n) || balances.iter().any(|&l| l != 0 && l != n) {
+        return Err(bad("the records' fields are of different lengths".into()));
+    }
+    for i in 0..n {
+        if rec.col[i] < 0 || rec.col[i] as usize >= n_cols {
+            return Err(bad(format!(
+                "fill {i} is in column {} of {n_cols}",
+                rec.col[i]
+            )));
+        }
+        if rec.idx[i] < 0 || rec.idx[i] as usize >= n_rows {
+            return Err(bad(format!(
+                "fill {i} is on bar {} of {n_rows}",
+                rec.idx[i]
+            )));
+        }
+        if !(0..=1).contains(&rec.side[i]) {
+            return Err(bad(format!("fill {i}'s side is not 0 (buy) or 1 (sell)")));
+        }
+    }
+    if let Some(c) = cash_records {
+        rec.cash.col = required(c, "col")?;
+        rec.cash.idx = required(c, "idx")?;
+        rec.cash.amount = required(c, "amount")?;
+        rec.cash.kind = required::<i64>(c, "kind")?
+            .into_iter()
+            .map(|k| i8::try_from(k).unwrap_or(-1))
+            .collect();
+        let m = rec.cash.col.len();
+        if [
+            rec.cash.idx.len(),
+            rec.cash.amount.len(),
+            rec.cash.kind.len(),
+        ]
+        .iter()
+        .any(|&l| l != m)
+        {
+            return Err(bad(
+                "the cash records' fields are of different lengths".into()
+            ));
+        }
+        for i in 0..m {
+            if rec.cash.col[i] < 0 || rec.cash.col[i] as usize >= n_cols {
+                return Err(bad(format!(
+                    "cash flow {i} is in column {}",
+                    rec.cash.col[i]
+                )));
+            }
+            if rec.cash.idx[i] < 0 || rec.cash.idx[i] as usize >= n_rows {
+                return Err(bad(format!("cash flow {i} is on bar {}", rec.cash.idx[i])));
+            }
+            // `CashFlowKind`'s discriminants run 0 (deposit) to 8 (initial
+            // position).
+            if !(0..=8).contains(&rec.cash.kind[i]) {
+                return Err(bad(format!(
+                    "cash flow {i}'s kind {} is not one",
+                    rec.cash.kind[i]
+                )));
+            }
+        }
+    }
+    rec.allow_negative_price = allow_negative_price;
+    let pf = PyPortfolio::assemble(
+        rec,
+        LogRecords::new(),
+        close_flat.to_vec(),
+        source_cols,
+        column_map,
+        cash,
+        groups,
+        cash_sharing,
+        n_rows,
+        n_cols,
+        scoring,
+    );
+    // Checked here rather than on first use: a fill the analysis refuses
+    // should say so where the records came in.
+    pf.core()?;
+    Ok(pf)
+}
+
 fn market_array<'a>(
     data: &'a [f64],
     rows: usize,
@@ -2543,6 +2891,9 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(expr::alpha360, m)?)?;
     m.add_function(wrap_pyfunction!(expr::crossed_above, m)?)?;
     research::register(m)?;
+    indicators::register(m)?;
+    signal_fns::register(m)?;
+    returns_fns::register(m)?;
     m.add(
         "__doc__",
         "Rust engine for phasor. Use the `phasor` package, not this.",
