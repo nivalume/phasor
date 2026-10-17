@@ -10,6 +10,8 @@ venv/
 *.so
 .pytest_cache/
 .hypothesis/
+dist/
+crates/phasor-py/dist/
 
 # Benchmark runs are machine-specific and regenerated; the committed
 # baseline.tsv is the part that is tracked.
