@@ -43,8 +43,6 @@
 #![deny(unsafe_code)]
 
 pub mod array;
-#[allow(unsafe_code)]
-mod arrow;
 mod callbacks;
 pub mod data;
 pub mod expr;
@@ -2928,10 +2926,6 @@ fn market_optional<'a>(
 fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<data::PyInstrumentId>()?;
     m.add_class::<data::PyBarType>()?;
-    m.add_class::<data::PyContext>()?;
-    m.add_class::<data::PyDataset>()?;
-    m.add_function(wrap_pyfunction!(data::catalog_files, m)?)?;
-    m.add_function(wrap_pyfunction!(data::load_data, m)?)?;
     m.add_class::<PyPortfolio>()?;
     m.add_class::<callbacks::PyContext>()?;
     m.add_class::<resume::PySimState>()?;

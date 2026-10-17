@@ -75,8 +75,6 @@ flowchart TD
         THIS --> phasor_core
     end
     subgraph Downstream["被以下上层 crate 依赖"]
-        phasor_data["phasor-data (L2)"]:::down
-        phasor_data --> THIS
         phasor_exec["phasor-exec (L2)"]:::down
         phasor_exec --> THIS
         phasor_expr["phasor-expr (L2)"]:::down
@@ -146,7 +144,7 @@ phasor-records 的 `logs.rs` 就是这样把日志里的整数还原成原因的
 
 ## 标识：InstrumentId 与 BarType 的解析
 
-`InstrumentId` 渲染为 `SYMBOL.VENUE`，用 `rsplit_once('.')` 解析——从**右边**切，所以 `BRK.B.NYSE` 的标的是 `BRK.B`。 `BarType` 是 `SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE`，用 `rsplitn(5, '-')` 解析——同样从右边切，标的名里可以有 `-`（`BTC-USDT`）。 两者都是 phasor-data catalog 的目录名（`<root>/data/<name>/<key>/`），所以解析时拒绝空白、控制字符和路径分隔符。
+`InstrumentId` 渲染为 `SYMBOL.VENUE`，用 `rsplit_once('.')` 解析——从**右边**切，所以 `BRK.B.NYSE` 的标的是 `BRK.B`。 `BarType` 是 `SYMBOL.VENUE-STEP-AGGREGATION-PRICE-SOURCE`，用 `rsplitn(5, '-')` 解析——同样从右边切，标的名里可以有 `-`（`BTC-USDT`）。 两者都是 phasor.data 的源键（目录名 `data/<schema>/<instrument>/` 里的那一段），所以解析时拒绝空白、控制字符和路径分隔符。
 
 #### 示意 / 说明：FromStr for InstrumentId / BarType，JS 移植；成功时还验证 Display 能原样写回
 

@@ -27,8 +27,6 @@
 
 pub use phasor_analysis as analysis;
 pub use phasor_core as core;
-#[cfg(feature = "data")]
-pub use phasor_data as data;
 pub use phasor_exec as exec;
 pub use phasor_expr as expr;
 pub use phasor_generic as generic;

@@ -12,11 +12,9 @@ workspace = true
 
 [features]
 default = []
-data = ["dep:phasor-data"]
 polars = ["phasor-expr/polars"]
 
 [dependencies]
-phasor-data = { workspace = true, optional = true }
 phasor-analysis = { workspace = true }
 phasor-core = { workspace = true }
 phasor-exec = { workspace = true }

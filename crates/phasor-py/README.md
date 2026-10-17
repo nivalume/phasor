@@ -322,9 +322,10 @@ entries[1:] = values["trend"][:-1] > 0
 ## Local data and parameter sweeps
 
 Install `pip install -e 'crates/phasor-py[data]'` for local CSV/Parquet sources.
-NumPy-only backtests still work without PyArrow. Rust `phasor-data` owns reading,
-validation, BarPanel construction and auxiliary alignment; Python supplies a
-batch decoder through Arrow C Data capsules (no per-row Python conversion).
+NumPy-only backtests still work without PyArrow. `phasor.data` owns reading,
+validation, BarPanel construction and auxiliary alignment, in Python: pyarrow
+feeds Arrow batches to the caller's decoder, and NumPy assembles the panel and
+answers the asof/window views.
 
 `InstrumentId.parse("ADAUSDC.BINANCE")` separates `symbol` and `venue`.
 `BarType.parse("ADAUSDC.BINANCE-1-MINUTE-LAST-EXTERNAL")` additionally preserves
@@ -345,31 +346,45 @@ the same column. `instrument="source"` uses the source key;
 means global data, broadcast only when an aligned view is requested.
 
 ```python
-# schemas contains user-defined DataSchema objects; see the runnable example.
-catalog = phasor.data.Catalog(schemas=schemas)  # ~/.cache/phasor/catalog
-bars = catalog.source("bars", keys=bar_types)
-# Or the same Schema with standalone files, without a catalog hierarchy:
-bars = phasor.data.files({bar_types[0]: "ada.csv", bar_types[1]: "eth.csv"},
-                       schema=schemas[0])
-panel = bars.prepare()
-funding = catalog.source("funding", keys=instruments).load()
-news = catalog.source("news", keys=instruments).load()
+# One path is all a source needs: a file, a directory of one key's files, or a
+# directory whose children are named after the keys.
+panel = phasor.data.load("/data/crypto_bar", bar_schema, bar_types).prepare()
+panel = phasor.data.load(f"/data/crypto_bar/{bar_types[0]}", bar_schema).prepare()
+funding = phasor.data.load("/data/crypto_funding_rate", funding_schema, instruments)
 fields = {
     "close": panel.close,
     "funding_rate": funding.asof(panel, field="rate"),
-    "news_sentiment": news.window(panel, field="sentiment", window="30m",
-                                  agg="mean", empty=0.0),
+    "news_sentiment": funding.window(panel, field="sentiment", window="30m",
+                                     agg="mean", empty=0.0),
 }
 ```
 
-Catalog paths are `root/data/{schema.name}/{key}/*.{parquet,csv}`. Files are
-sorted within each key; requested keys retain their order. Standalone file
-lists retain their explicit order. Readers never create directories, download,
-or write caches. `load(start=..., end=...)` and `prepare(...)` filter decoded
-availability timestamps in `[start,end)`. Arbitrary decoder transformations
-prevent guessing a physical timestamp predicate, so range filtering follows
-decoding; Parquet column projection happens before decoding. Include earlier
-history when loading auxiliary sources for asof/window views.
+A `Source` binds files to a decoder when the read should be deferred or repeated:
+
+```python
+source = phasor.data.Source("/data/crypto_bar", bar_schema, bar_types)
+panel = source.prepare(start=start_ns, end=end_ns)
+# The same mapping form names the keys and paths explicitly.
+source = phasor.data.Source({bar_types[0]: "ada.csv", bar_types[1]: "eth.csv"}, bar_schema)
+```
+
+With one path, the files are found like this, per key, first match wins: the
+path is a file; `path/<key>` is a file; `path/<key>` is a directory, whose data
+files are read in filename order; or the path is a directory holding one key's
+files, which works for a single key only. A directory whose children are named
+after the keys has no instrument of its own, so it needs `instruments`; a single
+key's directory names it, and a file name is never read as data. Only content
+decides a format, so gzip is transparent (`.csv.gz`, or gzip under any name) and
+a wrongly named file still reads correctly. Gzipped Parquet is refused: Parquet
+compresses internally and its reader needs to seek. Layouts such as
+`<root>/data/<schema>/<instrument>/` are the caller's: pass `<root>/data/<schema>`
+as the path and the instrument list, and nothing about that convention enters
+phasor.
+
+`start` and `end` on `phasor.data.load()` are uint64 UTC nanoseconds or ISO-8601
+strings; `Source.load()` and `Source.prepare()` take nanoseconds only. Either way
+they bound the decoded availability column, half open, and never a file name:
+history an asof or window view needs must be inside the range.
 
 `BarPanel.time` is the sorted union of available bar timestamps. Missing cells
 remain NaN; duplicate timestamps within one series raise an error. Each OHLCV
@@ -405,6 +420,7 @@ independent simulation accounts; rows inside each account remain sequential.
 Runnable examples (all except explicit fetch can run offline):
 
 ```sh
+python examples/local_data.py              # one path: file, instrument directory, schema directory
 python examples/multi_data.py --source catalog
 python examples/multi_data.py --source parquet
 python examples/multi_data.py --source csv
@@ -424,11 +440,13 @@ timings and source/expanded price bytes. Close-derived signals execute one row
 later. Synthetic examples use `.SIM` venues or explicitly synthetic Binance
 sample data.
 
-Migration: `phasor.data.load_cached/align/fetch_*` have been removed. Use
-`files(..., schema=...).prepare()` for old CSV inputs (the crypto example contains
-the decoder). Download/resume/write helpers and interval annualization now live
+Migration: `phasor.data.load_cached/align/fetch_*` have been removed, and so
+have `phasor.data.Catalog` and `phasor.data.files`: `Catalog(root, schemas=[...])
+.source(name, keys=keys)` becomes `Source(root / "data" / name, schema, keys)`,
+and `files({key: path}, schema=schema)` becomes `Source({key: path}, schema)`.
+Download/resume/write helpers and interval annualization now live
 only in `examples/binance.py`. New fetch filenames include the venue, e.g.
-`BTCUSDT.BINANCE-1d.csv`; old files may be passed directly to `files` with an
+`BTCUSDT.BINANCE-1d.csv`; old files may be passed directly to `Source` with an
 explicit full BarType key. There is no automatic rename or cache migration.
 
 ## Build

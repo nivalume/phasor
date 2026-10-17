@@ -105,12 +105,13 @@ def run(root, source):
     timings = {}
     started = perf_counter()
     definitions = schemas()
-    catalog = phasor.data.Catalog(root, schemas=definitions)
     loaded = {}
     for definition in definitions:
         keys = BAR_TYPES if definition.name == "bars" else INSTRUMENTS
-        data = (catalog.source(definition.name, keys=keys) if source == "catalog" else
-                phasor.data.files({key: root / f"{definition.name}-{col}.{source}" for col, key in enumerate(keys)}, schema=definition))
+        # The catalog layout is the caller's: a schema directory holds one
+        # directory per instrument, and Source joins the two.
+        data = (phasor.data.Source(root / "data" / definition.name, definition, keys) if source == "catalog" else
+                phasor.data.Source({key: root / f"{definition.name}-{col}.{source}" for col, key in enumerate(keys)}, definition))
         loaded[definition.name] = data.load()
     timings["load_decode"] = perf_counter() - started
     timings["load_decode_peak_rss_mib"] = peak_rss_mib()

@@ -33,10 +33,10 @@ def load_panel(instruments, interval, directory):
         event_time="time", available_time="time", decode=decode_cached,
     )
     unit = {"m": "MINUTE", "h": "HOUR", "d": "DAY", "w": "WEEK"}[interval[-1]]
-    return phasor.data.files({
+    return phasor.data.Source({
         f"{i}-{int(interval[:-1])}-{unit}-LAST-EXTERNAL": binance._cache_path(directory, str(i), interval)
         for i in instruments
-    }, schema=schema).prepare()
+    }, schema).prepare()
 
 
 def decode_cached(batch, context):

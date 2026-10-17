@@ -4,7 +4,7 @@
 
 > **核心特性与指标：**
 > - **0 个外部依赖**：连 thiserror 都没有：Error 的 Display 是手写的，地基不引入任何第三方代码
-> - **11 个 crate 直接依赖**：工作区 13 个 crate 中，除了它自己和 phasor-data，全部在 [dependencies] 里写了 phasor-core
+> - **11 个 crate 直接依赖**：工作区 12 个 crate 中，除了它自己，全部在 [dependencies] 里写了 phasor-core
 > - **1,258 行 · 32 个测试**：五个模块；math 一个文件就有 13 个测试，因为它是整个引擎里最容易“差一分钱”的地方
 
 <a id="concept"></a>
@@ -117,7 +117,7 @@ flowchart TD
 
 *说明：*
 
-来源：各 crate 的 Cargo.toml 与 `src/` 中的 `use phasor_core::…`。phasor-data 不依赖 phasor-core（它只依赖 phasor-model）。
+来源：各 crate 的 Cargo.toml 与 `src/` 中的 `use phasor_core::…`。
 
 <a id="columns"></a>
 

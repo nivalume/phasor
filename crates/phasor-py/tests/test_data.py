@@ -2,6 +2,7 @@
 from dataclasses import replace
 from pathlib import Path
 import gc
+import gzip
 import sys
 
 import numpy as np
@@ -48,7 +49,7 @@ def source(tmp_path, definition, tables, extension="parquet"):
         path = tmp_path / f"input-{i}.{extension}"
         (csv.write_csv if extension == "csv" else pq.write_table)(batch, path)
         paths[key] = path
-    return phasor.data.files(paths, schema=definition)
+    return phasor.data.Source(paths, definition)
 
 
 def test_three_sources_have_identical_end_to_end_results_and_are_read_only(tmp_path):
@@ -124,7 +125,7 @@ def test_availability_ties_window_boundaries_global_and_row_instruments(tmp_path
         data.asof(panel, field="headline")
 
 
-def test_decoded_range_validation_and_catalog_failures_do_not_create_files(tmp_path):
+def test_decoded_range_validation_and_missing_paths_do_not_create_files(tmp_path):
     data = source(tmp_path, bar_schema(), {KEY:bar_table([3,1,2])})
     np.testing.assert_array_equal(data.prepare(start=2,end=3).time, [2])
     assert data.prepare(start=10).shape == (0,1)
@@ -132,12 +133,12 @@ def test_decoded_range_validation_and_catalog_failures_do_not_create_files(tmp_p
         data.load(start=2,end=2)
     with pytest.raises(ValueError, match="cannot contain nulls"):
         source(tmp_path, bar_schema(), {KEY:bar_table([None])}).load()
-    catalog = phasor.data.Catalog(tmp_path / "absent", schemas=[bar_schema()])
-    with pytest.raises(ValueError):
-        catalog.source("custom", keys=[KEY])
-    assert not (tmp_path / "absent").exists()
+    absent = tmp_path / "absent"
+    with pytest.raises(ValueError, match="neither a file nor a directory"):
+        phasor.data.Source(absent, bar_schema(), [KEY])
+    assert not absent.exists()
     with pytest.raises(ValueError, match="path components"):
-        catalog.source("custom", keys=["../escape"])
+        phasor.data.Source(tmp_path, bar_schema(), ["../escape"])
 
 
 @pytest.mark.parametrize("value", ["ADA", ".BINANCE", "ADA.", "A/B.X", "A X.Y"])
@@ -168,3 +169,128 @@ def test_decoder_controls_time_and_bar_payload(tmp_path):
     data = source(tmp_path, definition, {KEY:bar_table([1]).append_column("extra",pa.array(["retained raw"]))}).load()
     assert data.prepare().close[0,0] == 10.
     assert data.batches[0][1]["extra"].to_pylist() == ["retained raw"]
+
+
+def ns(value):
+    return int(np.datetime64(value, "ns").astype(np.int64))
+
+
+def key_directory(root, tables, extension="parquet"):
+    """Write <root>/<key>/part.<extension> and return the schema directory."""
+    for i, (key, batch) in enumerate(tables.items()):
+        path = root / key / f"part-{i}.{extension}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        (csv.write_csv if extension == "csv" else pq.write_table)(batch, path)
+    return root
+
+
+def test_one_path_reads_a_file_a_key_directory_and_a_schema_directory(tmp_path):
+    definition = bar_schema()
+    directory = key_directory(tmp_path / "bars", {KEY: bar_table([10, 20, 30]), OTHER: bar_table([1, 2])})
+    from_root = phasor.data.Source(directory, definition, [KEY, OTHER]).prepare()
+    # The panel is the union of the two series' available times, in key order.
+    assert from_root.shape == (5, 2)
+    assert [str(t.instrument) for t in from_root.bar_types] == ["ADAUSDC.BINANCE", "ETHUSDC.BINANCE"]
+    file = next((directory / KEY).iterdir())
+    from_key_dir = phasor.data.Source(directory / KEY, definition, KEY).prepare()
+    from_file = phasor.data.Source(file, definition, KEY).prepare()
+    one_step = phasor.data.load(directory, definition, [KEY, OTHER]).prepare()
+    np.testing.assert_allclose(one_step.close, from_root.close, equal_nan=True)
+    for panel in (from_file, from_key_dir):
+        np.testing.assert_array_equal(panel.time, [10, 20, 30])
+        np.testing.assert_allclose(panel.close[:, 0], from_root.close[2:, 0])
+
+
+def test_a_key_is_inferred_from_the_directory_name_and_never_from_a_file_name(tmp_path):
+    definition = bar_schema()
+    directory = key_directory(tmp_path / "bars", {KEY: bar_table([1, 2])})
+    inferred = phasor.data.Source(directory / KEY, definition).prepare()
+    assert str(inferred.bar_types[0]) == KEY
+    # A schema directory names no single instrument.
+    with pytest.raises(ValueError, match="pass instruments"):
+        phasor.data.Source(directory, definition)
+    # A file name is not read as an instrument either: an explicit key wins.
+    renamed = next((directory / KEY).iterdir()).rename(directory / KEY / "anything.parquet")
+    assert phasor.data.load(renamed, definition, KEY).prepare().shape == (2, 1)
+
+
+def test_a_missing_key_directory_and_an_empty_directory_are_errors(tmp_path):
+    definition = bar_schema()
+    directory = key_directory(tmp_path / "bars", {KEY: bar_table([1])})
+    with pytest.raises(ValueError, match="no files for"):
+        phasor.data.Source(directory, definition, [KEY, OTHER])
+    empty = tmp_path / "empty"
+    (empty / KEY).mkdir(parents=True)
+    with pytest.raises(ValueError, match="no CSV or Parquet files"):
+        phasor.data.Source(empty, definition, [KEY])
+
+
+def test_gzip_files_and_misleading_names_read_the_same_rows(tmp_path):
+    definition = bar_schema()
+    rows = bar_table([10, 20, 30], [1., 2., 3.])
+    paths = {}
+    for name in ("plain.csv", "packed.csv.gz", "packed.csv", "plain.csv.gz"):
+        path = tmp_path / name
+        if name.endswith(".gz"):
+            with gzip.open(path, "wb") as handle:
+                csv.write_csv(rows, handle)
+        else:
+            csv.write_csv(rows, path)
+        paths[name] = phasor.data.Source({KEY: path}, definition).load()
+    expected = paths["plain.csv"].prepare()
+    for name, dataset in paths.items():
+        np.testing.assert_allclose(dataset.prepare().close, expected.close, equal_nan=True)
+    assert paths["plain.csv.gz"].batches[0][1].num_rows == 3
+
+
+def test_a_range_is_half_open_and_iso_strings_equal_nanoseconds(tmp_path):
+    definition = bar_schema()
+    days = [ns("2026-01-01"), ns("2026-01-02"), ns("2026-01-03")]
+    directory = key_directory(tmp_path / "bars", {KEY: bar_table(days, [1., 2., 3.])})
+    source = phasor.data.Source(directory, definition, [KEY])
+    text = phasor.data.load(directory, definition, [KEY], start="2026-01-02", end="2026-01-03").prepare()
+    numeric = phasor.data.load(directory, definition, [KEY], start=days[1], end=days[2]).prepare()
+    np.testing.assert_array_equal(text.time, numeric.time)
+    np.testing.assert_array_equal(text.time, [days[1]])
+    # Source.load and load() take the same bounds.
+    np.testing.assert_array_equal(source.load(start="2026-01-02").prepare().time, days[1:])
+    np.testing.assert_array_equal(source.load(end=days[2]).prepare().time, days[:2])
+    with pytest.raises(ValueError, match="ISO-8601"):
+        source.load(start="not a time")
+
+
+def test_the_removed_helpers_are_really_gone():
+    assert not hasattr(phasor.data, "files")
+    assert not hasattr(phasor.data, "Catalog")
+    assert not hasattr(phasor._phasor, "catalog_files")
+    assert sorted(phasor.data.Source({KEY: "x.csv"}, bar_schema()).items[0][1]) == ["x.csv"]
+
+
+JARVIS = Path.home() / "jarvis-data" / "crypto" / "data"
+
+
+@pytest.mark.skipif(not JARVIS.is_dir(), reason="no local jarvis-data catalog")
+def test_a_real_gzipped_catalog_agrees_across_every_granularity():
+    """Real files are gzipped CSV: quoted 18-digit decimals and int64 nanoseconds."""
+    keys = [f"{s}-1-DAY-LAST-EXTERNAL" for s in ("BTCUSDT-PERP.BINANCE", "ETHUSDT-PERP.BINANCE")]
+    definition = phasor.data.DataSchema(
+        name="crypto_bar",
+        input=pa.schema([("ts_close", pa.int64())] + [(n, pa.float64()) for n in multi_data.OHLCV]),
+        output=pa.schema([("event_time", pa.uint64()), ("available_time", pa.uint64())]
+                         + [(n, pa.float64()) for n in multi_data.OHLCV]),
+        # A bar is known when it closes, never when it opens.
+        decode=lambda batch, context: pa.RecordBatch.from_arrays(
+            [batch["ts_close"].cast(pa.uint64()), batch["ts_close"].cast(pa.uint64()),
+             *[batch[n] for n in multi_data.OHLCV]],
+            names=["event_time", "available_time", *multi_data.OHLCV]),
+    )
+    root = JARVIS / "crypto_bar"
+    from_root = phasor.data.Source(root, definition, keys).prepare()
+    assert from_root.shape[1] == 2 and from_root.coverage().min() == 1.0
+    files = sorted((root / keys[0]).glob("*.csv.gz"))
+    assert files, "the catalog keeps one gzipped CSV per instrument and range"
+    for dataset in (phasor.data.load(root / keys[0], definition),
+                    phasor.data.load(files[0], definition, keys[0])):
+        panel = dataset.prepare()
+        np.testing.assert_array_equal(panel.time, from_root.time)
+        np.testing.assert_array_equal(panel.close[:, 0], from_root.close[:, 0])

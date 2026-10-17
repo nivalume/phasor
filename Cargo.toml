@@ -3,7 +3,6 @@ resolver = "3"
 members = [
   "crates/phasor",
   "crates/phasor-core",
-  "crates/phasor-data",
   "crates/phasor-model",
   "crates/phasor-exec",
   "crates/phasor-generic",
@@ -25,9 +24,6 @@ repository = "https://github.com/nivalume/phasor"
 description = "Parallel factor-driven vectorized backtesting engine"
 
 [workspace.dependencies]
-phasor-data = { path = "crates/phasor-data", version = "0.1.0" }
-arrow-array = "59"
-arrow-schema = "59"
 rayon = "1.10"
 
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }

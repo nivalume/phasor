@@ -131,6 +131,7 @@ For Bars + funding + news from a catalog or standalone files:
 
 ```bash
 python -m pip install -e 'crates/phasor-py[data]'
+python examples/local_data.py                   # the data layer on its own, offline
 python examples/multi_data.py --source catalog  # also parquet / csv
 python examples/crypto.py --demo
 # Full USD-M history from Binance Vision (writes ~/.cache/phasor/catalog):
@@ -150,10 +151,11 @@ cargo fmt --check
 pytest crates/phasor-py/tests -q
 ```
 
-Local CSV/Parquet reading and alignment live in the optional `phasor-data` Rust
-crate. User Schemas decode Arrow batches before simulation; the compute crates
-remain independent of file I/O. Binance HTTP and cache writing live only in
-examples. Parallel account execution uses `std::thread::scope`.
+Local CSV/Parquet reading and alignment live in Python (`phasor.data`), on
+pyarrow and NumPy. User Schemas name the columns and decode each Arrow batch
+before simulation; the Rust compute crates stay independent of file I/O.
+Binance HTTP and cache writing live only in examples. Parallel account
+execution uses `std::thread::scope`.
 
 ## Licence
 

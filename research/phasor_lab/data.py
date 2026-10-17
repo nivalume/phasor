@@ -34,7 +34,7 @@ def load(catalog: str, symbols: list[str], venue: str, interval: str, start: str
     arrow_schema = pa.schema([("event_time", pa.uint64()), ("available_time", pa.uint64()), *fields])
     schema = phasor.data.DataSchema(name="bars", input=arrow_schema, output=arrow_schema, decode=_identity)
     keys = tuple(bar_key(symbol, venue, interval) for symbol in symbols)
-    source = phasor.data.Catalog(str(Path(catalog).expanduser()), schemas=[schema]).source("bars", keys=keys)
+    source = phasor.data.Source(Path(catalog).expanduser() / "data" / "bars", schema, keys)
     dataset = source.load(start=time_ns(start), end=time_ns(end))
     panel = dataset.prepare()
     quote_volume = dataset.asof(panel, field="quote_volume")

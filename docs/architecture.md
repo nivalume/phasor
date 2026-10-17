@@ -5,7 +5,7 @@ PHASOR
 phasor 是一个并行、因子驱动的向量化回测引擎：Rust 写的内核，一个 Python 包。这一页把整个系统串起来讲：有哪些 crate、谁依赖谁，数据在内存里怎么放， 一根 K 线里模拟做了什么，为什么分析层只读记录，怎么从一个状态接着跑，因子表达式怎么编译和执行，Python 层包了什么， 以及并行、确定性、性能和测试分别靠什么保证。每一节末尾都指向对应的 crate 页，那里有逐行的细节和可以动手的演示。
 
 > **核心特性与指标：**
-> - **13 个 crate · 7 层**：地基 → 领域与数组 → 内核与数据 → 记录 → 模拟 → 分析 → 门面；每个 crate 只依赖更低的层
+> - **12 个 crate · 7 层**：地基 → 领域与数组 → 内核 → 记录 → 模拟 → 分析 → 门面；每个 crate 只依赖更低的层
 > - **列是工作单位**：参数和标的展平成同一个列轴；列（或共享现金的账户组）之间相互独立，所以按列并行
 > - **记录是唯一事实**：模拟只写记录；净值、收益、指标都从记录重建。串行与多线程的记录逐位相同
 
@@ -19,7 +19,7 @@ phasor 是一个并行、因子驱动的向量化回测引擎：Rust 写的内�
 
 ```mermaid
 flowchart LR
-    Data["数据接入<br/>phasor-data / NumPy<br/>OhlcvPanel [T × S]"] --> Factor["因子与指标<br/>phasor-expr<br/>phasor-indicators<br/>Matrix [T × S]"]
+    Data["数据接入<br/>phasor.data (Python)<br/>OHLCV [T × S]"] --> Factor["因子与指标<br/>phasor-expr<br/>phasor-indicators<br/>Matrix [T × S]"]
     Factor --> Signal["信号生成<br/>phasor-signals<br/>SignalSweep 展开列<br/>bool [T × C]"]
     Signal --> Sim["向量化模拟<br/>phasor-sim 两条循环<br/>按账户组并行"]
     Sim --> Rec["记录生成<br/>phasor-records<br/>成交 · 现金流 · 日志"]
@@ -49,9 +49,9 @@ flowchart LR
 
 ## crate 分层
 
-工作区有 13 个 crate（[Cargo.toml:3](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/Cargo.toml#L3)）。最底下的 phasor-core 只依赖 `std`；最上面的门面 phasor 和 Python 扩展 phasor-py 依赖其余全部。 中间每一层回答一个问题：数怎么存、怎么比（core）；这些数是什么（model）；数组怎么滚动、信号怎么生成（generic、signals）；一笔订单怎么成交（exec）； 因子和指标怎么算（expr、indicators）；行情从文件怎么读进来（data）；成交怎么记下来（records）；一列或一个账户怎么逐根 K 线模拟（sim）；结果怎么看（analysis）。
+工作区有 12 个 crate（[Cargo.toml:3](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/Cargo.toml#L3)）。最底下的 phasor-core 只依赖 `std`；最上面的门面 phasor 和 Python 扩展 phasor-py 依赖其余全部。 中间每一层回答一个问题：数怎么存、怎么比（core）；这些数是什么（model）；数组怎么滚动、信号怎么生成（generic、signals）；一笔订单怎么成交（exec）； 因子和指标怎么算（expr、indicators）；成交怎么记下来（records）；一列或一个账户怎么逐根 K 线模拟（sim）；结果怎么看（analysis）。
 
-#### 示意 / 说明：七层，每个框链到对应页面（phasor-data 在本页的[数据一节](#data)）
+#### 示意 / 说明：七层，每个框链到对应页面（本地数据在 Python 侧，见本页的[数据一节](#data)）
 
 ```mermaid
 flowchart TD
@@ -59,7 +59,7 @@ flowchart TD
     L5["第 5 层 · 分析: phasor-analysis (5,960 行)"]
     L4["第 4 层 · 模拟: phasor-sim (12,694 行)"]
     L3["第 3 层 · 记录: phasor-records (5,049 行)"]
-    L2["第 2 层 · 内核与数据: phasor-data (560 行), phasor-exec (2,482 行), phasor-expr (5,554 行), phasor-indicators (1,861 行)"]
+    L2["第 2 层 · 内核: phasor-exec (2,482 行), phasor-expr (5,554 行), phasor-indicators (1,861 行)"]
     L1["第 1 层 · 领域与数组: phasor-model (1,000 行), phasor-generic (1,715 行), phasor-signals (2,039 行)"]
     L0["第 0 层 · 地基: phasor-core (1,435 行, 0 外部依赖)"]
 
@@ -72,14 +72,13 @@ flowchart TD
 | [phasor-model](phasor-model.md) | core | 撮合枚举（判别值固定，写进记录）、`InstrumentId` / `BarType`、`OhlcvPanel`、定点数 `Price` / `Quantity`。 |
 | [phasor-generic](phasor-generic.md) | core | 滚动 / 扩展 / 指数加权窗口、平移、填充、交叉；按种子生成的合成价格。 |
 | [phasor-signals](phasor-signals.md) | core | 信号清洗、生成出场、排名、区间、随机信号、标签。 |
-| [phasor-data](#data) | model | 只读的本地 CSV / Parquet 源、用户解码器、K 线面板与按可用时间对齐。 |
 | [phasor-exec](phasor-exec.md) | core、model | 撮合内核 `execute_order`：一笔订单在一个账户状态上成交多少、什么价、多少手续费。 |
 | [phasor-expr](phasor-expr.md) | core、generic、model | 因子表达式：解析、编译成去重的图、截面算子分阶段执行；Alpha158 / Alpha360 / WorldQuant 101；可选的 Polars 后端。 |
 | [phasor-indicators](phasor-indicators.md) | core、generic | 八个指标（MA、MSTD、BBANDS、RSI、STOCH、MACD、ATR、OBV）、参数扫描的列布局、逐根更新的流式版本。 |
 | [phasor-records](phasor-records.md) | core、exec、model | 记录格式与 sink、三种交易视图、回撤、MAE / MFE、按列分段归约、日志、分段拼接与字节格式。 |
 | [phasor-sim](phasor-sim.md) | core、exec、model、records | `from_orders` / `from_signals` 两条循环、止损止盈、限价单、共享现金与调用顺序、杠杆 / 保证金 / 强平 / 持仓费、回调与内置规则、状态快照与续跑、按组并行。 |
 | [phasor-analysis](phasor-analysis.md) | core、generic、model、records、sim | `Portfolio`：从记录重建资产、现金、净值、收益；指标、stats 表、按列标签汇总、过拟合检验。 |
-| [phasor](phasor.md) | 其余全部（data 在 `data` feature 后） | 门面：再导出、`prelude`、`SignalSweep`。 |
+| [phasor](phasor.md) | 其余全部 | 门面：再导出、`prelude`、`SignalSweep`。 |
 | [phasor-py](phasor-py.md) | 其余全部 | PyO3 扩展 `phasor._phasor` 与 Python 包 `phasor`。 |
 
 交互式的依赖图（可以只看传递约简后的边）在 [wiki 首页](README.md#crates)。库 crate 不下载、不写文件；下载和缓存写在 `examples/` 里。
@@ -146,25 +145,29 @@ flowchart TD
 
 <a id="data"></a>
 
-## 数据：phasor-data
+## 数据：Python 层的 phasor.data
 
-phasor-data 是读本地数据的一层，只依赖 phasor-model，加上 Arrow、Parquet 和 CSV 的读取库。它的模块文档只有一句：只读的本地源、用户解码器、模拟之外的列式准备（[lib.rs:1](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L1)）。 它不下载、不建目录、不写文件；Binance 的下载脚本在 `examples/` 里。门面 crate 在 `data` feature 后再导出它，Python 包通过 `phasor.data` 调用它。
+读本地数据不在 Rust 里。`phasor.data`（`crates/phasor-py/python/phasor/data.py`）在 Python 侧做四件事：把一个路径解析成要读的文件、用 pyarrow 逐批读出 Arrow `RecordBatch`、调用户的解码器、把结果拼成面板或按可用时间对齐。Rust 侧只留 `InstrumentId` 与 `BarType` 两个身份类型（`crates/phasor-py/src/data.rs`），撮合与因子拿到的始终是 NumPy 数组。它不下载、不建目录、不写文件；Binance 的下载脚本在 `examples/` 里。
 
 ### 1. 源与 schema
 
-`catalog(root, name, keys)`（[lib.rs:90](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L90)）把 `root/name/key/` 下的 .csv 和 .parquet 文件解析成 `SourceItem`，不创建也不管理目录。`DataSchema`（[:28](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L28)）写明输入列、输出列、事件时间、可用时间（都是 UTC 纳秒的 uint64）以及标的从哪来：源的键、两列 symbol / venue，或全局（不属于任何标的）。
+`Source(path, schema, instruments)` 把路径与键绑在一起，`phasor.data.load(path, schema, instruments, start=, end=)` 是一步到位的形式。路径按顺序解析，命中即停：路径是文件就用它；`path/<key>` 是文件就用它；`path/<key>` 是目录就扫这个目录；路径是目录且只给一个键就扫这个目录。所以同一次调用覆盖三种粒度——直接给文件、给某个 instrument 的目录、给按 instrument 分目录的 schema 目录。目录只在直接子文件里按扩展名取 `.csv` / `.parquet` / `.csv.gz` / `.parquet.gz`，跳过隐藏文件，按文件名排序，一个都没匹配上就报错并带上目录。键必须是单个路径组件（拒绝 `/`、`\`、`..`），因为它会被拼进路径。这里没有硬编码的目录约定：`<root>/data/<schema>/<instrument>/` 由调用方自己拼。
+
+`DataSchema` 写明输入列、输出列、事件时间、可用时间（都是 UTC 纳秒的 uint64）以及标的从哪来：源的键、两列 symbol / venue，或全局（不属于任何标的）。
 
 ### 2. 解码
 
-`load`（[:217](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L217)）逐批读文件，把每个 Arrow `RecordBatch` 交给调用方的解码器（Rust 闭包或 Python 回调），再按 `[start, end)` 过滤。先解码再过滤，因为解码器可以改时间。键能解析成 `BarType` 的源是 K 线序列。
+一次 `load` 逐批读文件，把每个 Arrow `RecordBatch` 交给调用方的解码器，再按 `[start, end)` 过滤。先解码再过滤，因为解码器可以改时间。键能解析成 `BarType` 的源是 K 线序列。格式由内容决定，不看文件名：前两字节是 gzip 魔数就解压，再看开头是不是 Parquet 的 `PAR1`，否则当 CSV。所以 `.csv.gz`、改了名的 gzip 文件、Parquet 内容配 `.csv` 后缀都能正确读出；gzip 的 Parquet 直接报错，因为 Parquet 自带压缩且读取需要 seek。CSV 与 Parquet 都只读 `input` 里声明的列（投影下推），文件里的其他列不会被读。
 
 ### 3. K 线面板
 
-`Dataset::prepare`（[:343](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L343)）把各个 K 线源按可用时间的并集排成行、每个 `BarType` 一列，得到 `BarPanel`（时间轴 + `OhlcvPanel`）。某个标的在某行没有 K 线就是 NaN；同一源同一时刻两根 K 线报错。
+`Dataset.prepare` 把各个 K 线源按可用时间的并集排成行、每个 `BarType` 一列，得到 `BarPanel`（时间轴 + 五个 F 序 `[T × S]` 数组）。某个标的在某行没有 K 线就是 NaN；同一源同一时刻两根 K 线报错。
 
 ### 4. 按时点对齐
 
-`Dataset::align`（[:487](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs#L487)）把资金费、新闻等事件按**可用时间**对齐到目标时间轴：每个时刻取最近一个已经可用的值，或者在一个窗口里求和、计数、取均值。按可用时间而不是事件时间，所以不会读到未来。排序后一遍双指针完成。
+`Dataset.asof` 与 `Dataset.window` 把资金费、新闻等事件按**可用时间**对齐到目标时间轴：每个时刻取最近一个已经可用的值，或者在一个窗口里求和、计数、取均值。按可用时间而不是事件时间，所以不会读到未来。两边都用 `searchsorted` 定位，一次向量化算完，并列时间取输入顺序里的最后一行。
+
+> 本节描述的是把读取搬到 Python 之后的接口；行号仍对应 1d573df，重钉 commit 时需重核。
 
 <a id="kernel"></a>
 
@@ -431,7 +434,7 @@ flowchart TD
     end
 
     subgraph L0["Rust 引擎层 (工作区 crates)"]
-        RustCrates["phasor-sim · phasor-analysis · phasor-expr<br/>phasor-indicators · phasor-signals · phasor-generic · phasor-data"]
+        RustCrates["phasor-sim · phasor-analysis · phasor-expr<br/>phasor-indicators · phasor-signals · phasor-generic"]
     end
 
     L3 --> Facade
@@ -600,8 +603,8 @@ flowchart TD
 <td>列标签、广播、列主序矩阵、容差、按键计算的随机数。</td>
 </tr>
 <tr>
-<td class="mono"><a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-data/src/lib.rs">phasor-data/src/lib.rs</a></td>
-<td>catalog、DataSchema、load、Dataset::prepare / align。</td>
+<td class="mono"><a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-py/python/phasor/data.py">phasor-py/python/phasor/data.py</a> · <a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-py/src/data.rs">src/data.rs</a></td>
+<td>Source、resolve、DataSchema、load、prepare / asof / window。</td>
 </tr>
 <tr>
 <td class="mono"><a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-exec/src/kernel.rs">phasor-exec/src/kernel.rs</a></td>

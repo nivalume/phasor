@@ -5,7 +5,7 @@ Python 包。一个 wheel 里两层：Rust 扩展 `phasor._phasor`（PyO3 0.29 +
 > **核心特性与指标：**
 > - **110 格实测**：参数路由表的每一格都来自对已编译模块的真实调用：10 类参数 × 11 种输入 × 两层（phasor 与 phasor._phasor），记录的是转换、结果或报错原文
 > - **433 通过 · 6 跳过**：uv run --with pytest python -m pytest crates/phasor-py/tests -q；跳过的是要装 TA-Lib、Ray、PyPortfolioOpt、plotly 等可选依赖才跑的测试。cargo test -p phasor-py 另有 18 个字符串映射测试（parse.rs）；整个工作区 cargo test --workspace 是 774 个
-> - **只有 arrow.rs 有 unsafe**：crate 根上 #![deny(unsafe_code)]，唯一的例外是 Arrow C Data 接口的导入导出。Rust 7,142 行（13 个文件），Python 7,476 行（python/phasor/ 下 35 个文件）
+> - **整个 crate 没有 unsafe**：crate 根上 #![deny(unsafe_code)]，把 Arrow C Data 接口交给 Python 侧的 pyarrow 之后没有例外。Rust 6,903 行（12 个文件），Python 7,874 行（python/phasor/ 下 35 个文件）
 
 <a id="concept"></a>
 
@@ -538,19 +538,19 @@ Python 回调是直接调用的：引擎照常在 `py.detach` 里跑，每调一
 
 <a id="data"></a>
 
-## 数据边界：Arrow C Data 接口
+## 数据边界：读取全在 Python
 
-### 只认具体的 PyArrow 类
+### 不再有 Arrow C Data 接口
 
-`arrow.rs` 先 `is_exact_instance(pyarrow.Schema / RecordBatch)`，再取 `__arrow_c_schema__` / `__arrow_c_array__` 胶囊。导入时 `FFI_ArrowArray::from_raw` 把数组的所有权搬出来并清空胶囊，防止重复释放。这是整个 crate 唯一的 `unsafe`。
+读文件、解码与对齐都在 `phasor.data`（Python）里，不经过 FFI：pyarrow 读批次时自己放下 GIL，用户的解码器是普通 Python 回调，面板拼装与 asof/window 用 NumPy。`phasor-py` 里只剩 `InstrumentId` 与 `BarType` 两个身份类型是 Rust 的绑定（`src/data.rs`）；Cargo 里的 `arrow-*` 依赖只服务 numpy 数组进出 FFI 的那条路，与本地数据无关。
 
-### GIL 一批一放
+### 一批解一次
 
-`load_data` 在 `py.detach` 里调 `phasor_data::load`：读文件、对齐都不持 GIL；每读到一批，用 `Python::attach` 拿回 GIL，导出成 `pyarrow.RecordBatch`，调用户的解码器，再导回来。`prepare` 和 `align` 同样释放 GIL。
+`Source.load` 逐文件、逐批读出 `pyarrow.RecordBatch`，交给用户的解码器，再把结果的列按 `output` 投影并校验类型与可空性。CSV 与 Parquet 都只读 `input` 声明的列。
 
 ### 出来的面板是 F 序
 
-`prepare()` 返回扁平数组，`BarPanel._from_native` 用 `reshape(shape, order="F")` 还原成 `(T, S)`——不复制，直接就是 `from_signals` 想要的布局。库里只读本地文件；下载脚本在 `examples/`。
+`Dataset.prepare()` 用 `reshape((T, S), order="F")` 拼出面板——`close` 等五个数组直接就是 `from_signals` 想要的布局，不复制。库里只读本地文件；下载脚本在 `examples/`。
 
 <a id="docs"></a>
 
@@ -583,5 +583,5 @@ Python 回调是直接调用的：引擎照常在 `py.detach` 里跑，每调一
 11. **`python/phasor/chunked.py`、`distributed.py`、`cache.py`**：`chunked.run` 的循环（切数组、`resume=state, row_offset=`、检查点）和 `_concat` 的排序；`distributed.chunks` 怎么不拆开组；`cache._feed` 每种值怎么进摘要。
 12. **`python/phasor/cli.py` → `config.py` → `schedule.py`**：从 `cli.main` 跟到 `config.run`；然后 `tools.py`（help、check_shapes）、`__init__.py` 的 `save` / `load` / `_Persist`。
 13. **`python/phasor/mcp.py`、`docs.py`**：先读模块文档里“不能读什么”，再读 `_read_checkout` 和 `run_backtest` 开头的检查；`docs.Index` 是一个很短的 BM25。
-14. **`src/data.rs`、`src/arrow.rs`**：数据层的绑定和唯一的 `unsafe`。
+14. **`src/data.rs`、`python/phasor/data.py`**：Rust 侧只剩 `InstrumentId` 与 `BarType` 两个身份类型；读文件、解码、面板与对齐都在 Python 里（`Source`、`load`、`Dataset.prepare` / `asof` / `window`）。
 15. **测试**：`test_research_api.py` 覆盖研究工具（指标对 Rust、Stream 对批量、信号函数、收益序列对组合、组合变换、wq101 和分批输出）；`test_builtin_rules.py`、`test_optimization.py`、`test_scale.py`、`test_toolchain.py`、`test_ai.py` 各对一节；`test_bindings.py` 里 `test_a_c_ordered_array_is_refused_rather_than_transposed`、`test_the_engine_does_not_write_through_a_borrowed_array`；`test_column_map.py` 证明映射与铺开在执行和分析上逐项一致，且改写或释放原数组不影响已返回的组合。

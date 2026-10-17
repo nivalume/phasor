@@ -15,10 +15,6 @@ name = "_phasor"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-phasor-data.workspace = true
-arrow-array = { workspace = true, features = ["ffi"] }
-arrow-schema = { workspace = true, features = ["ffi"] }
-
 phasor-analysis = { workspace = true }
 phasor-core = { workspace = true }
 phasor-expr = { workspace = true }

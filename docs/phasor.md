@@ -4,7 +4,7 @@
 
 > **核心特性与指标：**
 > - **400 例逐位一致**：页面里 SignalSweep 的 JS 移植，对照一个只依赖 phasor 的临时 crate 生成的 400 个随机情形（含 NaN / ±inf、各种 delay）：信号、标签、展开后的收盘价全部相同，四条报错原文也相同
-> - **prelude 78 个名字**：来自 10 个 crate（打开 polars feature 再加 PolarsBackend）；phasor-generic 和 phasor-data 一个都没有进 prelude
+> - **prelude 78 个名字**：来自 10 个 crate（打开 polars feature 再加 PolarsBackend）；phasor-generic 一个都没有进 prelude
 > - **没有 crate 依赖它**：工作区里它是叶子：phasor-py 直接依赖各个 crate。用到它的只有自己的 3 个测试文件、1 个例子——cargo test -p phasor 9 个测试全过
 
 <a id="concept"></a>
@@ -17,7 +17,7 @@
 
 ### 2. 重的东西放在 feature 后面
 
-`data` feature 才引入 phasor-data（Arrow、Parquet 一整套依赖）；`polars` feature 打开 phasor-expr 的 Polars 后端。默认什么都不加： 只想跑模拟和指标的人不该为一个 Parquet 读取器付编译时间。
+`polars` feature 打开 phasor-expr 的 Polars 后端。默认什么都不加：只想跑模拟和指标的人不该为可选后端付编译时间。本地数据的读取在 Python 侧（`phasor.data`，需要 pyarrow），不进 Rust 构建。
 
 ### 3. prelude 是“一个端到端脚本要的名字”
 
@@ -45,8 +45,6 @@ flowchart TD
         THIS["<b>phasor</b> (L6)<br/>统一导出、prelude、SignalSweep、配置与黄金测试"]:::current
     end
     subgraph Upstream["直接依赖的底层 crate"]
-        phasor_data["phasor-data (L2)"]:::up
-        THIS --> phasor_data
         phasor_analysis["phasor-analysis (L5)"]:::up
         THIS --> phasor_analysis
         phasor_core["phasor-core (L0)"]:::up
@@ -217,7 +215,7 @@ flowchart TD
 </tr>
 <tr>
 <td class="mono"><a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs">crates/phasor/src/lib.rs</a></td>
-<td>模块文档的四条要点（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L6-L12">lib.rs:6–12</a>）、十一行再导出（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L28-L39">:28–39</a>，phasor_data 在 <code>data</code> feature 之后，<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L30">:30</a>）、<code>pub mod sweep</code>（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L41">:41</a>）、prelude（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L44">:44</a>）。</td>
+<td>模块文档的四条要点（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L6-L12">lib.rs:6–12</a>）、十行再导出（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L28-L39">:28–39</a>）、<code>pub mod sweep</code>（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L41">:41</a>）、prelude（<a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/lib.rs#L44">:44</a>）。</td>
 </tr>
 <tr>
 <td class="mono"><a href="https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor/src/sweep.rs">src/sweep.rs</a></td>
