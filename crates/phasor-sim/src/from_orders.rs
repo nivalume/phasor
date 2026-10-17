@@ -28,6 +28,7 @@ use phasor_records::{Balances, Journal, LogEntry, LogSink, OrderRecords, RecordS
 
 use crate::callbacks::{Context, Flow, NoCallbacks, OrderFunc};
 use crate::groups::{CallSeq, Groups, approx_cash_need, approx_order_value};
+use crate::snapshot::{GroupState, Loop, Run, SimState};
 use crate::state::ColumnState;
 
 /// Inputs to [`simulate_from_orders`].
@@ -217,6 +218,14 @@ pub struct FromOrders<'a> {
     /// closed at the mark price (the close without one), with no fee. See
     /// [`crate::liquidation`].
     pub auto_deleverage: FlexArray<'a, bool>,
+    /// The state to continue from, on its `next_row`, in place of
+    /// `init_cash` and `init_position`; see [`crate::snapshot`]. `None`
+    /// starts a run.
+    pub resume: Option<&'a crate::snapshot::SimState>,
+    /// The run's row the arrays' first row is: they cover rows
+    /// `row_offset..row_offset + n_rows`. Records and the state are written
+    /// on the run's rows. 0 unless a long history runs in pieces.
+    pub row_offset: usize,
     /// What a liquidation fill pays, as a fraction of its notional, in place
     /// of the column's fees.
     pub liquidation_fee: FlexArray<'a, f64>,
@@ -335,6 +344,44 @@ impl FromOrders<'_> {
             &self.cash_dividends,
             &self.cash_earnings,
         )
+    }
+
+    /// The first row to simulate, counted from the arrays' first: 0, or
+    /// where `resume` continues.
+    fn start_row(&self) -> Result<usize> {
+        self.resume.map_or(Ok(0), |state| {
+            state.start_in(
+                Loop::FromOrders,
+                self.groups.len(),
+                self.row_offset,
+                self.n_rows,
+            )
+        })
+    }
+
+    /// [`levered`](Self::levered), kept from the state a run continues:
+    /// its records keep balances or not, as the earlier run's did.
+    fn run_levered(&self) -> Result<bool> {
+        let levered = self.levered();
+        match self.resume {
+            Some(state) if state.levered => Ok(true),
+            Some(_) if levered => Err(Error::Invariant(
+                "this run borrows or trades on margin and the run it continues did not; start \
+                 that run with the leverage, account type or charges it will need"
+                    .into(),
+            )),
+            _ => Ok(levered),
+        }
+    }
+
+    /// The state after the run's last bar, from each group's.
+    fn last_state(&self, levered: bool, groups: Vec<GroupState>) -> SimState {
+        SimState {
+            source: Loop::FromOrders,
+            next_row: self.row_offset + self.n_rows,
+            levered,
+            groups,
+        }
     }
 
     /// Whether the run's accounts may go below zero cash: whether any column
@@ -466,6 +513,8 @@ impl Default for FromOrders<'_> {
             margin_tier_rate: FlexArray::Scalar(f64::NAN),
             liquidation_step: FlexArray::Scalar(f64::NAN),
             auto_deleverage: FlexArray::Scalar(false),
+            resume: None,
+            row_offset: 0,
             liquidation_fee: FlexArray::Scalar(0.0),
             margin_mode: FlexArray::Scalar(MarginMode::Cross),
             ffill_val_price: true,
@@ -548,7 +597,7 @@ fn simulate_group<S: RecordSink + LogSink, C: OrderFunc>(
     cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<C::State> {
+) -> Result<(C::State, GroupState)> {
     let flows = args.flows();
     match (flows, levered) {
         (false, false) => group_loop::<S, C, false, false>(args, group, cb, sink, fills),
@@ -576,11 +625,12 @@ fn group_loop<S: RecordSink + LogSink, C: OrderFunc, const FLOWS: bool, const LE
     cb: &C,
     sink: &mut S,
     fills: &mut i64,
-) -> Result<C::State> {
+) -> Result<(C::State, GroupState)> {
     let mut cs = cb.pre_group(group, args.groups.range(group))?;
+    let start = args.start_row()?;
     let mut run = Group::new::<S, LEV>(args, group, sink, fills)?;
-    run.run_rows::<S, C, FLOWS, LEV>(args, 0..args.n_rows, cb, &mut cs, sink, fills)?;
-    Ok(cs)
+    run.run_rows::<S, C, FLOWS, LEV>(args, start..args.n_rows, cb, &mut cs, sink, fills)?;
+    Ok((cs, run.finish(args.row_offset)))
 }
 
 /// One group's account and the scratch its bars reuse, between bars.
@@ -647,8 +697,8 @@ macro_rules! fill {
 
         // Drawn only when asked for, so a run without random rejection never
         // touches the generator.
-        let draw =
-            (order.order().reject_prob > 0.0).then(|| crate::random::uniform(args.seed, i, col));
+        let draw = (order.order().reject_prob > 0.0)
+            .then(|| crate::random::uniform(args.seed, i + args.row_offset, col));
         let (exec_state, result) = execute_validated(&process, order, draw)?;
 
         if result.status == OrderStatus::Rejected && order.order().raise_reject {
@@ -786,9 +836,18 @@ impl<'g> Group<'g> {
 
         // One cash balance for the group. Read from the group's first
         // column, so an ungrouped run still reads per-column starting cash.
-        let mut cash = args.init_cash.get(0, cols.start);
-        let mut free_cash = cash;
-        let mut state = vec![ColumnState::new(); group_len];
+        // A run that continues another starts from where that one ended.
+        let resumed = args
+            .resume
+            .map(|state| state.group_for(group, group_len, args.row_offset))
+            .transpose()?;
+        let (mut cash, mut free_cash, mut state, stopped) = match resumed {
+            Some(g) => (g.cash, g.free_cash, g.columns, g.stopped),
+            None => {
+                let cash = args.init_cash.get(0, cols.start);
+                (cash, cash, vec![ColumnState::new(); group_len], false)
+            }
+        };
 
         // Build each request once per column, not once per bar. That hoists
         // two things: the eleven flexible-array reads it takes to fill in,
@@ -826,7 +885,7 @@ impl<'g> Group<'g> {
         } else {
             Vec::new()
         };
-        if crate::initial::any(&args.init_position, cols.clone()) {
+        if args.resume.is_none() && crate::initial::any(&args.init_position, cols.clone()) {
             let inputs = crate::initial::Columns {
                 orders: &orders,
                 margin: &margin,
@@ -896,9 +955,20 @@ impl<'g> Group<'g> {
             } else {
                 Vec::new()
             },
-            stopped: false,
+            stopped,
             cols,
         })
+    }
+
+    /// The group's state after its last bar, rows made the run's.
+    fn finish(self, row_offset: usize) -> GroupState {
+        crate::snapshot::finish(
+            self.cash,
+            self.free_cash,
+            self.state,
+            self.stopped,
+            row_offset,
+        )
     }
 
     /// Bars `rows`, each: deposit, resolve, liquidate, execute, earn and
@@ -1811,21 +1881,38 @@ fn check_groups(args: &FromOrders<'_>) -> Result<()> {
 fn simulate_into<S: SinkBuffer, C: OrderFunc>(
     args: &FromOrders<'_>,
     cb: &C,
-) -> Result<(S, Vec<C::State>)> {
+) -> Result<Run<S, C::State>> {
     check_groups(args)?;
     let mut sink = S::with_capacity(args.fill_bound(0..args.n_cols));
     // One counter across every group, because they share one buffer. See
     // [`simulate_group`].
     let mut fills = 0_i64;
-    let levered = args.levered();
+    let levered = args.run_levered()?;
     let mut states = Vec::new();
+    let mut groups = Vec::new();
     for group in 0..args.groups.len() {
-        states.push(simulate_group(
-            args, group, levered, cb, &mut sink, &mut fills,
-        )?);
+        let (cs, ended) = simulate_group(args, group, levered, cb, &mut sink, &mut fills)?;
+        states.push(cs);
+        groups.push(ended);
     }
-    sink.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok((sink, states))
+    Ok(finish_run(args, sink, states, levered, groups))
+}
+
+/// The run's records on its own rows, and its state.
+fn finish_run<S: SinkBuffer, T>(
+    args: &FromOrders<'_>,
+    mut records: S,
+    states: Vec<T>,
+    levered: bool,
+    groups: Vec<GroupState>,
+) -> Run<S, T> {
+    records.records_mut().allow_negative_price = args.allow_negative_price;
+    records.shift_rows(args.row_offset as i64);
+    Run {
+        records,
+        states,
+        last_state: args.last_state(levered, groups),
+    }
 }
 
 /// Simulates every column on one thread.
@@ -1835,7 +1922,7 @@ fn simulate_into<S: SinkBuffer, C: OrderFunc>(
 /// Propagates any invariant violation from the execution kernel, and any
 /// rejection on a column whose `raise_reject` is set.
 pub fn simulate_from_orders(args: &FromOrders<'_>) -> Result<OrderRecords> {
-    Ok(simulate_into(args, &NoCallbacks)?.0)
+    Ok(simulate_into(args, &NoCallbacks)?.records)
 }
 
 /// Simulates every column, keeping the logs of the orders that asked for one.
@@ -1853,7 +1940,7 @@ pub fn simulate_from_orders(args: &FromOrders<'_>) -> Result<OrderRecords> {
 ///
 /// As [`simulate_from_orders`].
 pub fn simulate_from_orders_logged(args: &FromOrders<'_>) -> Result<Journal> {
-    Ok(simulate_into(args, &NoCallbacks)?.0)
+    Ok(simulate_into(args, &NoCallbacks)?.records)
 }
 
 /// Simulates every group across `n_threads`, producing byte-identical output.
@@ -1879,7 +1966,7 @@ pub fn simulate_from_orders_parallel(
     args: &FromOrders<'_>,
     n_threads: usize,
 ) -> Result<OrderRecords> {
-    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.records)
 }
 
 /// Simulates every group across `n_threads`, keeping logs.
@@ -1896,7 +1983,7 @@ pub fn simulate_from_orders_logged_parallel(
     args: &FromOrders<'_>,
     n_threads: usize,
 ) -> Result<Journal> {
-    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.0)
+    Ok(simulate_into_parallel(args, &NoCallbacks, n_threads)?.records)
 }
 
 /// How [`simulate_from_order_func`] runs its groups.
@@ -1932,12 +2019,12 @@ pub fn simulate_from_order_func<S: SinkBuffer, C: OrderFunc + Sync>(
     args: &FromOrders<'_>,
     cb: &C,
     schedule: Schedule,
-) -> Result<(S, Vec<C::State>)> {
+) -> Result<Run<S, C::State>> {
     match schedule {
         Schedule::Groups { n_threads } => simulate_into_parallel(args, cb, n_threads),
         Schedule::RowWise => {
             check_groups(args)?;
-            match (args.flows(), args.levered()) {
+            match (args.flows(), args.run_levered()?) {
                 (false, false) => row_wise::<S, C, false, false>(args, cb),
                 (true, false) => row_wise::<S, C, true, false>(args, cb),
                 (false, true) => row_wise::<S, C, false, true>(args, cb),
@@ -1953,8 +2040,9 @@ pub fn simulate_from_order_func<S: SinkBuffer, C: OrderFunc + Sync>(
 fn row_wise<S: SinkBuffer, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
     args: &FromOrders<'_>,
     cb: &C,
-) -> Result<(S, Vec<C::State>)> {
+) -> Result<Run<S, C::State>> {
     let n_groups = args.groups.len();
+    let start = args.start_row()?;
     let mut sinks = Vec::with_capacity(n_groups);
     let mut fills = vec![0_i64; n_groups];
     let mut states = Vec::with_capacity(n_groups);
@@ -1966,7 +2054,7 @@ fn row_wise<S: SinkBuffer, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
         runs.push(Group::new::<S, LEV>(args, group, &mut sink, filled)?);
         sinks.push(sink);
     }
-    for i in 0..args.n_rows {
+    for i in start..args.n_rows {
         for (group, run) in runs.iter_mut().enumerate() {
             run.run_rows::<S, C, FLOWS, LEV>(
                 args,
@@ -1978,9 +2066,11 @@ fn row_wise<S: SinkBuffer, C: OrderFunc, const FLOWS: bool, const LEV: bool>(
             )?;
         }
     }
-    let mut merged = S::merge(sinks);
-    merged.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok((merged, states))
+    let groups = runs
+        .into_iter()
+        .map(|run| run.finish(args.row_offset))
+        .collect();
+    Ok(finish_run(args, S::merge(sinks), states, LEV, groups))
 }
 
 /// Simulates every group across `n_threads` into any sink.
@@ -1992,7 +2082,7 @@ fn simulate_into_parallel<S: SinkBuffer, C: OrderFunc + Sync>(
     args: &FromOrders<'_>,
     cb: &C,
     n_threads: usize,
-) -> Result<(S, Vec<C::State>)> {
+) -> Result<Run<S, C::State>> {
     // The parallel axis is the group, not the column. With the default
     // grouping the two are the same thing; with one shared portfolio there is
     // a single unit of work and this degrades to the serial path, which is
@@ -2008,9 +2098,10 @@ fn simulate_into_parallel<S: SinkBuffer, C: OrderFunc + Sync>(
     // Contiguous chunks keep each thread's columns adjacent in memory and
     // make the merge an ordered append.
     let ranges = args.groups.chunks(n_threads);
-    let levered = args.levered();
+    let levered = args.run_levered()?;
 
-    let results: Vec<Result<(S, Vec<C::State>)>> = std::thread::scope(|scope| {
+    type Part<S, T> = (S, Vec<(T, GroupState)>);
+    let results: Vec<Result<Part<S, C::State>>> = std::thread::scope(|scope| {
         let handles: Vec<_> = ranges
             .iter()
             .map(|&(start, end)| {
@@ -2025,13 +2116,13 @@ fn simulate_into_parallel<S: SinkBuffer, C: OrderFunc + Sync>(
                     // re-bases them. A shared counter here would make the
                     // numbering depend on interleaving.
                     let mut fills = 0_i64;
-                    let mut states = Vec::new();
+                    let mut ended = Vec::new();
                     for group in start..end {
-                        states.push(simulate_group(
+                        ended.push(simulate_group(
                             args, group, levered, cb, &mut sink, &mut fills,
                         )?);
                     }
-                    Ok((sink, states))
+                    Ok((sink, ended))
                 })
             })
             .collect();
@@ -2047,14 +2138,29 @@ fn simulate_into_parallel<S: SinkBuffer, C: OrderFunc + Sync>(
     // Report the lowest-numbered failure so errors are deterministic.
     let mut parts = Vec::with_capacity(results.len());
     let mut states = Vec::with_capacity(n_groups);
+    let mut groups = Vec::with_capacity(n_groups);
     for result in results {
         let (sink, part) = result?;
         parts.push(sink);
-        states.extend(part);
+        for (cs, ended) in part {
+            states.push(cs);
+            groups.push(ended);
+        }
     }
-    let mut merged = S::merge(parts);
-    merged.records_mut().allow_negative_price = args.allow_negative_price;
-    Ok((merged, states))
+    Ok(finish_run(args, S::merge(parts), states, levered, groups))
+}
+
+/// `from_orders` returning its state as well as its records, to continue
+/// it later (see [`crate::snapshot`]); groups across `n_threads`.
+///
+/// # Errors
+///
+/// As [`simulate_from_orders`], and a `resume` that does not fit the run.
+pub fn simulate_from_orders_run<S: SinkBuffer>(
+    args: &FromOrders<'_>,
+    n_threads: usize,
+) -> Result<Run<S>> {
+    simulate_into_parallel(args, &NoCallbacks, n_threads)
 }
 
 #[cfg(test)]

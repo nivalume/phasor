@@ -94,6 +94,24 @@ impl CashRecords {
         reorder!(col, idx, amount, kind);
     }
 
+    /// Moves every flow `by` rows later: a segment run on arrays that start
+    /// `by` rows into the run writes its rows from 0.
+    pub fn shift_rows(&mut self, by: i64) {
+        if by != 0 {
+            for idx in &mut self.idx {
+                *idx += by;
+            }
+        }
+    }
+
+    /// Reorders the flows: the `k`th becomes the one at `order[k]`.
+    pub fn permute(&mut self, order: &[usize]) {
+        macro_rules! reorder {
+            ($($field:ident),*) => { $(self.$field = order.iter().map(|&i| self.$field[i]).collect();)* };
+        }
+        reorder!(col, idx, amount, kind);
+    }
+
     /// Whether the flow at `i` is capital brought in or taken out rather
     /// than earned: a deposit or withdrawal, or an initial position's cost.
     #[must_use]

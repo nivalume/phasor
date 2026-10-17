@@ -53,6 +53,7 @@ pub mod expr;
 pub mod params;
 pub mod parse;
 pub mod research;
+mod resume;
 
 use std::sync::OnceLock;
 
@@ -122,6 +123,8 @@ pub struct PyPortfolio {
     /// Each group's callback state, in group order, when the run had
     /// callbacks.
     in_outputs: Option<Py<PyAny>>,
+    /// The state after the last bar, to continue the run from.
+    last_state: Option<phasor_sim::SimState>,
 }
 
 impl PyPortfolio {
@@ -200,6 +203,7 @@ impl PyPortfolio {
             incl_open: scoring.incl_open,
             trades_type: scoring.trades_type,
             in_outputs: None,
+            last_state: None,
         }
     }
 }
@@ -211,6 +215,25 @@ impl PyPortfolio {
     #[getter]
     fn in_outputs(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.in_outputs.as_ref().map(|v| v.clone_ref(py))
+    }
+
+    /// The state after the last bar: what `resume=pf` continues from.
+    #[getter]
+    fn last_state(&self) -> Option<resume::PySimState> {
+        self.last_state.clone().map(resume::PySimState)
+    }
+
+    /// The portfolio as bytes: records, logs, the inputs its analysis reads
+    /// and its state; `phasor.save` writes them to a file. Callback states
+    /// (`in_outputs`) are not kept.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, pyo3::types::PyBytes> {
+        pyo3::types::PyBytes::new(py, &resume::to_bytes(self))
+    }
+
+    /// A portfolio from `to_bytes`.
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> PyResult<Self> {
+        resume::from_bytes(bytes).map_err(to_py_err)
     }
 
     /// Bytes retained for source prices, independent of parameter count.
@@ -569,32 +592,7 @@ impl PyPortfolio {
     /// rather than return them empty, so every array in the dict has one entry
     /// per fill.
     fn orders<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let out = PyDict::new(py);
-        out.set_item("col", self.orders.col.clone().into_pyarray(py))?;
-        out.set_item("idx", self.orders.idx.clone().into_pyarray(py))?;
-        out.set_item("size", self.orders.size.clone().into_pyarray(py))?;
-        out.set_item("price", self.orders.price.clone().into_pyarray(py))?;
-        out.set_item("fees", self.orders.fees.clone().into_pyarray(py))?;
-        let side: Vec<i64> = self.orders.side.iter().map(|s| i64::from(*s)).collect();
-        out.set_item("side", side.into_pyarray(py))?;
-        if !self.orders.debt.is_empty() {
-            out.set_item("debt", self.orders.debt.clone().into_pyarray(py))?;
-            out.set_item(
-                "locked_cash",
-                self.orders.locked_cash.clone().into_pyarray(py),
-            )?;
-            out.set_item("margin", self.orders.margin.clone().into_pyarray(py))?;
-            out.set_item("isolated", self.orders.isolated.clone().into_pyarray(py))?;
-            out.set_item(
-                "liquidation",
-                self.orders.liquidation.clone().into_pyarray(py),
-            )?;
-            out.set_item(
-                "multiplier",
-                self.orders.multiplier.clone().into_pyarray(py),
-            )?;
-        }
-        Ok(out)
+        orders_dict(py, &self.orders)
     }
 
     /// Cash that moved without a fill, as a dict of NumPy arrays.
@@ -607,14 +605,10 @@ impl PyPortfolio {
     /// and 7 for a liquidation's loss written off. Rows are in column order,
     /// then bar order.
     fn cash_records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let cash = &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash;
-        let out = PyDict::new(py);
-        out.set_item("col", cash.col.clone().into_pyarray(py))?;
-        out.set_item("idx", cash.idx.clone().into_pyarray(py))?;
-        out.set_item("amount", cash.amount.clone().into_pyarray(py))?;
-        let kind: Vec<i64> = cash.kind.iter().map(|k| i64::from(*k)).collect();
-        out.set_item("kind", kind.into_pyarray(py))?;
-        Ok(out)
+        cash_dict(
+            py,
+            &self.sorted_orders.as_ref().unwrap_or(&self.orders).cash,
+        )
     }
 
     /// The cash flows of one kind, `(n_rows, n_cols)`: per bar and per
@@ -1205,6 +1199,8 @@ fn deposits_view<'a>(
     callbacks = None,
     flexible = false,
     row_wise = false,
+    resume = None,
+    row_offset = 0,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -1311,7 +1307,9 @@ fn from_signals(
     callbacks: Option<&Bound<'_, PyDict>>,
     flexible: bool,
     row_wise: bool,
-) -> PyResult<PyPortfolio> {
+    resume: Option<&Bound<'_, PyAny>>,
+    row_offset: usize,
+) -> PyResult<Py<PyAny>> {
     // `close` first, so every other parameter can be checked against a known
     // shape rather than one inferred from whichever array arrived first.
     let close_b = borrow_f64(close, "close")?;
@@ -1538,6 +1536,22 @@ fn from_signals(
     // The account's cost of cash, so a parameter: a 1-D array is per bar.
     let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
+    // A run that continues a portfolio takes its records and state; see
+    // `resume`.
+    let prior = resume::resolve(
+        resume,
+        &resume::Shape {
+            close: close_flat,
+            n_rows,
+            n_cols,
+            source_cols,
+            column_map: column_map.as_deref(),
+            groups: &groups,
+            cash_sharing,
+        },
+        row_offset,
+    )?;
+
     let args = FromSignals {
         groups: Some(groups.clone()),
         call_seq,
@@ -1743,6 +1757,8 @@ fn from_signals(
             d.liquidation_step,
         )?,
         auto_deleverage: flex_or_bool(&adl_b, n_rows, n_cols, d.auto_deleverage)?,
+        resume: prior.as_ref().map(resume::Resumed::state),
+        row_offset,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -1758,60 +1774,28 @@ fn from_signals(
             "flexible and row_wise are for from_order_func",
         ));
     }
-    let mut in_outputs = None;
-    let (orders, logs) = if let Some(funcs) = callbacks {
-        let cbs = callbacks::PyCallbacks::new(funcs)?;
-        let fail = |e| cbs.take_error().unwrap_or_else(|| to_py_err(e));
-        let (journal, states) = if p.wants_logs() {
-            py.detach(|| {
-                phasor_sim::simulate_from_signal_func::<phasor_records::Journal, _>(
-                    &args, &cbs, threads,
-                )
-            })
-            .map_err(fail)?
-        } else {
-            let (orders, states) = py
-                .detach(|| {
-                    phasor_sim::simulate_from_signal_func::<OrderRecords, _>(&args, &cbs, threads)
-                })
-                .map_err(fail)?;
-            (
-                phasor_records::Journal {
-                    orders,
-                    logs: LogRecords::new(),
-                },
-                states,
-            )
-        };
-        in_outputs = Some(pyo3::types::PyList::new(py, states)?.into_any().unbind());
-        (journal.orders, journal.logs)
-    } else if p.wants_logs() {
-        let journal = py
-            .detach(|| {
-                if threads > 1 {
-                    phasor_sim::simulate_from_signals_logged_parallel(&args, threads)
-                } else {
-                    phasor_sim::simulate_from_signals_logged(&args)
-                }
-            })
-            .map_err(to_py_err)?;
-        (journal.orders, journal.logs)
-    } else {
-        let orders = py
-            .detach(|| {
-                if threads > 1 {
-                    phasor_sim::simulate_from_signals_parallel(&args, threads)
-                } else {
-                    phasor_sim::simulate_from_signals(&args)
-                }
-            })
-            .map_err(to_py_err)?;
-        (orders, LogRecords::new())
-    };
+    let cbs = callbacks.map(callbacks::PyCallbacks::new).transpose()?;
+    let logged = p.wants_logs();
+    let run = py
+        .detach(|| signals_run(&args, cbs.as_ref(), threads, logged))
+        .map_err(|e| failed(cbs.as_ref(), e))?;
 
     // The starting cash is materialized per column so the portfolio can be
     // rebuilt without keeping Python's array alive.
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
+    if matches!(prior, Some(resume::Resumed::State(_))) {
+        return resume::segment(py, run);
+    }
+    let (journal, init_cash_owned, in_outputs, last_state) = finished(
+        py,
+        run,
+        prior,
+        &groups,
+        n_cols,
+        init_cash_owned,
+        cbs.is_some(),
+    )?;
+    let (orders, logs) = (journal.orders, journal.logs);
 
     let mut pf = PyPortfolio::assemble(
         orders,
@@ -1832,7 +1816,8 @@ fn from_signals(
         },
     );
     pf.in_outputs = in_outputs;
-    Ok(pf)
+    pf.last_state = Some(last_state);
+    Ok(Bound::new(py, pf)?.into_any().unbind())
 }
 
 /// Runs a backtest from one order request per element.
@@ -1921,6 +1906,8 @@ fn from_signals(
     callbacks = None,
     flexible = false,
     row_wise = false,
+    resume = None,
+    row_offset = 0,
 ))]
 #[allow(
     clippy::too_many_arguments,
@@ -1997,7 +1984,9 @@ fn from_orders(
     callbacks: Option<&Bound<'_, PyDict>>,
     flexible: bool,
     row_wise: bool,
-) -> PyResult<PyPortfolio> {
+    resume: Option<&Bound<'_, PyAny>>,
+    row_offset: usize,
+) -> PyResult<Py<PyAny>> {
     let close_b = borrow_f64(close, "close")?;
     let Borrowed::Slice(close_arr) = &close_b else {
         return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -2131,6 +2120,22 @@ fn from_orders(
     // The account's cost of cash, so a parameter: a 1-D array is per bar.
     let debt = flex_or_f64(&h.debt_rate, n_rows, n_cols, OneDim::PerRow, d.debt_rate)?;
 
+    // A run that continues a portfolio takes its records and state; see
+    // `resume`.
+    let prior = resume::resolve(
+        resume,
+        &resume::Shape {
+            close: close_flat,
+            n_rows,
+            n_cols,
+            source_cols,
+            column_map: column_map.as_deref(),
+            groups: &groups,
+            cash_sharing,
+        },
+        row_offset,
+    )?;
+
     let args = FromOrders {
         n_rows,
         n_cols,
@@ -2258,6 +2263,8 @@ fn from_orders(
             d.liquidation_step,
         )?,
         auto_deleverage: flex_or_bool(&adl_b, n_rows, n_cols, d.auto_deleverage)?,
+        resume: prior.as_ref().map(resume::Resumed::state),
+        row_offset,
         cash_limit: flex_or_f64(&p.cash_limit, n_rows, n_cols, per_col, d.cash_limit)?,
         reject_prob: flex_or_f64(&p.reject_prob, n_rows, n_cols, per_col, d.reject_prob)?,
         seed,
@@ -2265,46 +2272,31 @@ fn from_orders(
         update_value,
     };
 
-    let mut in_outputs = None;
-    let (orders, logs) = if let Some(funcs) = callbacks {
-        let cbs = callbacks::PyCallbacks::new(funcs)?;
-        let fail = |e| cbs.take_error().unwrap_or_else(|| to_py_err(e));
-        let schedule = if row_wise {
-            phasor_sim::Schedule::RowWise
-        } else {
-            phasor_sim::Schedule::Groups { n_threads: threads }
-        };
-        let logged = p.wants_logs();
-        let (journal, states) = py
-            .detach(|| order_func_run(&args, &cbs, schedule, flexible, logged))
-            .map_err(fail)?;
-        in_outputs = Some(pyo3::types::PyList::new(py, states)?.into_any().unbind());
-        (journal.orders, journal.logs)
-    } else if p.wants_logs() {
-        let journal = py
-            .detach(|| {
-                if threads > 1 {
-                    phasor_sim::simulate_from_orders_logged_parallel(&args, threads)
-                } else {
-                    phasor_sim::simulate_from_orders_logged(&args)
-                }
-            })
-            .map_err(to_py_err)?;
-        (journal.orders, journal.logs)
+    let cbs = callbacks.map(callbacks::PyCallbacks::new).transpose()?;
+    let schedule = if row_wise {
+        phasor_sim::Schedule::RowWise
     } else {
-        let orders = py
-            .detach(|| {
-                if threads > 1 {
-                    phasor_sim::simulate_from_orders_parallel(&args, threads)
-                } else {
-                    phasor_sim::simulate_from_orders(&args)
-                }
-            })
-            .map_err(to_py_err)?;
-        (orders, LogRecords::new())
+        phasor_sim::Schedule::Groups { n_threads: threads }
     };
+    let logged = p.wants_logs();
+    let run = py
+        .detach(|| orders_run(&args, cbs.as_ref(), schedule, flexible, logged))
+        .map_err(|e| failed(cbs.as_ref(), e))?;
 
     let init_cash_owned: Vec<f64> = (0..n_cols).map(|c| args.init_cash.get(0, c)).collect();
+    if matches!(prior, Some(resume::Resumed::State(_))) {
+        return resume::segment(py, run);
+    }
+    let (journal, init_cash_owned, in_outputs, last_state) = finished(
+        py,
+        run,
+        prior,
+        &groups,
+        n_cols,
+        init_cash_owned,
+        cbs.is_some(),
+    )?;
+    let (orders, logs) = (journal.orders, journal.logs);
 
     let mut pf = PyPortfolio::assemble(
         orders,
@@ -2325,34 +2317,169 @@ fn from_orders(
         },
     );
     pf.in_outputs = in_outputs;
-    Ok(pf)
+    pf.last_state = Some(last_state);
+    Ok(Bound::new(py, pf)?.into_any().unbind())
 }
 
-/// `from_orders` with Python callbacks, logged or not, flexible or not.
-fn order_func_run(
+/// A run's records with logs or without, as one type, and its callback
+/// states.
+type PyRun = phasor_sim::Run<phasor_records::Journal, Py<PyAny>>;
+
+/// A run without logs, or without callbacks, as a [`PyRun`].
+fn as_py_run<T>(run: phasor_sim::Run<OrderRecords, T>) -> PyRun {
+    phasor_sim::Run {
+        records: phasor_records::Journal {
+            orders: run.records,
+            logs: LogRecords::new(),
+        },
+        states: Vec::new(),
+        last_state: run.last_state,
+    }
+}
+
+/// [`as_py_run`] for a logged run without callbacks.
+fn logged_py_run(run: phasor_sim::Run<phasor_records::Journal>) -> PyRun {
+    phasor_sim::Run {
+        records: run.records,
+        states: Vec::new(),
+        last_state: run.last_state,
+    }
+}
+
+/// [`as_py_run`] for a callback run without logs.
+fn unlogged_py_run(run: phasor_sim::Run<OrderRecords, Py<PyAny>>) -> PyRun {
+    phasor_sim::Run {
+        records: phasor_records::Journal {
+            orders: run.records,
+            logs: LogRecords::new(),
+        },
+        states: run.states,
+        last_state: run.last_state,
+    }
+}
+
+/// `from_signals`, with Python callbacks or not, logged or not.
+fn signals_run(
+    args: &FromSignals<'_>,
+    cbs: Option<&callbacks::PyCallbacks>,
+    threads: usize,
+    logged: bool,
+) -> phasor_core::error::Result<PyRun> {
+    use phasor_sim::{simulate_from_signal_func as func, simulate_from_signals_run as plain};
+    match (cbs, logged) {
+        (Some(cbs), true) => func(args, cbs, threads),
+        (Some(cbs), false) => func::<OrderRecords, _>(args, cbs, threads).map(unlogged_py_run),
+        (None, true) => plain(args, threads).map(logged_py_run),
+        (None, false) => plain::<OrderRecords>(args, threads).map(as_py_run),
+    }
+}
+
+/// `from_orders`, with Python callbacks or not, flexible or not, logged or
+/// not.
+fn orders_run(
     args: &FromOrders<'_>,
-    cbs: &callbacks::PyCallbacks,
+    cbs: Option<&callbacks::PyCallbacks>,
     schedule: phasor_sim::Schedule,
     flexible: bool,
     logged: bool,
-) -> phasor_core::error::Result<(phasor_records::Journal, Vec<Py<PyAny>>)> {
+) -> phasor_core::error::Result<PyRun> {
     use phasor_records::Journal;
-    use phasor_sim::simulate_from_order_func as run;
-    let plain = |(orders, states): (OrderRecords, Vec<Py<PyAny>>)| {
-        (
-            Journal {
-                orders,
-                logs: LogRecords::new(),
-            },
-            states,
-        )
+    use phasor_sim::simulate_from_order_func as func;
+    let Some(cbs) = cbs else {
+        return if logged {
+            func::<Journal, _>(args, &phasor_sim::NoCallbacks, schedule).map(logged_py_run)
+        } else {
+            func::<OrderRecords, _>(args, &phasor_sim::NoCallbacks, schedule).map(as_py_run)
+        };
     };
+    let (flex, plain) = (
+        callbacks::PyOrderFunc::<true>(cbs),
+        callbacks::PyOrderFunc::<false>(cbs),
+    );
     match (flexible, logged) {
-        (false, false) => run(args, &callbacks::PyOrderFunc::<false>(cbs), schedule).map(plain),
-        (true, false) => run(args, &callbacks::PyOrderFunc::<true>(cbs), schedule).map(plain),
-        (false, true) => run(args, &callbacks::PyOrderFunc::<false>(cbs), schedule),
-        (true, true) => run(args, &callbacks::PyOrderFunc::<true>(cbs), schedule),
+        (false, false) => func::<OrderRecords, _>(args, &plain, schedule).map(unlogged_py_run),
+        (true, false) => func::<OrderRecords, _>(args, &flex, schedule).map(unlogged_py_run),
+        (false, true) => func(args, &plain, schedule),
+        (true, true) => func(args, &flex, schedule),
     }
+}
+
+/// The error a run ended on: a callback's own exception when one raised.
+fn failed(cbs: Option<&callbacks::PyCallbacks>, e: phasor_core::Error) -> PyErr {
+    cbs.and_then(callbacks::PyCallbacks::take_error)
+        .unwrap_or_else(|| to_py_err(e))
+}
+
+/// What the portfolio is built from: the records (after the prior's, when
+/// the run continues one), the starting cash (the prior's), the callback
+/// states and the state to continue from.
+#[allow(
+    clippy::type_complexity,
+    reason = "the four parts a binding assembles a portfolio from"
+)]
+fn finished(
+    py: Python<'_>,
+    run: PyRun,
+    prior: Option<resume::Resumed>,
+    groups: &Groups,
+    n_cols: usize,
+    init_cash: Vec<f64>,
+    with_callbacks: bool,
+) -> PyResult<(
+    phasor_records::Journal,
+    Vec<f64>,
+    Option<Py<PyAny>>,
+    phasor_sim::SimState,
+)> {
+    let in_outputs = with_callbacks
+        .then(|| pyo3::types::PyList::new(py, run.states).map(|l| l.into_any().unbind()))
+        .transpose()?;
+    let (journal, init_cash) = match prior {
+        Some(resume::Resumed::Portfolio(mut prior)) => (
+            phasor_records::Journal::chain(
+                &[std::mem::take(&mut prior.journal), run.records],
+                &resume::group_of(groups, n_cols),
+            ),
+            prior.init_cash,
+        ),
+        _ => (run.records, init_cash),
+    };
+    Ok((journal, init_cash, in_outputs, run.last_state))
+}
+
+/// Fills as a dict of NumPy arrays, as `pf.orders()` gives them.
+fn orders_dict<'py>(py: Python<'py>, orders: &OrderRecords) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("col", orders.col.clone().into_pyarray(py))?;
+    out.set_item("idx", orders.idx.clone().into_pyarray(py))?;
+    out.set_item("size", orders.size.clone().into_pyarray(py))?;
+    out.set_item("price", orders.price.clone().into_pyarray(py))?;
+    out.set_item("fees", orders.fees.clone().into_pyarray(py))?;
+    let side: Vec<i64> = orders.side.iter().map(|s| i64::from(*s)).collect();
+    out.set_item("side", side.into_pyarray(py))?;
+    if !orders.debt.is_empty() {
+        out.set_item("debt", orders.debt.clone().into_pyarray(py))?;
+        out.set_item("locked_cash", orders.locked_cash.clone().into_pyarray(py))?;
+        out.set_item("margin", orders.margin.clone().into_pyarray(py))?;
+        out.set_item("isolated", orders.isolated.clone().into_pyarray(py))?;
+        out.set_item("liquidation", orders.liquidation.clone().into_pyarray(py))?;
+        out.set_item("multiplier", orders.multiplier.clone().into_pyarray(py))?;
+    }
+    Ok(out)
+}
+
+/// Cash flows as a dict of NumPy arrays, as `pf.cash_records()` gives them.
+fn cash_dict<'py>(
+    py: Python<'py>,
+    cash: &phasor_records::cash::CashRecords,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("col", cash.col.clone().into_pyarray(py))?;
+    out.set_item("idx", cash.idx.clone().into_pyarray(py))?;
+    out.set_item("amount", cash.amount.clone().into_pyarray(py))?;
+    let kind: Vec<i64> = cash.kind.iter().map(|k| i64::from(*k)).collect();
+    out.set_item("kind", kind.into_pyarray(py))?;
+    Ok(out)
 }
 
 fn market_array<'a>(
@@ -2407,6 +2534,8 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(data::load_data, m)?)?;
     m.add_class::<PyPortfolio>()?;
     m.add_class::<callbacks::PyContext>()?;
+    m.add_class::<resume::PySimState>()?;
+    m.add_class::<resume::PySegment>()?;
     m.add_class::<PyFactorSet>()?;
     m.add_function(wrap_pyfunction!(from_signals, m)?)?;
     m.add_function(wrap_pyfunction!(from_orders, m)?)?;

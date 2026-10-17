@@ -135,6 +135,8 @@ fn matches_the_reference_stats_table() {
             margin_tier_rate: FlexArray::Scalar(f64::NAN),
             liquidation_step: FlexArray::Scalar(f64::NAN),
             auto_deleverage: FlexArray::Scalar(false),
+            resume: None,
+            row_offset: 0,
             close,
             size,
             price: close,

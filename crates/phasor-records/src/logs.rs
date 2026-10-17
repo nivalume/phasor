@@ -428,6 +428,126 @@ impl LogRecords {
         out
     }
 
+    /// Moves every row `by` rows later; see
+    /// [`OrderRecords::shift_rows`](crate::OrderRecords::shift_rows).
+    pub fn shift_rows(&mut self, by: i64) {
+        if by != 0 {
+            for idx in &mut self.idx {
+                *idx += by;
+            }
+        }
+    }
+
+    /// The length of every column, to check they agree.
+    pub(crate) fn lens(&self) -> Vec<usize> {
+        macro_rules! lens {
+            ($($f:ident),+ $(,)?) => { vec![$( self.$f.len(), )+] };
+        }
+        lens!(
+            group,
+            col,
+            idx,
+            cash,
+            position,
+            debt,
+            locked_cash,
+            free_cash,
+            val_price,
+            value,
+            req_size,
+            req_price,
+            req_size_type,
+            req_direction,
+            req_fees,
+            req_fixed_fees,
+            req_slippage,
+            req_min_size,
+            req_max_size,
+            req_size_granularity,
+            req_leverage,
+            req_leverage_mode,
+            req_account_type,
+            req_initial_margin,
+            req_margin_basis,
+            req_reject_prob,
+            req_lock_cash,
+            req_allow_partial,
+            req_raise_reject,
+            req_log,
+            new_cash,
+            new_position,
+            new_debt,
+            new_locked_cash,
+            new_free_cash,
+            new_val_price,
+            new_value,
+            res_size,
+            res_price,
+            res_fees,
+            res_side,
+            res_status,
+            res_status_info,
+            order_id,
+            liquidation,
+            multiplier,
+        )
+    }
+
+    /// Reorders the rows: the `k`th becomes the one at `order[k]`.
+    pub fn permute(&mut self, order: &[usize]) {
+        macro_rules! reorder {
+            ($($f:ident),+ $(,)?) => { $( self.$f = order.iter().map(|&i| self.$f[i]).collect(); )+ };
+        }
+        reorder!(
+            group,
+            col,
+            idx,
+            cash,
+            position,
+            debt,
+            locked_cash,
+            free_cash,
+            val_price,
+            value,
+            req_size,
+            req_price,
+            req_size_type,
+            req_direction,
+            req_fees,
+            req_fixed_fees,
+            req_slippage,
+            req_min_size,
+            req_max_size,
+            req_size_granularity,
+            req_leverage,
+            req_leverage_mode,
+            req_account_type,
+            req_initial_margin,
+            req_margin_basis,
+            req_reject_prob,
+            req_lock_cash,
+            req_allow_partial,
+            req_raise_reject,
+            req_log,
+            new_cash,
+            new_position,
+            new_debt,
+            new_locked_cash,
+            new_free_cash,
+            new_val_price,
+            new_value,
+            res_size,
+            res_price,
+            res_fees,
+            res_side,
+            res_status,
+            res_status_info,
+            order_id,
+            liquidation,
+            multiplier,
+        );
+    }
+
     /// Why each logged order ended the way it did, in words.
     ///
     /// The whole reason logs exist. `"filled"` for the ones that did, and the
@@ -539,6 +659,30 @@ impl Journal {
             out.extend(part);
         }
         out
+    }
+
+    /// [`OrderRecords::chain`](crate::OrderRecords::chain) for a journal:
+    /// the logs are put in the same order, and their `order_id`s follow
+    /// the fills they name.
+    #[must_use]
+    pub fn chain(parts: &[Self], group_of: &[usize]) -> Self {
+        let joined = Self::concat(parts);
+        let orders = crate::OrderRecords::chain(std::slice::from_ref(&joined.orders), group_of);
+        // Where each fill of the concatenation went.
+        let order = crate::chain_order(&joined.orders.col, group_of);
+        let mut moved = vec![0_i64; order.len()];
+        for (new, &old) in order.iter().enumerate() {
+            moved[old] = new as i64;
+        }
+        let mut logs = joined.logs;
+        for id in &mut logs.order_id {
+            if *id >= 0 {
+                *id = moved[*id as usize];
+            }
+        }
+        let order = crate::chain_order(&logs.col, group_of);
+        logs.permute(&order);
+        Self { orders, logs }
     }
 }
 

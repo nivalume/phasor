@@ -55,13 +55,16 @@ from . import (
     validation,
 )
 from ._phasor import InstrumentId, BarType
-from ._phasor import Context, Portfolio
+from ._phasor import Context, Portfolio, Segment, SimState
 
 __all__ = [
     "Expression",
     "FactorSet",
     "Context",
     "Portfolio",
+    "Segment",
+    "SimState",
+    "Stepper",
     "alpha158",
     "alpha360",
     "data",
@@ -80,6 +83,8 @@ __all__ = [
     "BarType",
     "from_order_func",
     "from_orders",
+    "load",
+    "save",
     "from_signals",
     "strategy",
     "factors",
@@ -660,6 +665,8 @@ def from_signals(
     group_lens=None,
     call_seq="default",
     column_map=None,
+    resume=None,
+    row_offset=0,
     pre_group_func=None,
     signal_func=None,
     adjust_func=None,
@@ -675,6 +682,20 @@ def from_signals(
     column_map
         Logical run column -> source market column. Close and OHLC stay (T, S);
         signals and trading parameters use (T, len(column_map)).
+    resume
+        A portfolio to continue (``pf.update``): pass the whole history again,
+        the bars it ran on and the new ones, with the same parameters, and only
+        the new bars are simulated, from the portfolio's ``last_state``. The
+        result is one portfolio over the whole history, equal to running it in
+        one go, records in the same order. The closes of the bars it ran on
+        must be the same; the starting cash is the portfolio's.
+    row_offset
+        With ``resume`` a ``SimState``, the low-level form a stepper uses: the
+        arrays cover rows ``row_offset`` onwards of a longer history, and
+        include the bars before the state's ``next_row`` that the run looks
+        back at (the previous close for ``price=-inf``, ``from_ago`` bars).
+        Returns a ``phasor.Segment``: the new rows' records, on the history's
+        rows, and its ``last_state``. Not a portfolio: it starts mid-run.
     open, high, low
         The rest of the bar. Needed for stops and for an intrabar liquidation
         test, and **required** for stops:
@@ -1054,6 +1075,7 @@ def from_signals(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    _resume(resume, init_cash)
     if isinstance(init_cash, str):
         return _auto_cash(from_signals, dict(locals()))
     price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
@@ -1158,6 +1180,8 @@ def from_signals(
         group_lens=_group_lens(group_lens),
         call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
+        resume=_resume(resume, init_cash),
+        row_offset=int(row_offset),
         callbacks=_callbacks_of(
             pre_group=pre_group_func,
             signal=signal_func,
@@ -1166,6 +1190,31 @@ def from_signals(
             post_segment=post_segment_func,
         ),
     )
+
+
+def _resume(resume, init_cash):
+    if resume is None:
+        return None
+    if not isinstance(resume, (Portfolio, SimState)):
+        raise TypeError(f"resume must be a Portfolio or a SimState; got {type(resume).__name__}")
+    if isinstance(init_cash, str):
+        raise ValueError("init_cash='auto' sizes a run's start; a resumed run continues one")
+    return resume
+
+
+def save(pf, path):
+    """Writes ``pf`` to ``path``: its records, logs, the inputs its analysis
+    reads and its state, so ``load(path)`` gives a portfolio that analyses,
+    and continues with ``resume=``, as ``pf`` does. Callback states
+    (``in_outputs``) are not kept."""
+    with open(path, "wb") as f:
+        f.write(pf.to_bytes())
+
+
+def load(path) -> Portfolio:
+    """A portfolio ``save`` wrote."""
+    with open(path, "rb") as f:
+        return Portfolio.from_bytes(f.read())
 
 
 def _callbacks_of(**funcs):
@@ -1320,6 +1369,8 @@ def from_orders(
     group_lens=None,
     call_seq="default",
     column_map=None,
+    resume=None,
+    row_offset=0,
     _callbacks=None,
     _flexible=False,
     _row_wise=False,
@@ -1339,6 +1390,20 @@ def from_orders(
     column_map
         Optional logical-column to source-column indices, as in from_signals.
         Trading parameters use the logical width; market prices retain source width.
+    resume
+        A portfolio to continue (``pf.update``): pass the whole history again,
+        the bars it ran on and the new ones, with the same parameters, and only
+        the new bars are simulated, from the portfolio's ``last_state``. The
+        result is one portfolio over the whole history, equal to running it in
+        one go, records in the same order. The closes of the bars it ran on
+        must be the same; the starting cash is the portfolio's.
+    row_offset
+        With ``resume`` a ``SimState``, the low-level form a stepper uses: the
+        arrays cover rows ``row_offset`` onwards of a longer history, and
+        include the bars before the state's ``next_row`` that the run looks
+        back at (the previous close for ``price=-inf``, ``from_ago`` bars).
+        Returns a ``phasor.Segment``: the new rows' records, on the history's
+        rows, and its ``last_state``. Not a portfolio: it starts mid-run.
     close
         ``(n_bars, n_cols)``, or 1-D for a single column. Sets the shape, and
         resolves the ``inf`` sentinel in ``price`` and ``val_price``.
@@ -1578,6 +1643,7 @@ def from_orders(
     Portfolio
         The run's fills, plus everything derivable from them on demand.
     """
+    _resume(resume, init_cash)
     if isinstance(init_cash, str):
         return _auto_cash(from_orders, dict(locals()))
     price, price_type, from_ago = _price_option(price, from_ago, close, open, column_map)
@@ -1647,10 +1713,13 @@ def from_orders(
         group_lens=_group_lens(group_lens),
         call_seq=_call_seq(call_seq),
         column_map=_column_map(column_map),
+        resume=_resume(resume, init_cash),
+        row_offset=int(row_offset),
         callbacks=_callbacks,
         flexible=_flexible,
         row_wise=_row_wise,
     )
 
 
+from .stepper import Stepper
 from .strategy import crossed_above, factors, strategy

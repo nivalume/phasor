@@ -211,6 +211,8 @@ fn matches_the_reference_loop() {
             margin_tier_rate: FlexArray::Scalar(f64::NAN),
             liquidation_step: FlexArray::Scalar(f64::NAN),
             auto_deleverage: FlexArray::Scalar(false),
+            resume: None,
+            row_offset: 0,
             close: close.as_flex(n_rows, n_cols),
             size: size.as_flex(n_rows, n_cols),
             price: price.as_flex(n_rows, n_cols),

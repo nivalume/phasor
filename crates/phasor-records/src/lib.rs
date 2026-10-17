@@ -28,6 +28,7 @@
 //! Phase 1. Order records, all three trade views, drawdown episodes, the
 //! mapped-array reduction layer and log records are implemented.
 
+pub mod bytes;
 pub mod cash;
 pub mod drawdowns;
 pub mod excursions;
@@ -139,6 +140,20 @@ pub trait SinkBuffer: RecordSink + logs::LogSink + Send + Sized {
 
     /// The fills, to mark what the run allowed.
     fn records_mut(&mut self) -> &mut OrderRecords;
+
+    /// Moves everything recorded `by` rows later; see
+    /// [`OrderRecords::shift_rows`].
+    fn shift_rows(&mut self, by: i64);
+}
+
+/// The order that puts records written by consecutive segments of one run
+/// where one run would have written them: by group (`group_of[col]`), and
+/// within a group as written, which is by segment and then by bar.
+fn chain_order(cols: &[i64], group_of: &[usize]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..cols.len()).collect();
+    // Stable, so each group keeps its own sequence.
+    order.sort_by_key(|&i| group_of[cols[i] as usize]);
+    order
 }
 
 impl SinkBuffer for OrderRecords {
@@ -155,6 +170,10 @@ impl SinkBuffer for OrderRecords {
 
     fn records_mut(&mut self) -> &mut OrderRecords {
         self
+    }
+
+    fn shift_rows(&mut self, by: i64) {
+        Self::shift_rows(self, by);
     }
 }
 
@@ -181,6 +200,11 @@ impl SinkBuffer for logs::Journal {
 
     fn records_mut(&mut self) -> &mut OrderRecords {
         &mut self.orders
+    }
+
+    fn shift_rows(&mut self, by: i64) {
+        self.orders.shift_rows(by);
+        self.logs.shift_rows(by);
     }
 }
 
@@ -358,6 +382,49 @@ impl OrderRecords {
         if !self.debt.is_empty() {
             reorder!(debt, locked_cash, margin, isolated, liquidation, multiplier);
         }
+    }
+
+    /// Moves every fill and cash flow `by` rows later. A run on arrays that
+    /// start `by` rows into a longer history writes its rows from 0; this
+    /// puts them on the history's rows.
+    pub fn shift_rows(&mut self, by: i64) {
+        if by != 0 {
+            for idx in &mut self.idx {
+                *idx += by;
+            }
+        }
+        self.cash.shift_rows(by);
+    }
+
+    /// Reorders the fills: the `k`th becomes the one at `order[k]`. Cash
+    /// flows are not touched.
+    pub fn permute(&mut self, order: &[usize]) {
+        macro_rules! reorder {
+            ($($field:ident),*) => { $(self.$field = order.iter().map(|&i| self.$field[i]).collect();)* };
+        }
+        reorder!(col, idx, size, price, fees, side);
+        if !self.debt.is_empty() {
+            reorder!(debt, locked_cash, margin, isolated, liquidation, multiplier);
+        }
+    }
+
+    /// The records of consecutive segments of one run, each continued from
+    /// the last's state, as the one run would have written them: by group
+    /// (`group_of[col]` is column `col`'s group), then by segment.
+    ///
+    /// Equal to the one run's records, order included, which is what lets a
+    /// test compare them bit for bit.
+    #[must_use]
+    pub fn chain(parts: &[Self], group_of: &[usize]) -> Self {
+        let mut out = Self::new();
+        for part in parts {
+            out.extend(part);
+        }
+        let order = chain_order(&out.col, group_of);
+        out.permute(&order);
+        let order = chain_order(&out.cash.col, group_of);
+        out.cash.permute(&order);
+        out
     }
 
     /// Merges buffers that are already in column order.

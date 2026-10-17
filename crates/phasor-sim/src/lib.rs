@@ -55,6 +55,7 @@ mod margin;
 mod prices;
 mod random;
 pub mod signals;
+pub mod snapshot;
 pub mod state;
 pub mod stop_exits;
 mod stops;
@@ -250,9 +251,11 @@ pub use callbacks::{Context, Decision, Flow, NoCallbacks, OrderFunc, SignalFunc,
 pub use from_orders::{
     FromOrders, Schedule, simulate_from_order_func, simulate_from_orders,
     simulate_from_orders_logged, simulate_from_orders_logged_parallel,
-    simulate_from_orders_parallel,
+    simulate_from_orders_parallel, simulate_from_orders_run,
 };
 pub use from_signals::{
     FromSignals, simulate_from_signal_func, simulate_from_signals, simulate_from_signals_logged,
     simulate_from_signals_logged_parallel, simulate_from_signals_parallel,
+    simulate_from_signals_run,
 };
+pub use snapshot::{GroupState, Loop, Run, SimState};

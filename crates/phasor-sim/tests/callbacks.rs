@@ -12,6 +12,7 @@ use phasor_model::CashFlowKind;
 use phasor_records::{Journal, OrderRecords};
 use phasor_sim::callbacks::{Context, Decision, Flow, OrderFunc, SignalFunc, risk_size};
 use phasor_sim::groups::{CallSeq, Groups};
+use phasor_sim::snapshot::Run;
 use phasor_sim::state::StopState;
 use phasor_sim::{
     FromOrders, FromSignals, Schedule, simulate_from_order_func, simulate_from_orders,
@@ -136,7 +137,11 @@ fn a_callback_that_changes_nothing_changes_no_record() {
                 Schedule::Groups { n_threads: 3 },
                 Schedule::RowWise,
             ] {
-                let (records, calls): (OrderRecords, _) =
+                let Run {
+                    records,
+                    states: calls,
+                    ..
+                }: Run<OrderRecords, _> =
                     simulate_from_order_func(&args, &Passive, schedule).unwrap();
                 assert_eq!(records, plain, "{schedule:?}, levered {levered}");
                 assert_eq!(calls.iter().sum::<usize>(), N_ROWS * N_COLS);
@@ -146,7 +151,9 @@ fn a_callback_that_changes_nothing_changes_no_record() {
                 ..args.clone()
             })
             .unwrap();
-            let (journal, _): (Journal, _) = simulate_from_order_func(
+            let Run {
+                records: journal, ..
+            }: Run<Journal, _> = simulate_from_order_func(
                 &FromOrders {
                     log: FlexArray::scalar(true),
                     ..args.clone()
@@ -207,7 +214,7 @@ fn a_callback_that_decides_matches_the_arrays_that_decide_the_same() {
     let blank = vec![f64::NAN; N_COLS * N_ROWS];
     let groups = Groups::from_lens(&[3, 3], N_COLS).unwrap();
     let expected = simulate_from_orders(&order_args(&close, &decided, groups.clone())).unwrap();
-    let (records, _): (OrderRecords, _) = simulate_from_order_func(
+    let Run { records, .. }: Run<OrderRecords, _> = simulate_from_order_func(
         &order_args(&close, &blank, groups),
         &Momentum { close: &close },
         Schedule::Groups { n_threads: 2 },
@@ -279,7 +286,11 @@ fn flex_orders_fill_in_the_order_given_and_a_stopped_group_still_earns() {
         groups: Groups::ungrouped(1),
         ..FromOrders::default()
     };
-    let (records, state): (OrderRecords, _) =
+    let Run {
+        records,
+        states: state,
+        ..
+    }: Run<OrderRecords, _> =
         simulate_from_order_func(&args, &TwoLegs { stop_after: 3 }, Schedule::RowWise).unwrap();
     assert_eq!(
         fills(&records),
@@ -333,7 +344,7 @@ fn row_wise_runs_every_group_s_bar_before_the_next_bar() {
         per_row: 2,
         taken: Mutex::new(Vec::new()),
     };
-    let (records, _): (OrderRecords, _) =
+    let Run { records, .. }: Run<OrderRecords, _> =
         simulate_from_order_func(&args, &budget, Schedule::RowWise).unwrap();
     // Groups 0 and 1 take every bar's budget.
     let taken = budget.taken.into_inner().unwrap();
@@ -463,7 +474,7 @@ fn a_callback_sees_the_strategy_s_prices_whatever_the_multiplier() {
         groups: Groups::ungrouped(1),
         ..FromOrders::default()
     };
-    let (records, _): (OrderRecords, _) =
+    let Run { records, .. }: Run<OrderRecords, _> =
         simulate_from_order_func(&args, &cb, Schedule::Groups { n_threads: 1 }).unwrap();
     assert_eq!(fills(&records), [(0, 0, 1.0, 20.0)]);
     let seen = cb.seen.into_inner().unwrap();
@@ -519,7 +530,11 @@ fn a_signal_callback_that_changes_nothing_changes_no_record() {
             }
             let plain = simulate_from_signals(&args).unwrap();
             for n_threads in [1, 3] {
-                let (records, calls): (OrderRecords, _) =
+                let Run {
+                    records,
+                    states: calls,
+                    ..
+                }: Run<OrderRecords, _> =
                     simulate_from_signal_func(&args, &Passive, n_threads).unwrap();
                 assert_eq!(records, plain, "stops {stops}");
                 assert_eq!(calls.iter().sum::<usize>(), N_ROWS * N_COLS);
@@ -567,7 +582,7 @@ fn signals_from_a_callback_match_the_same_signals_from_arrays() {
         entries: &entries,
         exits: &exits,
     };
-    let (records, _): (OrderRecords, _) =
+    let Run { records, .. }: Run<OrderRecords, _> =
         simulate_from_signal_func(&signal_args(&close, &none, &none, groups), &cb, 2).unwrap();
     assert_eq!(records, expected);
     assert!(records.len() > 20);
@@ -631,7 +646,7 @@ fn risk_sizing_and_a_break_even_stop_through_callbacks() {
         sl_stop: FlexArray::scalar(0.05),
         ..FromSignals::default()
     };
-    let (records, _): (OrderRecords, _) =
+    let Run { records, .. }: Run<OrderRecords, _> =
         simulate_from_signal_func(&args, &Risk { sl: 0.05 }, 1).unwrap();
     let f = fills(&records);
     // 1% of 10,000 over a 5-point stop is 20 units.
@@ -756,8 +771,11 @@ fn a_dynamic_ladder_through_callbacks() {
         use_stops: true,
         ..FromSignals::default()
     };
-    let (records, steps): (OrderRecords, Vec<Steps>) =
-        simulate_from_signal_func(&args, &Ladder, 1).unwrap();
+    let Run {
+        records,
+        states: steps,
+        ..
+    }: Run<OrderRecords, Steps> = simulate_from_signal_func(&args, &Ladder, 1).unwrap();
     // In at 100; a third out at 102 and at 104; the rest stopped at the
     // second step's level, which bar 4 opens below.
     assert_eq!(

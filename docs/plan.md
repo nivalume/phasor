@@ -20,7 +20,7 @@
 | 5 | [账户与资金](#25-账户与资金) | ✅ | 共享现金、入金出金、收支、分红、杠杆、合约乘数、初始持仓、`init_cash="auto"`、负价格、连续合约、汇率换算 | — |
 | 6 | [保证金、强平、持仓费](#26-保证金强平持仓费) ➕ | ✅ | 全仓和逐仓保证金、强平（含部分强平、分档、ADL、融资融券）、资金费、隔夜融资、借贷利息、标记价格；和 NautilusTrader 对照一致 | — |
 | 7 | [多周期与交易时段](#27-多周期与交易时段) | ✅ | 粗周期对齐到细周期、聚合回粗周期、交易时段、强制平仓 | `Portfolio.resample`（归在组合分析） |
-| 8 | [状态延续与增量回测](#28-状态延续与增量回测) | ⬜ | — | 状态快照、`pf.update`、拼接、`save`/`load`、stepper |
+| 8 | [状态延续与增量回测](#28-状态延续与增量回测) | ✅ | 状态快照 `SimState`、续跑（`resume=pf`）、分段拼接、长历史分批（`row_offset`）、`save`/`load`、`Stepper`（回报成交、对账）；任意切点逐位一致 | — |
 | 9 | [数据](#29-数据) | 🟡 | 本地 CSV、Parquet、目录读取，按可用时间对齐，合成数据 | 数据源连接器、数据库存储、增量更新 |
 | 10 | [指标](#210-指标) | 🟡 | 8 个 Rust 指标和参数扫描，因子 DSL（Alpha158、Alpha360） | Python 接口、指标工厂、第三方库、WorldQuant 101、流式 |
 | 11 | [信号与标签](#211-信号与标签) | 🟡 | 带种子随机信号，信号区间，4 种 ML 标签 | Python 接口、日历信号、统计表 |
@@ -145,12 +145,13 @@
 
 验收：任意切点分两段跑再拼接，结果和一次跑完逐位一致，用随机切点测试。
 
-- [ ] 状态快照 `SimState`（列、账户组和回调状态），`Portfolio.last_state`；公开的账户组状态 `GroupState`（现金、可用现金），可序列化
-- [ ] 增量更新 `pf.update`：从快照继续，只算新增 K 线
-- [ ] 分段拼接 `row_stack(chained=True)`
-- [ ] 持久化 `save`/`load`：记录存 Arrow IPC 或 Parquet，状态存带版本号的二进制
-- [ ] Stepper：外部执行层回报成交，phasor 逐根推进并对账
-- [ ] 长历史分批，控制内存
+- [x] 状态快照 `phasor_sim::snapshot::SimState`：每个账户组的现金、可用现金、各列状态（持仓、债务、锁定现金、估值价、止损、挂单）、是否被回调停止；`Portfolio.last_state`；带版本号的二进制 `to_bytes`/`from_bytes`。行号存绝对行号。回调自己的状态不在里面：续跑时再调一次 `pre_group`
+- [x] 续跑（即 `pf.update`）：两个循环的参数加 `resume`；Python `from_signals(..., resume=pf)`、`from_orders(..., resume=pf)` 传入完整历史，只算新增 K 线，返回整段历史的组合；核对旧 K 线的收盘价、分组和列
+- [x] 分段拼接：`OrderRecords::chain`、`Journal::chain` 按账户组稳定排序，结果和一次跑完的记录顺序完全相同（日志的 `order_id` 跟着重编）；Python 的 `resume=pf` 直接返回拼好的组合
+- [x] 持久化：`Portfolio.to_bytes`/`from_bytes`，`phasor.save`/`phasor.load`（Python 写文件，库不写文件）。没有用 Arrow IPC，用的是带版本号的二进制（记录、日志、分析需要的输入、状态）；回调状态 `in_outputs` 不保存
+- [x] Stepper：`phasor.Stepper` 逐根 `propose`（回测会怎么成交）、`commit(fills)`（记下券商回报的数量、价格、费用，持仓费和现金流照常），`reconcile(positions)` 对账；每根只跑这一根和回看的几根，成本不随历史变长。只支持 `from_orders`
+- [x] 长历史分批：参数 `row_offset`，数组从历史的任意一行开始，带上回看需要的几行；Rust 测试 7 行一段跑完 90 行；Python `resume=SimState, row_offset=` 返回 `phasor.Segment`
+- 验收：`crates/phasor-sim/tests/resume.rs`，两个循环各 4 组功能（共享现金、杠杆、保证金和强平、止损含时间止损、限价单、随机拒单、现金流、持仓费）× 5 个切点 × 两种续跑方式，记录和最终状态逐位一致；去掉时间止损的行号换算或随机数改用局部行号，测试失败
 
 ### 2.9 数据
 
@@ -309,6 +310,7 @@ PRO 闭源，没法差分测试，按功能来源对照：
 | 初始持仓、负价格 | eaabcc2 | +0.79% | +1.23% |
 | 融资融券强平、分档、部分强平、ADL、逐仓持仓费、负现金计息 | 40a3e79 | −0.42% | −0.47% |
 | 回调、`from_order_func`、`row_wise`；`FlexArray::get` 标量快路径 | ee45e7f | −1.18% | −13.85% |
+| 状态快照、续跑、分批 | 6aa71f9 | +1.01% | +1.58% |
 
 从限价单起只测了指令数，没有跑交替计时。回调这一行是两件事相抵：回调本身让 `from_orders` 多了约 4%（循环拆成 `Group::run_rows` 以支持 `row_wise`，寄存器分配变差），`FlexArray::get` 对标量直接返回、不再调用函数，省回约 5%。累计和 c0fc6b2 比：`from_orders` +2.47%，`from_signals` −14.30%，回到约束以内。
 

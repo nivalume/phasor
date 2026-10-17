@@ -308,6 +308,8 @@ fn check_row(fixture: &Fixture, row: &[String], failures: &mut Vec<String>, fill
         margin_tier_rate: FlexArray::Scalar(f64::NAN),
         liquidation_step: FlexArray::Scalar(f64::NAN),
         auto_deleverage: FlexArray::Scalar(false),
+        resume: None,
+        row_offset: 0,
         open: open.as_flex(n_rows, n_cols),
         high: high.as_flex(n_rows, n_cols),
         low: low.as_flex(n_rows, n_cols),
