@@ -22,7 +22,7 @@
 | 7 | [多周期与交易时段](#27-多周期与交易时段) | ✅ | 粗周期对齐到细周期、聚合回粗周期、交易时段、强制平仓 | `Portfolio.resample`（归在组合分析） |
 | 8 | [状态延续与增量回测](#28-状态延续与增量回测) | ✅ | 状态快照 `SimState`、续跑（`resume=pf`）、分段拼接、长历史分批（`row_offset`）、`save`/`load`、`Stepper`（回报成交、对账）；任意切点逐位一致 | — |
 | 9 | [数据](#29-数据) | 🟡 | 本地 CSV、Parquet、目录读取，按可用时间对齐，合成数据 | 数据源连接器、数据库存储、增量更新 |
-| 10 | [指标](#210-指标) | 🟡 | 8 个 Rust 指标和参数扫描，因子 DSL（Alpha158、Alpha360） | Python 接口、指标工厂、第三方库、WorldQuant 101、流式 |
+| 10 | [指标](#210-指标) | ✅ | 8 个 Rust 指标和参数扫描、流式版本，Python 接口、指标工厂、第三方库；因子 DSL（Alpha158、Alpha360、WorldQuant 101），截面算子分阶段执行，分批输出，窄面板按因子并行 | — |
 | 11 | [信号与标签](#211-信号与标签) | 🟡 | 带种子随机信号，信号区间，4 种 ML 标签 | Python 接口、日历信号、统计表 |
 | 12 | [组合分析](#212-组合分析) | 🟡 | 记录、收益与风险指标、回撤、敞口、MAE/MFE、事件研究 | 切片拼接重采样、图表、形态搜索、部分 Python 接口 |
 | 13 | [参数优化与验证](#213-参数优化与验证) | 🟡 | 策略参数扫描，交叉验证切分，PSR、deflated Sharpe、PBO | 通用参数化、日历切分、置换检验、组合优化 |
@@ -176,12 +176,12 @@
 - [x] Rust 指标接到 Python：`phasor.indicators.ma/mstd/bbands/rsi/stoch/macd/atr/obv/true_range`，参数列表做乘积（或 `product=False` 逐位配对），`IndicatorResult` 带每列参数标签和 `select(...)`
 - [x] 指标工厂：`IndicatorFactory(func, inputs, params, outputs).run(...)`，任意 Python 函数按参数网格跑，输出布局和内置指标相同
 - [x] 第三方库包装：`from_talib`、`from_pandas_ta`、`from_ta`、`from_smc`，用到时才导入；TA-Lib 的 SMA 和内置 MA 相差 2e-13（测试在装了 TA-Lib 时跑）
-- [ ] 截面算子（`CSRank`、`CSZScore`、`Scale`、中性化），按图分阶段执行
-- [ ] WorldQuant 101，对照公开公式手算 fixture
-- [ ] 流式指标：逐根更新，结果和批量计算一致
-- [ ] 因子输出分批写到 sink 或 Arrow/Parquet，峰值内存有界
-- [ ] 更多逐元素算子：`Exp`、`Sqrt`、`Clip`、`FillNa`、`IsNan`、掩码
-- [ ] 窄面板上单标的内部并行
+- [x] 截面算子：`CSRank`（pandas `rank(pct=True)`）、`CSZScore`、`CSDemean`、`Scale(x, a)`、`IndNeutralize(x, $group)`（组内去均值）、`CSResi(y, x)`（截面回归残差）。图按截面节点分层（`phasor_expr::stage`）：同层的逐标的节点编成一个普通图按列并行，层间对每行跑截面节点；跨层的序列存成整块面板，最后一个读者用完就释放。线程数不影响结果（测试 1、2、4、7 线程逐位一致）
+- [x] WorldQuant 101：`wq101()`（只读量价的 82 个）、`wq101_all()`（加 `$cap`、`$sector`、`$industry`、`$subindustry` 共 101 个）、`wq101_formula(k)`。公式从论文原文（arXiv:1601.00991v3 附录 A）机械翻译，`tests/parity/generate_wq101.py` 同时生成 Rust 表和 fixture；fixture 由一个独立的 NumPy 解释器按论文定义逐个算子直接计算。精确算术下相等、浮点下差几个 ulp 的值（两点相关系数恰为 ±1、秩序列的协方差）会让排名两边都对但不同，解释器跟踪这类近似并列，fixture 标出这些格子不比较（约 6%）；其余格子相对误差 1e-9 内一致。`adv{d}` 取 `Mean($volume, d)`（论文说是成交额，但多个 alpha 直接拿它和 `volume` 比）
+- [x] 流式指标：`phasor_indicators::Stream`（Rust）、`phasor.indicators.Stream`（Python），8 个指标逐根更新，状态是批量算法跨根携带的那部分，浮点运算顺序相同，结果和批量计算逐位一致（含缺失值、常数段、`adjust` 两种取法）
+- [x] 因子分批输出：`FactorSet::evaluate_batches(inputs, batch, sink)` 每次算 `batch` 个标的交给 sink，没有截面算子时峰值内存只和批大小有关；有截面算子时先整块算完再分批交出。Python `FactorSet.evaluate_batches`、`FactorSet.to_parquet`（pyarrow，每批一个 row group）
+- [x] 更多逐元素算子：`Exp`、`Sqrt`、`Clip(x, lo, hi)`、`FillNa(x, v)`、`IsNan`、`Mask(x, cond)`、`SignedPower`；时间序列 `DecayLinear`、`Prod`
+- [x] 窄面板并行：标的数少于线程数时，因子按顺序切成至多 16 组分别编译，按（组、标的）并行；共享子表达式在组间会重复计算，结果逐位不变。单标的 Alpha158（5 万行）1 线程 111 ms，4 线程 40 ms
 
 ### 2.11 信号与标签
 
@@ -262,6 +262,7 @@
 - [ ] 过时注释：`phasor-analysis` 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程
 - [ ] `propose.py` 引用 `tests/test_propose.py`，实际检查在 `research/tests/test_pipeline.py::test_proposals_never_see_results`
 - [ ] 两个 Qlib fixture 用了不同版本的 Qlib/NumPy/pandas（见 fixture 文件头）
+- [ ] `cargo test -p phasor-expr --features polars --test parity_qlib` 在 debug 构建下多数次数栈溢出（polars 工作线程上，Alpha158 的表达式树深）；release 和原生后端不受影响。126d8da 上也一样
 
 ---
 

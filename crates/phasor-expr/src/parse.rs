@@ -244,13 +244,16 @@ impl Parser {
 fn validate(expr: &Expression) -> std::result::Result<(), String> {
     if let Expression::Call(name, args) = expr {
         let arity = match name.as_str() {
-            "Abs" | "Sign" | "Log" | "Not" => 1..=1,
+            "Abs" | "Sign" | "Log" | "Not" | "Exp" | "Sqrt" | "IsNan" | "CSRank" | "CSZScore"
+            | "CSDemean" => 1..=1,
             "Greater" | "Less" | "Power" | "Add" | "Sub" | "Mul" | "Div" | "Gt" | "Ge" | "Lt"
-            | "Le" | "Eq" | "Ne" | "And" | "Or" => 2..=2,
-            "If" => 3..=3,
+            | "Le" | "Eq" | "Ne" | "And" | "Or" | "FillNa" | "Mask" | "SignedPower"
+            | "IndNeutralize" | "CSResi" => 2..=2,
+            "Scale" => 1..=2,
+            "If" | "Clip" => 3..=3,
             "Ref" | "Mean" | "Std" | "Sum" | "Max" | "Min" | "Rank" | "IdxMax" | "IdxMin"
             | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew" | "Kurt" | "Med" | "Mad" | "Count"
-            | "Delta" | "WMA" | "EMA" => 2..=2,
+            | "Delta" | "WMA" | "EMA" | "DecayLinear" | "Prod" => 2..=2,
             "Quantile" | "Corr" | "Cov" => 3..=3,
             _ => return Err(format!("unsupported operator {name:?}")),
         };

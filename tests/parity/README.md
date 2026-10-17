@@ -83,6 +83,20 @@ market-data download is needed. The committed TSV files contain both f64
 inputs and Qlib expression outputs; matching the Rust matrix dtype keeps the
 tests focused on operator semantics rather than float32 cancellation.
 
+WorldQuant 101 has no reference implementation to run, so its generator is
+the reference: it parses the paper's formulas (copied verbatim into the
+script), prints phasor's table from them, and evaluates them with a direct
+NumPy interpreter that shares no code with phasor. It needs only NumPy:
+
+```bash
+uv run python tests/parity/generate_wq101.py fixture
+python3 tests/parity/generate_wq101.py rust   # the table in phasor-expr/src/wq101.rs
+cargo test -p phasor-expr --test wq101
+```
+
+Cells marked `~` may depend on how a tie in exact arithmetic rounds and are
+not compared; the script's docstring says how they are found.
+
 Then **read the diff**. Fixtures are seeded, so a changed line means the two
 implementations now disagree somewhere — either you changed the reference
 version, or you changed what a case covers. An unexplained change is a finding,

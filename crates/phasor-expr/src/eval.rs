@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use phasor_core::error::{Error, Result};
@@ -8,8 +9,10 @@ use phasor_model::OhlcvPanel;
 use rayon::prelude::*;
 
 use crate::FactorSet;
-use crate::graph::{self, BinaryOp, Graph, NodeId, Op, Rolling, UnaryOp};
+use crate::cross;
+use crate::graph::{self, BinaryOp, Cross, Graph, NodeId, Op, Rolling, UnaryOp};
 use crate::order::{Order, ordered_into, rolling_arg_extreme_into};
+use crate::stage::{Dest, Source, Staged, Step};
 use crate::window::{Count, Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide_into};
 
 /// Named column-major fields supplied to a factor set.
@@ -151,6 +154,33 @@ impl FactorValues {
             .map(|(name, value)| (name.as_str(), value.as_ref()))
     }
 
+    /// The values of symbols `cols` only.
+    ///
+    /// # Errors
+    ///
+    /// A range past the last symbol.
+    pub fn columns(&self, cols: Range<usize>) -> Result<Self> {
+        let matrices = self
+            .values
+            .iter()
+            .map(|m| {
+                if cols.end > m.n_cols() || cols.start > cols.end {
+                    return Err(Error::Invariant(format!(
+                        "symbols {cols:?} of {}",
+                        m.n_cols()
+                    )));
+                }
+                let n_rows = m.n_rows();
+                Matrix::from_column_major(
+                    m.as_slice()[cols.start * n_rows..cols.end * n_rows].to_vec(),
+                    n_rows,
+                    cols.len(),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Self::from_matrices(self.names.clone(), matrices)
+    }
+
     /// Takes the matrices in factor-set order. A matrix is moved out rather
     /// than copied unless two factors share the same expression.
     pub fn into_matrices(self) -> impl ExactSizeIterator<Item = (String, Matrix)> {
@@ -180,6 +210,216 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
             })
             .collect::<Result<Vec<&[f64]>>>()?;
 
+    let outputs = match &set.plan {
+        // Fewer symbols than threads: split the factors as well, so the pool
+        // has work. Every node computes the same values in any graph, so the
+        // result is the same bit for bit.
+        None if n_cols < rayon::current_num_threads() && set.factors.len() > 1 => {
+            let parts = set.parts.get_or_init(|| split(set));
+            run_parts(parts, graph.outputs.len(), inputs, n_rows, n_cols)?
+        }
+        None => run_graph(graph, &fields, n_rows, n_cols),
+        Some(staged) => run_staged(staged, graph.outputs.len(), &fields, n_rows, n_cols),
+    };
+    let names = set.names().map(str::to_owned).collect();
+    let matrices = outputs
+        .into_iter()
+        .map(|cells| Matrix::from_column_major(cells, n_rows, n_cols))
+        .collect::<Result<Vec<_>>>()?;
+    FactorValues::from_matrices(names, matrices)
+}
+
+/// A group of factors compiled on its own.
+#[derive(Debug, Clone)]
+pub(crate) struct Part {
+    graph: Graph,
+    /// Each output's position in the whole set.
+    positions: Vec<usize>,
+}
+
+/// The factors in contiguous groups of about equal size. Neighbouring
+/// factors tend to share subexpressions (Alpha158's `MA5`, `MA10`, ... read
+/// the same close), so contiguous groups recompute little.
+fn split(set: &FactorSet) -> Vec<Part> {
+    const PARTS: usize = 16;
+    let n = set.factors.len();
+    let per = n.div_ceil(PARTS.min(n));
+    (0..n)
+        .step_by(per)
+        .map(|start| {
+            let positions: Vec<usize> = (start..(start + per).min(n)).collect();
+            let graph = Graph::compile(
+                positions
+                    .iter()
+                    .map(|&k| (set.factors[k].0.as_str(), &set.factors[k].1)),
+            )
+            .expect("a subset of a compiled set compiles");
+            Part { graph, positions }
+        })
+        .collect()
+}
+
+/// Every (group, symbol) pair as one task.
+fn run_parts(
+    parts: &[Part],
+    n_outputs: usize,
+    inputs: &FactorInputs<'_>,
+    n_rows: usize,
+    n_cols: usize,
+) -> Result<Vec<Vec<f64>>> {
+    let mut outputs: Vec<Vec<f64>> = (0..n_outputs).map(|_| vec![0.0; n_rows * n_cols]).collect();
+    if n_rows == 0 {
+        return Ok(outputs);
+    }
+    let mut cells: Vec<Vec<Option<&mut [f64]>>> = outputs
+        .iter_mut()
+        .map(|output| output.chunks_mut(n_rows).map(Some).collect())
+        .collect();
+    let mut tasks = Vec::with_capacity(parts.len() * n_cols);
+    for part in parts {
+        let fields = part
+            .graph
+            .fields
+            .iter()
+            .map(|name| {
+                inputs.fields.get(name).copied().ok_or_else(|| {
+                    Error::Invariant(format!("factor input is missing field ${name}"))
+                })
+            })
+            .collect::<Result<Vec<&[f64]>>>()?;
+        for col in 0..n_cols {
+            let out: Vec<&mut [f64]> = part
+                .positions
+                .iter()
+                .map(|&p| cells[p][col].take().expect("each cell has one writer"))
+                .collect();
+            let column: Vec<&[f64]> = fields
+                .iter()
+                .map(|values| &values[col * n_rows..(col + 1) * n_rows])
+                .collect();
+            tasks.push((&part.graph, column, out));
+        }
+    }
+    tasks.into_par_iter().for_each(|(graph, column, mut out)| {
+        let mut scratch = Scratch::new(graph.slots, n_rows);
+        run_column(graph, &column, &mut scratch, &mut out);
+    });
+    Ok(outputs)
+}
+
+/// Runs the stages in order: each per-symbol stage over every column, each
+/// cross-sectional node over every row.
+fn run_staged(
+    staged: &Staged,
+    n_outputs: usize,
+    fields: &[&[f64]],
+    n_rows: usize,
+    n_cols: usize,
+) -> Vec<Vec<f64>> {
+    let mut outputs: Vec<Option<Vec<f64>>> = vec![None; n_outputs];
+    let mut panels: Vec<Option<Vec<f64>>> = vec![None; staged.panels];
+    for (at, step) in staged.steps.iter().enumerate() {
+        let read = |source: &Source| -> Arg<'_> {
+            match *source {
+                Source::Field(index) => Arg::Series(fields[index]),
+                Source::Const(value) => Arg::Scalar(value),
+                Source::Panel(k) => Arg::Series(
+                    panels[k]
+                        .as_deref()
+                        .expect("a panel is written before it is read"),
+                ),
+            }
+        };
+        match step {
+            Step::Columns {
+                graph,
+                sources,
+                dests,
+            } => {
+                let inputs: Vec<&[f64]> = sources
+                    .iter()
+                    .map(|source| match read(source) {
+                        Arg::Series(values) => values,
+                        _ => unreachable!("a stage's fields are series"),
+                    })
+                    .collect();
+                let results = run_graph(graph, &inputs, n_rows, n_cols);
+                for (values, dest) in results.into_iter().zip(dests) {
+                    match *dest {
+                        Dest::Output(position) => outputs[position] = Some(values),
+                        Dest::Panel(k) => panels[k] = Some(values),
+                    }
+                }
+            }
+            Step::Cross {
+                op,
+                inputs,
+                panel,
+                outputs: positions,
+            } => {
+                let x = read(&inputs[0]);
+                let y = inputs.get(1).map_or(Arg::Scalar(f64::NAN), read);
+                let values = cross_panel(*op, x, y, n_rows, n_cols);
+                for &position in positions {
+                    outputs[position] = Some(values.clone());
+                }
+                panels[*panel] = Some(values);
+            }
+        }
+        for &k in &staged.release[at] {
+            panels[k] = None;
+        }
+    }
+    outputs
+        .into_iter()
+        .map(|values| values.expect("every factor is written by some step"))
+        .collect()
+}
+
+/// A cross-sectional node over every row, rows in parallel. Rows are built
+/// row-major, so each is one contiguous slice, then transposed.
+fn cross_panel(op: Cross, x: Arg<'_>, y: Arg<'_>, n_rows: usize, n_cols: usize) -> Vec<f64> {
+    let at = |arg: Arg<'_>, row: usize, col: usize| match arg {
+        Arg::Scalar(value) => value,
+        Arg::Series(values) => values[col * n_rows + row],
+        Arg::Shifted { .. } => unreachable!("cross-sectional inputs are whole series"),
+    };
+    let mut rows = vec![0.0; n_rows * n_cols];
+    if n_cols > 0 {
+        rows.par_chunks_mut(n_cols).enumerate().for_each_init(
+            || {
+                (
+                    vec![0.0; n_cols],
+                    vec![0.0; n_cols],
+                    cross::Scratch::default(),
+                )
+            },
+            |(xs, ys, scratch), (row, out)| {
+                for col in 0..n_cols {
+                    xs[col] = at(x, row, col);
+                    ys[col] = at(y, row, col);
+                }
+                cross::row(op, xs, ys, out, scratch);
+            },
+        );
+    }
+    let mut columns = vec![0.0; n_rows * n_cols];
+    if n_rows > 0 {
+        columns
+            .par_chunks_mut(n_rows)
+            .enumerate()
+            .for_each(|(col, column)| {
+                for (row, slot) in column.iter_mut().enumerate() {
+                    *slot = rows[row * n_cols + col];
+                }
+            });
+    }
+    columns
+}
+
+/// Every output of a graph without cross-sectional nodes, one column-major
+/// series each, columns in parallel.
+fn run_graph(graph: &Graph, fields: &[&[f64]], n_rows: usize, n_cols: usize) -> Vec<Vec<f64>> {
     // One allocation per output rather than cloning a zeroed buffer, so the
     // pages are zeroed lazily by the columns that write them, in parallel.
     let mut outputs: Vec<Vec<f64>> = (0..graph.outputs.len())
@@ -207,12 +447,7 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
             },
         );
     }
-    let names = set.names().map(str::to_owned).collect();
-    let matrices = outputs
-        .into_iter()
-        .map(|cells| Matrix::from_column_major(cells, n_rows, n_cols))
-        .collect::<Result<Vec<_>>>()?;
-    FactorValues::from_matrices(names, matrices)
+    outputs
 }
 
 /// One worker's scratch: the graph's slots, each a series of `n_rows`, plus a
@@ -316,7 +551,9 @@ fn segments(args: &[Arg<'_>], n_rows: usize) -> impl Iterator<Item = (usize, usi
 
 /// Evaluates the whole graph for one symbol, writing each factor's column.
 fn run_column(graph: &Graph, fields: &[&[f64]], scratch: &mut Scratch, out: &mut [&mut [f64]]) {
-    let n_rows = out.first().map_or(fields[0].len(), |column| column.len());
+    let n_rows = out
+        .first()
+        .map_or_else(|| fields[0].len(), |column| column.len());
     for node in &graph.nodes {
         fn arg<'s>(
             graph: &Graph,
@@ -468,6 +705,7 @@ fn step(op: Op, args: &[Arg<'_>], target: &mut [f64], spare: &mut [Vec<f64>]) {
             }
         }
         Op::Field(_) | Op::Const(_) => unreachable!("fields and literals are not computed"),
+        Op::Cross(_) => unreachable!("cross-sectional nodes run between stages"),
     }
 }
 
@@ -502,7 +740,7 @@ fn unary_series(op: UnaryOp, input: Arg<'_>, target: &mut [f64]) {
             }
         };
     }
-    dispatch!(Neg, Abs, Sign, Log, Not);
+    dispatch!(Neg, Abs, Sign, Log, Not, Exp, Sqrt, IsNan);
 }
 
 /// An elementwise binary operator with the operator and operand kinds
@@ -541,7 +779,24 @@ fn binary_series(op: BinaryOp, left: Arg<'_>, right: Arg<'_>, target: &mut [f64]
         };
     }
     dispatch!(
-        Add, Sub, Mul, Div, Pow, Gt, Lt, Ge, Le, Eq, Ne, And, Or, Greater, Less
+        Add,
+        Sub,
+        Mul,
+        Div,
+        Pow,
+        Gt,
+        Lt,
+        Ge,
+        Le,
+        Eq,
+        Ne,
+        And,
+        Or,
+        Greater,
+        Less,
+        FillNa,
+        Mask,
+        SignedPower
     );
 }
 
@@ -584,6 +839,44 @@ fn rolling_into(kind: Rolling, input: &[f64], window: usize, out: &mut [f64]) {
         Rolling::Slope => slide_into(input, window, &mut Regression::new(Fit::Slope), out),
         Rolling::Rsquare => slide_into(input, window, &mut Regression::new(Fit::Rsquare), out),
         Rolling::Resi => slide_into(input, window, &mut Regression::new(Fit::Resi), out),
+        Rolling::Decay => decay_into(input, window, out),
+        Rolling::Prod => prod_into(input, window, out),
+    }
+}
+
+/// Linearly decaying weights `1..=len` over each trailing window, newest
+/// heaviest, normalized over the values present. A direct `O(window)` sum per
+/// row: the windows these are used with are short, and a running sum would
+/// carry rounding from rows long gone.
+fn decay_into(input: &[f64], window: usize, out: &mut [f64]) {
+    for (row, slot) in out.iter_mut().enumerate() {
+        let start = (row + 1).saturating_sub(window);
+        let (mut num, mut den) = (0.0, 0.0);
+        for (k, &value) in input[start..=row].iter().enumerate() {
+            if !value.is_nan() {
+                let weight = (k + 1) as f64;
+                num += weight * value;
+                den += weight;
+            }
+        }
+        *slot = if den > 0.0 { num / den } else { f64::NAN };
+    }
+}
+
+/// The product of the values present in each trailing window; `NaN` when
+/// there are none. Direct, since a zero makes a running quotient useless.
+fn prod_into(input: &[f64], window: usize, out: &mut [f64]) {
+    for (row, slot) in out.iter_mut().enumerate() {
+        let start = (row + 1).saturating_sub(window);
+        let mut product = 1.0;
+        let mut any = false;
+        for &value in &input[start..=row] {
+            if !value.is_nan() {
+                product *= value;
+                any = true;
+            }
+        }
+        *slot = if any { product } else { f64::NAN };
     }
 }
 

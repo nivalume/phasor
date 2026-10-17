@@ -31,6 +31,7 @@ import numpy as np
 from . import _phasor
 
 __all__ = [
+    "Stream",
     "IndicatorFactory",
     "IndicatorResult",
     "atr",
@@ -183,6 +184,53 @@ def true_range(high, low, close) -> np.ndarray:
     """Each bar's true range: the high-low range widened to the previous
     close."""
     return _phasor.ind_true_range(_matrix(high, "high"), _matrix(low, "low"), _matrix(close, "close"))
+
+
+_STREAM_DEFAULTS = {
+    "ma": dict(window=14, ewm=False, adjust=True),
+    "mstd": dict(window=14, ewm=False, adjust=True, ddof=1),
+    "bbands": dict(window=20, ewm=False, alpha=2.0, adjust=True, ddof=0),
+    "rsi": dict(window=14, ewm=False, adjust=True),
+    "stoch": dict(k_window=14, d_window=3, d_ewm=False, adjust=True),
+    "macd": dict(fast_window=12, slow_window=26, signal_window=9, macd_ewm=False, signal_ewm=False, adjust=True),
+    "atr": dict(window=14, ewm=False, adjust=True),
+    "obv": dict(),
+}
+
+
+class Stream:
+    """One indicator over ``n_cols`` series, a bar at a time, for live use.
+
+    Parameters are the batch function's, one value each, with the same
+    defaults. Each :meth:`update` takes one bar for every column and returns
+    that bar's outputs, equal bit for bit to the batch function's on the
+    whole history::
+
+        s = phasor.indicators.Stream("rsi", n_cols=3, window=14)
+        for bar in live_bars:
+            out = s.update(bar.close)        # {"rsi": array of 3}
+        s = phasor.indicators.Stream("atr", n_cols=3)
+        s.update(close, high=high, low=low)  # {"tr": ..., "atr": ...}
+    """
+
+    def __init__(self, kind: str, n_cols: int = 1, **params: Any):
+        if kind not in _STREAM_DEFAULTS:
+            raise ValueError(f"no streaming indicator {kind!r}; there are {', '.join(_STREAM_DEFAULTS)}")
+        unknown = set(params) - set(_STREAM_DEFAULTS[kind])
+        if unknown:
+            raise TypeError(f"{kind} takes no parameter {sorted(unknown)[0]!r}")
+        self.kind = kind
+        self.params = {**_STREAM_DEFAULTS[kind], **params}
+        self._inner = _phasor._IndicatorStream(kind, n_cols, self.params)
+
+    @property
+    def names(self) -> list[str]:
+        return list(self._inner.names)
+
+    def update(self, close, high=None, low=None, volume=None) -> dict[str, np.ndarray]:
+        def row(x):
+            return None if x is None else np.atleast_1d(np.asarray(x, dtype=float)).tolist()
+        return dict(self._inner.update(row(close), row(high), row(low), row(volume)))
 
 
 class IndicatorFactory:

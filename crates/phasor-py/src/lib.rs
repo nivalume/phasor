@@ -2889,6 +2889,8 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(from_orders, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha158, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha360, m)?)?;
+    m.add_function(wrap_pyfunction!(expr::wq101, m)?)?;
+    m.add_function(wrap_pyfunction!(expr::wq101_formula, m)?)?;
     m.add_function(wrap_pyfunction!(expr::crossed_above, m)?)?;
     research::register(m)?;
     indicators::register(m)?;

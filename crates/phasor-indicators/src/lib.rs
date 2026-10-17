@@ -27,6 +27,10 @@
 //! determine them, so a wide grid does not recompute a shared moving average
 //! once per row of it.
 //!
+//! [`stream`] computes the same indicators one bar at a time, for live use:
+//! a [`Stream`] per series and parameter set, whose outputs equal the batch
+//! function's bit for bit.
+//!
 //! # Verification
 //!
 //! Every indicator is pinned against the reference by
@@ -35,10 +39,12 @@
 //! stochastic with a flat range, a true range on the first bar.
 
 pub mod indicators;
+pub mod stream;
 pub mod sweep;
 
 pub use indicators::{
     BbParams, Indicator, MaParams, MacdParams, StochParams, atr, bbands, ma, macd, mstd, obv, rsi,
     stoch, true_range,
 };
+pub use stream::{Bar, Stream};
 pub use sweep::{ParamLevel, column_of, combinations, sweep_columns};

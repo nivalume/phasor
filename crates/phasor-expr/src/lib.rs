@@ -7,13 +7,16 @@
 mod alpha158;
 mod alpha360;
 mod backend;
+mod cross;
 mod eval;
 mod graph;
 mod order;
 mod parse;
 #[cfg(feature = "polars")]
 mod polars_backend;
+mod stage;
 mod window;
+mod wq101;
 
 pub use alpha158::alpha158;
 pub use alpha360::alpha360;
@@ -22,8 +25,11 @@ pub use eval::{FactorInputs, FactorValues};
 pub use parse::Expression;
 #[cfg(feature = "polars")]
 pub use polars_backend::PolarsBackend;
+pub use wq101::{wq101, wq101_all, wq101_formula};
 
 use std::collections::BTreeSet;
+use std::ops::Range;
+use std::sync::OnceLock;
 
 use phasor_core::error::{Error, Result};
 
@@ -34,6 +40,11 @@ use crate::parse::parse;
 pub struct FactorSet {
     factors: Vec<(String, Expression)>,
     graph: graph::Graph,
+    /// The stages, when a factor reads across symbols.
+    plan: Option<stage::Staged>,
+    /// The factors split into separately compiled groups, built on first use
+    /// by a panel narrower than the thread pool.
+    parts: OnceLock<Vec<eval::Part>>,
 }
 
 impl FactorSet {
@@ -69,9 +80,12 @@ impl FactorSet {
         }
         let graph =
             graph::Graph::compile(compiled.iter().map(|(name, expr)| (name.as_str(), expr)))?;
+        let plan = stage::Staged::plan(&graph);
         Ok(Self {
             factors: compiled,
             graph,
+            plan,
+            parts: OnceLock::new(),
         })
     }
 
@@ -124,6 +138,48 @@ impl FactorSet {
         backend: &dyn ComputeBackend,
     ) -> Result<FactorValues> {
         backend.evaluate(self, inputs)
+    }
+
+    /// Evaluates `batch` symbols at a time, handing each batch's values to
+    /// `sink` with the range of symbols they cover, in order. Without a
+    /// cross-sectional operator only one batch is held at a time, so peak
+    /// memory is bounded by `batch`, not by the panel; with one, every symbol
+    /// is needed for every row, so the whole panel is evaluated first and
+    /// then handed over in batches.
+    ///
+    /// # Errors
+    ///
+    /// As [`FactorSet::evaluate`], a zero `batch`, and whatever `sink`
+    /// returns, which stops the run.
+    pub fn evaluate_batches(
+        &self,
+        inputs: &FactorInputs<'_>,
+        batch: usize,
+        mut sink: impl FnMut(Range<usize>, FactorValues) -> Result<()>,
+    ) -> Result<()> {
+        if batch == 0 {
+            return Err(Error::Invariant(
+                "a batch must hold at least one symbol".into(),
+            ));
+        }
+        let (n_rows, n_cols) = inputs.shape();
+        if self.plan.is_some() {
+            let all = self.evaluate(inputs)?;
+            for start in (0..n_cols).step_by(batch) {
+                let cols = start..(start + batch).min(n_cols);
+                sink(cols.clone(), all.columns(cols)?)?;
+            }
+            return Ok(());
+        }
+        for start in (0..n_cols).step_by(batch) {
+            let cols = start..(start + batch).min(n_cols);
+            let mut part = FactorInputs::new(n_rows, cols.len())?;
+            for (name, values) in inputs.fields() {
+                part = part.with_field(name, &values[cols.start * n_rows..cols.end * n_rows])?;
+            }
+            sink(cols, self.evaluate(&part)?)?;
+        }
+        Ok(())
     }
 }
 

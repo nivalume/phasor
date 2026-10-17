@@ -203,3 +203,64 @@ def test_talib_wrapper_matches_the_builtin():
     c = _close()
     sma = phasor.indicators.from_talib("SMA", params=["timeperiod"]).run(c, timeperiod=[5, 10])
     np.testing.assert_allclose(sma.out, phasor.indicators.ma(c, window=[5, 10]).ma, rtol=1e-12)
+
+
+# --- factor engine: cross-sectional operators, WQ101, batches, streams -------
+
+
+def _ohlcv(n=80, cols=5, seed=1):
+    c = _close(n, cols, seed)
+    rng = np.random.default_rng(seed)
+    return {"open": c * 0.999, "high": c * 1.01, "low": c * 0.99, "close": c,
+            "volume": rng.uniform(1e5, 2e5, c.shape), "vwap": c * 1.0005}
+
+
+def test_cross_sectional_factors_and_wq101():
+    f = _ohlcv()
+    out = phasor.FactorSet.compile({"r": "CSRank($close)", "z": "CSZScore(Mean($close, 5))"}).evaluate(f)
+    ranks = np.argsort(np.argsort(f["close"], axis=1), axis=1)
+    np.testing.assert_allclose(out["r"], (ranks + 1) / 5)
+    np.testing.assert_allclose(np.nanmean(out["z"][10:], axis=1), 0, atol=1e-12)
+    w = phasor.wq101()
+    assert len(w.names) == 82 and len(phasor.wq101(all=True).names) == 101
+    assert phasor.wq101_formula(101) == "((close - open) / ((high - low) + .001))"
+    v = w.evaluate(f)
+    np.testing.assert_allclose(v["alpha101"], (f["close"] - f["open"]) / (f["high"] - f["low"] + 0.001))
+
+
+def test_factor_batches_match_and_write_parquet(tmp_path):
+    f = _ohlcv(cols=7)
+    s = phasor.alpha158()
+    whole = s.evaluate(f)
+    seen = []
+
+    def sink(start, stop, values):
+        seen.append((start, stop))
+        np.testing.assert_array_equal(values["MA5"], whole["MA5"][:, start:stop])
+
+    s.evaluate_batches(f, 3, sink)
+    assert seen == [(0, 3), (3, 6), (6, 7)]
+    pq = pytest.importorskip("pyarrow.parquet")
+    path = tmp_path / "f.parquet"
+    s.to_parquet(str(path), f, batch=3, symbols=list("ABCDEFG"))
+    t = pq.read_table(path)
+    assert t.num_rows == 80 * 7 and pq.ParquetFile(path).num_row_groups == 3
+    np.testing.assert_array_equal(t.column("MA5").to_numpy()[80:160], whole["MA5"][:, 1])
+
+
+def test_indicator_streams_match_the_batch():
+    c = _close(200, 3)
+    h, lo = c * 1.01, c * 0.99
+    for kind, batch, kw in [
+        ("rsi", phasor.indicators.rsi(c, window=14), {}),
+        ("macd", phasor.indicators.macd(c), {}),
+        ("atr", phasor.indicators.atr(h, lo, c), {"high": h, "low": lo}),
+        ("bbands", phasor.indicators.bbands(c), {}),
+    ]:
+        s = phasor.indicators.Stream(kind, n_cols=3)
+        rows = [s.update(c[i], **{k: v[i] for k, v in kw.items()}) for i in range(len(c))]
+        for name in s.names:
+            got = np.array([r[name] for r in rows])
+            np.testing.assert_array_equal(got, batch.outputs[name], err_msg=f"{kind}.{name}")
+    with pytest.raises(TypeError, match="no parameter"):
+        phasor.indicators.Stream("rsi", span=3)

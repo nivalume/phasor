@@ -22,11 +22,11 @@
 //!   through the offset. Alpha360 is 354 such nodes over six fields, so this
 //!   is the difference between one pass per factor and three.
 //!
-//! Every operator is currently a per-symbol time-series operator, so the graph
-//! is evaluated one symbol (column) at a time, symbols in parallel. A future
-//! cross-sectional operator (one output row reads every symbol) would have to
-//! split the schedule into stages at that node: columns in parallel within a
-//! stage, one cross-sectional pass between stages.
+//! Every operator but the cross-sectional ones ([`Op::Cross`]) reads only its
+//! own symbol, so a graph without them is evaluated one symbol (column) at a
+//! time, symbols in parallel. A graph with them is split into stages at those
+//! nodes by [`crate::stage`]: columns in parallel within a stage, one
+//! cross-sectional pass between stages.
 
 use std::collections::HashMap;
 
@@ -60,6 +60,9 @@ pub(crate) enum UnaryOp {
     Sign,
     Log,
     Not,
+    Exp,
+    Sqrt,
+    IsNan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,6 +82,12 @@ pub(crate) enum BinaryOp {
     Or,
     Greater,
     Less,
+    /// The left operand where it is not `NaN`, else the right.
+    FillNa,
+    /// The left operand where the right is true (non-zero, not `NaN`), else `NaN`.
+    Mask,
+    /// `sign(a) · |a|^b`.
+    SignedPower,
 }
 
 /// Per-symbol rolling reductions over a trailing window.
@@ -104,6 +113,28 @@ pub(crate) enum Rolling {
     Slope,
     Rsquare,
     Resi,
+    /// WorldQuant's `decay_linear`: weights `1..=window`, newest heaviest,
+    /// normalized over the values present.
+    Decay,
+    Prod,
+}
+
+/// Operators whose row reads every symbol's value on that row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Cross {
+    /// Percentile rank, ties averaged, `NaN` excluded (pandas
+    /// `rank(pct=True)`).
+    Rank,
+    /// `(x - mean) / std`, sample standard deviation.
+    ZScore,
+    /// `x - mean`.
+    Demean,
+    /// `x · a / Σ|x|`; the scale's bits.
+    Scale(u64),
+    /// `x` minus the mean of `x` over the symbols in the same group.
+    Neutralize,
+    /// The residual of a least-squares fit of `y` on `x` across symbols.
+    Resi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -124,6 +155,7 @@ pub(crate) enum Op {
         corr: bool,
         window: Window,
     },
+    Cross(Cross),
 }
 
 #[derive(Debug, Clone)]
@@ -170,14 +202,7 @@ impl Graph {
             })?;
             outputs.push(node);
         }
-        let mut graph = Self {
-            nodes: builder.nodes,
-            outputs,
-            fields: builder.fields,
-            slots: 0,
-        };
-        graph.schedule();
-        Ok(graph)
+        Ok(builder.finish(outputs))
     }
 
     /// Resolves views, then assigns each computed node a scratch slot,
@@ -241,14 +266,39 @@ impl Graph {
 }
 
 #[derive(Default)]
-struct Builder {
+pub(crate) struct Builder {
     nodes: Vec<Node>,
     interned: HashMap<(Op, Vec<NodeId>), NodeId>,
     fields: Vec<String>,
 }
 
 impl Builder {
-    fn intern(&mut self, op: Op, inputs: Vec<NodeId>) -> NodeId {
+    /// The graph of the nodes interned so far, with `outputs` in factor
+    /// order, scheduled.
+    pub(crate) fn finish(self, outputs: Vec<NodeId>) -> Graph {
+        let mut graph = Graph {
+            nodes: self.nodes,
+            outputs,
+            fields: self.fields,
+            slots: 0,
+        };
+        graph.schedule();
+        graph
+    }
+
+    /// The node reading field `name`.
+    pub(crate) fn field(&mut self, name: &str) -> NodeId {
+        let index = match self.fields.iter().position(|field| field == name) {
+            Some(index) => index,
+            None => {
+                self.fields.push(name.to_owned());
+                self.fields.len() - 1
+            }
+        };
+        self.intern(Op::Field(index), Vec::new())
+    }
+
+    pub(crate) fn intern(&mut self, op: Op, inputs: Vec<NodeId>) -> NodeId {
         if let Some(folded) = self.fold(op, &inputs) {
             return self.intern(Op::Const(folded.to_bits()), Vec::new());
         }
@@ -288,16 +338,7 @@ impl Builder {
     fn node(&mut self, expr: &Expression) -> Result<NodeId> {
         Ok(match expr {
             Expression::Number(bits) => self.intern(Op::Const(*bits), Vec::new()),
-            Expression::Field(name) => {
-                let index = match self.fields.iter().position(|field| field == name) {
-                    Some(index) => index,
-                    None => {
-                        self.fields.push(name.clone());
-                        self.fields.len() - 1
-                    }
-                };
-                self.intern(Op::Field(index), Vec::new())
-            }
+            Expression::Field(name) => self.field(name),
             Expression::Unary('+', child) => self.node(child)?,
             Expression::Unary('-', child) => {
                 let child = self.node(child)?;
@@ -338,6 +379,9 @@ impl Builder {
             "Sign" => Some(UnaryOp::Sign),
             "Log" => Some(UnaryOp::Log),
             "Not" => Some(UnaryOp::Not),
+            "Exp" => Some(UnaryOp::Exp),
+            "Sqrt" => Some(UnaryOp::Sqrt),
+            "IsNan" => Some(UnaryOp::IsNan),
             _ => None,
         };
         if let Some(op) = unary {
@@ -360,6 +404,9 @@ impl Builder {
             "Or" => Some(BinaryOp::Or),
             "Greater" => Some(BinaryOp::Greater),
             "Less" => Some(BinaryOp::Less),
+            "FillNa" => Some(BinaryOp::FillNa),
+            "Mask" => Some(BinaryOp::Mask),
+            "SignedPower" => Some(BinaryOp::SignedPower),
             _ => None,
         };
         if let Some(op) = binary {
@@ -392,6 +439,8 @@ impl Builder {
             "Slope" => Some(Rolling::Slope),
             "Rsquare" => Some(Rolling::Rsquare),
             "Resi" => Some(Rolling::Resi),
+            "DecayLinear" => Some(Rolling::Decay),
+            "Prod" => Some(Rolling::Prod),
             _ => None,
         };
         if let Some(kind) = rolling {
@@ -399,7 +448,41 @@ impl Builder {
             let input = self.node(&args[0])?;
             return Ok(self.intern(Op::Rolling(kind, window), vec![input]));
         }
+        let cross = match name {
+            "CSRank" => Some(Cross::Rank),
+            "CSZScore" => Some(Cross::ZScore),
+            "CSDemean" => Some(Cross::Demean),
+            "Scale" => {
+                let scale = args
+                    .get(1)
+                    .map_or(Ok(1.0), |a| number(a, "Scale's scale"))?;
+                Some(Cross::Scale(scale.to_bits()))
+            }
+            "IndNeutralize" => Some(Cross::Neutralize),
+            "CSResi" => Some(Cross::Resi),
+            _ => None,
+        };
+        if let Some(op) = cross {
+            let n = if matches!(op, Cross::Neutralize | Cross::Resi) {
+                2
+            } else {
+                1
+            };
+            let inputs = args[..n]
+                .iter()
+                .map(|arg| self.node(arg))
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(self.intern(Op::Cross(op), inputs));
+        }
         Ok(match name {
+            "Clip" => {
+                // Less(Greater(x, lo), hi): NaN stays NaN, and a floor above
+                // the cap gives the cap, as NumPy's clip does.
+                let inputs = vec![self.node(&args[0])?, self.node(&args[1])?];
+                let floored = self.intern(Op::Binary(BinaryOp::Greater), inputs);
+                let cap = self.node(&args[2])?;
+                self.intern(Op::Binary(BinaryOp::Less), vec![floored, cap])
+            }
             "If" => {
                 let inputs = vec![
                     self.node(&args[0])?,
@@ -495,6 +578,9 @@ pub(crate) fn unary(op: UnaryOp, value: f64) -> f64 {
         }
         UnaryOp::Log => value.ln(),
         UnaryOp::Not => f64::from(value == 0.0),
+        UnaryOp::Exp => value.exp(),
+        UnaryOp::Sqrt => value.sqrt(),
+        UnaryOp::IsNan => f64::from(value.is_nan()),
     }
 }
 
@@ -529,6 +615,27 @@ pub(crate) fn binary(op: BinaryOp, a: f64, b: f64) -> f64 {
                 f64::NAN
             } else {
                 a.min(b)
+            }
+        }
+        BinaryOp::FillNa => {
+            if a.is_nan() {
+                b
+            } else {
+                a
+            }
+        }
+        BinaryOp::Mask => {
+            if b.is_nan() || b == 0.0 {
+                f64::NAN
+            } else {
+                a
+            }
+        }
+        BinaryOp::SignedPower => {
+            if a == 0.0 {
+                0.0
+            } else {
+                a.signum() * a.abs().powf(b)
             }
         }
     }

@@ -33,7 +33,7 @@ independent cash. ``cash_sharing=True`` groups adjacent columns into accounts;
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -74,6 +74,8 @@ __all__ = [
     "Stepper",
     "alpha158",
     "alpha360",
+    "wq101",
+    "wq101_formula",
     "data",
     "events",
     "frames",
@@ -185,6 +187,54 @@ class FactorSet:
             for name, values in self._inner.evaluate(prepared).items()
         }
 
+    def evaluate_batches(
+        self, fields: Mapping[str, Any], batch: int, sink: Callable[[int, int, dict], Any]
+    ) -> None:
+        """Evaluates ``batch`` symbols (columns) at a time and calls
+        ``sink(start, stop, values)`` for each, ``values`` shaped
+        ``(rows, stop - start)``. Without a cross-sectional operator only one
+        batch is in memory at a time; with one, the whole panel is evaluated
+        first."""
+        prepared, shape = _factor_fields(fields)
+
+        def forward(start: int, stop: int, values: dict) -> None:
+            sink(start, stop, {k: v.reshape((shape[0], stop - start), order="F") for k, v in values.items()})
+
+        self._inner.evaluate_batches(prepared, int(batch), forward)
+
+    def to_parquet(self, path: str, fields: Mapping[str, Any], batch: int = 256,
+                   index: Any = None, symbols: Sequence[Any] | None = None) -> None:
+        """Writes every factor to a Parquet file, one row group per batch of
+        symbols: long format, columns ``symbol``, ``row`` (or ``time`` from
+        ``index``) and one per factor. Needs pyarrow."""
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+        except ImportError as e:  # pragma: no cover - depends on the environment
+            raise ImportError("FactorSet.to_parquet needs pyarrow: pip install pyarrow") from e
+        writer = None
+        n_rows = None
+
+        def sink(start: int, stop: int, values: dict) -> None:
+            nonlocal writer, n_rows
+            n_rows = next(iter(values.values())).shape[0]
+            labels = list(range(start, stop)) if symbols is None else list(symbols[start:stop])
+            columns = {"symbol": np.repeat(np.asarray(labels), n_rows)}
+            rows = np.tile(np.arange(n_rows), stop - start)
+            columns["row" if index is None else "time"] = rows if index is None else np.asarray(index)[rows]
+            for name, v in values.items():
+                columns[name] = v.reshape(-1, order="F")
+            table = pa.table(columns)
+            if writer is None:
+                writer = pq.ParquetWriter(path, table.schema)
+            writer.write_table(table)
+
+        try:
+            self.evaluate_batches(fields, batch, sink)
+        finally:
+            if writer is not None:
+                writer.close()
+
 
 class Expression:
     """One compiled factor expression."""
@@ -220,6 +270,20 @@ def alpha158() -> FactorSet:
 def alpha360() -> FactorSet:
     """Returns Qlib's default 360 compiled expressions."""
     return FactorSet(_phasor.alpha360())
+
+
+def wq101(all: bool = False) -> FactorSet:
+    """WorldQuant's 101 Formulaic Alphas (Kakushadze 2016), ``alpha001`` to
+    ``alpha101``. By default the 82 that read only ``open``, ``high``,
+    ``low``, ``close``, ``volume`` and ``vwap``; ``all=True`` adds the 19 that
+    also read ``cap`` and the group labels ``sector``, ``industry``,
+    ``subindustry``. ``wq101_formula(k)`` gives the paper's formula."""
+    return FactorSet(_phasor.wq101(all))
+
+
+def wq101_formula(k: int) -> str | None:
+    """The paper's formula for alpha ``k`` (1 to 101)."""
+    return _phasor.wq101_formula(k)
 
 
 def _signals(value: Any, name: str) -> np.ndarray:

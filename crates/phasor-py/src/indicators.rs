@@ -7,10 +7,10 @@
 //! comes back as a dict of `(n_rows, n_combinations × n_input)` arrays by
 //! output name, and `columns`, each level's label per output column.
 
-use numpy::{PyArray2, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use phasor_core::columns::Label;
 use phasor_core::matrix::Matrix;
-use phasor_indicators::{BbParams, Indicator, MaParams, MacdParams, StochParams};
+use phasor_indicators::{Bar, BbParams, Indicator, MaParams, MacdParams, StochParams, Stream};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -271,8 +271,141 @@ pub fn ind_true_range<'py>(
     columns_out(py, m.into_vec(), r, c)
 }
 
+/// One indicator per column, a bar at a time: `phasor.indicators.Stream`.
+#[pyclass(name = "_IndicatorStream", module = "phasor._phasor")]
+#[derive(Debug)]
+pub struct PyStream {
+    streams: Vec<Stream>,
+}
+
+fn param<'py, T: pyo3::conversion::FromPyObjectOwned<'py>>(
+    params: &Bound<'py, PyDict>,
+    name: &str,
+    default: T,
+) -> PyResult<T> {
+    match params.get_item(name)? {
+        Some(v) => v.extract().map_err(Into::into),
+        None => Ok(default),
+    }
+}
+
+#[pymethods]
+impl PyStream {
+    /// `kind` is an indicator name; `params` its parameters, as the batch
+    /// function takes them but one value each.
+    #[new]
+    fn new(kind: &str, n_cols: usize, params: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let adjust = param(params, "adjust", false)?;
+        let window = param(params, "window", 14usize)?;
+        let ewm = param(params, "ewm", false)?;
+        let ma = MaParams { window, ewm };
+        let make = || -> PyResult<Stream> {
+            let stream = match kind {
+                "ma" => Stream::ma(ma, adjust),
+                "mstd" => Stream::mstd(ma, adjust, param(params, "ddof", 1usize)?),
+                "bbands" => Stream::bbands(
+                    BbParams {
+                        window,
+                        ewm,
+                        alpha: param(params, "alpha", 2.0)?,
+                    },
+                    adjust,
+                    param(params, "ddof", 1usize)?,
+                ),
+                "rsi" => Stream::rsi(ma, adjust),
+                "stoch" => Stream::stoch(
+                    StochParams {
+                        k_window: param(params, "k_window", 14usize)?,
+                        d_window: param(params, "d_window", 3usize)?,
+                        d_ewm: param(params, "d_ewm", false)?,
+                    },
+                    adjust,
+                ),
+                "macd" => Stream::macd(
+                    MacdParams {
+                        fast_window: param(params, "fast_window", 12usize)?,
+                        slow_window: param(params, "slow_window", 26usize)?,
+                        signal_window: param(params, "signal_window", 9usize)?,
+                        macd_ewm: param(params, "macd_ewm", false)?,
+                        signal_ewm: param(params, "signal_ewm", false)?,
+                    },
+                    adjust,
+                ),
+                "atr" => Stream::atr(ma, adjust),
+                "obv" => Ok(Stream::obv()),
+                other => {
+                    return Err(PyValueError::new_err(format!(
+                        "no streaming indicator {other:?}; there are ma, mstd, bbands, rsi, \
+                         stoch, macd, atr and obv"
+                    )));
+                }
+            };
+            stream.map_err(to_py_err)
+        };
+        Ok(Self {
+            streams: (0..n_cols).map(|_| make()).collect::<PyResult<_>>()?,
+        })
+    }
+
+    #[getter]
+    fn names(&self) -> Vec<&'static str> {
+        self.streams
+            .first()
+            .map_or(Vec::new(), |s| s.names().to_vec())
+    }
+
+    /// One bar for every column; returns each output's values.
+    #[pyo3(signature = (close, high=None, low=None, volume=None))]
+    fn update<'py>(
+        &mut self,
+        py: Python<'py>,
+        close: Vec<f64>,
+        high: Option<Vec<f64>>,
+        low: Option<Vec<f64>>,
+        volume: Option<Vec<f64>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let n = self.streams.len();
+        let field = |v: Option<Vec<f64>>, name: &str| -> PyResult<Vec<f64>> {
+            let v = v.unwrap_or_else(|| vec![f64::NAN; n]);
+            if v.len() == n {
+                Ok(v)
+            } else {
+                Err(PyValueError::new_err(format!(
+                    "{name} has {} values for {n} columns",
+                    v.len()
+                )))
+            }
+        };
+        let close = field(Some(close), "close")?;
+        let (high, low, volume) = (
+            field(high, "high")?,
+            field(low, "low")?,
+            field(volume, "volume")?,
+        );
+        let names = self.names();
+        let mut outs = vec![Vec::with_capacity(n); names.len()];
+        for (c, stream) in self.streams.iter_mut().enumerate() {
+            let bar = Bar {
+                high: high[c],
+                low: low[c],
+                close: close[c],
+                volume: volume[c],
+            };
+            for (k, &v) in stream.update(bar).iter().enumerate() {
+                outs[k].push(v);
+            }
+        }
+        let d = PyDict::new(py);
+        for (name, values) in names.iter().zip(outs) {
+            d.set_item(name, values.into_pyarray(py))?;
+        }
+        Ok(d)
+    }
+}
+
 /// Adds the functions to the module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyStream>()?;
     m.add_function(wrap_pyfunction!(ind_ma, m)?)?;
     m.add_function(wrap_pyfunction!(ind_mstd, m)?)?;
     m.add_function(wrap_pyfunction!(ind_bbands, m)?)?;
