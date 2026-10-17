@@ -25,8 +25,8 @@
 //!
 //! Phase 1. The rebuild chain, return metrics in both scalar and rolling
 //! form, benchmark-relative metrics, trade statistics, drawdown records,
-//! by-level aggregation and the tag-filtered stats registry are implemented.
-//! Cash sharing and group-level portfolios are not.
+//! by-level aggregation and the tag-filtered stats registry are implemented,
+//! for single-column accounts and for groups sharing cash.
 
 pub mod aggregate;
 pub mod benchmark;

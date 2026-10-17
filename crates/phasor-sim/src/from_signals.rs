@@ -83,7 +83,7 @@ pub struct FromSignals<'a> {
     /// Starting cash; a shared group uses its first column's value once.
     pub init_cash: FlexArray<'a, f64>,
     /// Units held before the first bar, per column (negative: short); 0 is
-    /// none. See [`crate::initial`].
+    /// none. See `crate::initial`.
     pub init_position: FlexArray<'a, f64>,
     /// What the initial position was opened at; `NaN` is the first close.
     pub init_price: FlexArray<'a, f64>,
@@ -122,7 +122,7 @@ pub struct FromSignals<'a> {
     /// Order price. `+inf` is this bar's close, `-inf` its open.
     pub price: FlexArray<'a, f64>,
     /// Whether an order executes at `price`, or at the bar's open or close.
-    /// See [`crate::prices`].
+    /// See `crate::prices`.
     pub price_type: FlexArray<'a, PriceType>,
     /// How many bars before the one an order executes on it was decided:
     /// its signals, size, size type and an explicit price are read there.
@@ -269,7 +269,7 @@ pub struct FromSignals<'a> {
     /// bar a long is stopped out.
     pub upon_opp_stop_conflict: FlexArray<'a, PendingConflictMode>,
     /// A trailing stop's distance from the best price since the entry, as a
-    /// fraction. `NaN` disables it. See [`crate::stops`].
+    /// fraction. `NaN` disables it. See `crate::stops`.
     pub tsl_stop: FlexArray<'a, f64>,
     /// How far the price must first move in the position's favour, as a
     /// fraction of the anchor, for the trailing stop to be live. `NaN` or 0:
@@ -280,7 +280,7 @@ pub struct FromSignals<'a> {
     /// Exit at the open of this row. `NaN` disables it.
     pub dt_stop: FlexArray<'a, f64>,
     /// Whether `sl_stop`, `tsl_stop` and `tp_stop` are ladders, their rows
-    /// steps, and how a step's share is sized. See [`crate::stops`].
+    /// steps, and how a step's share is sized. See `crate::stops`.
     pub stop_ladder: StopLadderMode,
     /// Whether a fired stop exits at market or places a limit order at its
     /// level (a time stop's: the open), `stop_limit_delta` worse (a
@@ -327,22 +327,22 @@ pub struct FromSignals<'a> {
     /// (borrowing cash under `leverage`, or shares to short) must keep. Below
     /// it the account's cash columns that carry one are liquidated as margin
     /// columns are. `NaN` or zero, the default, carries none: a cash column
-    /// is then collateral and never closed. See [`crate::liquidation`].
+    /// is then collateral and never closed. See `crate::liquidation`.
     pub cash_maintenance_margin: FlexArray<'a, f64>,
     /// A tier table of maintenance margins by notional, replacing
     /// `maintenance_margin` where given: the rows are tiers, `NaN` after the
     /// last; `margin_tier_rate[t]` applies up to `margin_tier_notional[t]`
     /// (the last tier's bound is ignored). Margin columns with a notional
-    /// basis only. See [`crate::liquidation`].
+    /// basis only. See `crate::liquidation`.
     pub margin_tier_notional: FlexArray<'a, f64>,
     /// The tiers' maintenance margin rates. See `margin_tier_notional`.
     pub margin_tier_rate: FlexArray<'a, f64>,
     /// The fraction of a position each breach closes, in `(0, 1]`; `NaN`,
-    /// the default, closes it all. See [`crate::liquidation`].
+    /// the default, closes it all. See `crate::liquidation`.
     pub liquidation_step: FlexArray<'a, f64>,
     /// Bars on which an exchange deleverages: a margin column's position is
     /// closed at the mark price (the close without one), with no fee. See
-    /// [`crate::liquidation`].
+    /// `crate::liquidation`.
     pub auto_deleverage: FlexArray<'a, bool>,
     /// The state to continue from, on its `next_row`, in place of
     /// `init_cash` and `init_position`; see [`crate::snapshot`]. `None`
@@ -892,7 +892,7 @@ fn bar_range(args: &FromSignals<'_>, i: usize, col: usize) -> (f64, f64, f64, f6
 /// `EXTENDED` says whether the column's group uses anything beyond the
 /// reference's pipeline: limit orders, a stop conflict mode other than
 /// ignoring the signal, `from_ago`, a price type, bid and ask or a price
-/// range check, or the stops of [`crate::stops`]. The copy without has no
+/// range check, or the stops of `crate::stops`. The copy without has no
 /// code for any of them.
 #[allow(
     clippy::too_many_lines,

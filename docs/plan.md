@@ -257,11 +257,11 @@
 - [x] 新功能接到 Python
 - [x] 合并三份 SplitMix64 实现到 `phasor_core::random`
 - [x] `from_orders` 指令数比 c0fc6b2 累计超过 3%：`FlexArray::get` 标量快路径后是 +2.47%（`from_signals` −14.30%）
-- [ ] 补一次交替计时：从限价单起只测了指令数；标量快路径是 `#[inline(always)]`，指令少了，代码变大，要确认时间也降
-- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc` 不通过：`phasor-sim`、`phasor-records` 的文档链接指向私有模块或其他 crate
-- [ ] `Symbol` / `Venue` 未驻留，但模块注释说已驻留（`phasor-model`）
-- [ ] 过时注释：`phasor-analysis` 说不支持共享现金；`from_orders.rs` 用镜像不可用来解释作用域线程
-- [ ] `propose.py` 引用 `tests/test_propose.py`，实际检查在 `research/tests/test_pipeline.py::test_proposals_never_see_results`
+- [x] 交替计时：c0fc6b2 和 aeb8f77 的 `bench` 交替各跑 5 轮，单线程，每个工作负载取中位数（成交数和校验和相同）：`from_orders` 几何平均 +1.14%（指令数 +2.47%），`from_signals` −20.66%（指令数 −14.30%）。标量快路径在时间上也是降的
+- [x] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` 通过：指向私有模块和其他 crate 的链接改成代码字面量，`excursions` 的歧义链接指明是函数
+- [x] `Symbol` / `Venue` 的模块注释改成实情（`Arc<str>`，未驻留）
+- [x] 过时注释：`phasor-analysis` 支持共享现金的组；`from_orders.rs` 里已没有镜像的说法
+- [x] `propose.py` 指向 `research/tests/test_pipeline.py::test_proposals_never_see_results`
 - [ ] 两个 Qlib fixture 用了不同版本的 Qlib/NumPy/pandas（见 fixture 文件头）
 - [ ] `cargo test -p phasor-expr --features polars --test parity_qlib` 在 debug 构建下多数次数栈溢出（polars 工作线程上，Alpha158 的表达式树深）；release 和原生后端不受影响。126d8da 上也一样
 
@@ -314,7 +314,7 @@ PRO 闭源，没法差分测试，按功能来源对照：
 | 回调、`from_order_func`、`row_wise`；`FlexArray::get` 标量快路径 | ee45e7f | −1.18% | −13.85% |
 | 状态快照、续跑、分批 | 6aa71f9 | +1.01% | +1.58% |
 
-从限价单起只测了指令数，没有跑交替计时。回调这一行是两件事相抵：回调本身让 `from_orders` 多了约 4%（循环拆成 `Group::run_rows` 以支持 `row_wise`，寄存器分配变差），`FlexArray::get` 对标量直接返回、不再调用函数，省回约 5%。累计和 c0fc6b2 比：`from_orders` +2.47%，`from_signals` −14.30%，回到约束以内。
+交替计时（2026-10-17，c0fc6b2 对 aeb8f77，5 轮中位数）和累计指令数一致：`from_orders` +1.14%，`from_signals` −20.66%。回调这一行是两件事相抵：回调本身让 `from_orders` 多了约 4%（循环拆成 `Group::run_rows` 以支持 `row_wise`，寄存器分配变差），`FlexArray::get` 对标量直接返回、不再调用函数，省回约 5%。累计和 c0fc6b2 比：`from_orders` +2.47%，`from_signals` −14.30%，回到约束以内。
 
 ---
 

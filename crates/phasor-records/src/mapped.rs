@@ -6,8 +6,8 @@
 //! operation: cut the flat array into per-column segments, reduce each
 //! segment, get one value per column back.
 //!
-//! Before this module every caller hand-rolled that cut. [`crate::trades`] had
-//! a private `column_ranges`, [`phasor_analysis`] built a `Vec<Vec<f64>>` of
+//! Before this module every caller hand-rolled that cut. `crate::trades` had
+//! a private `column_ranges`, `phasor_analysis` built a `Vec<Vec<f64>>` of
 //! buckets, and the sweep code walked `col` inline. Three spellings of one
 //! idea, each with its own handling of the column that produced nothing.
 //!

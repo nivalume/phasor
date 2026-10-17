@@ -1,6 +1,6 @@
 //! Python bindings for phasor.
 //!
-//! A thin shell, deliberately. The engine's own [`Portfolio`] already holds the
+//! A thin shell, deliberately. The engine's own `Portfolio` already holds the
 //! interesting design — lazy derivation, one cached rebuild chain, per-column
 //! metrics — so this layer's whole job is to get NumPy's buffers in and results
 //! out without copying and without lying about layout.
@@ -22,14 +22,14 @@
 //! over this module's compiled [`expr::PyFactorSet`], with WorldQuant 101 and
 //! batched evaluation. Event studies, overfitting statistics, labels, random
 //! signals and synthetic prices are in [`research`]; the indicator sweep and
-//! streams in [`indicators`]; signal tools in [`signal_fns`]; rolling
-//! metrics and drawdown records in [`returns_fns`].
+//! streams in `indicators`; signal tools in `signal_fns`; rolling
+//! metrics and drawdown records in `returns_fns`.
 //!
 //! # Two things worth knowing before using it
 //!
 //! **Arrays must be column-major.** The engine is; NumPy is not by default.
 //! The Python wrapper converts, and the Rust layer refuses anything it cannot
-//! read correctly rather than reading it wrongly — see [`array`] for why that
+//! read correctly rather than reading it wrongly — see `array` for why that
 //! is a refusal rather than a silent transpose.
 //!
 //! **A column that never traded has an infinite Sharpe.** That is the
@@ -90,9 +90,9 @@ use params::{Holding, Liquidation, Shared};
 /// rebuilt per call from the copy.
 ///
 /// The copy is one array, once. The rebuild chain — the value curve, returns,
-/// trades and drawdowns — is derived on demand into [`Self::cache`], which
+/// trades and drawdowns — is derived on demand into `Self::cache`, which
 /// outlives the per-call engine view, so a curve computed for one call is
-/// still there for the next. [`Self::clear_cache`] gives the memory back.
+/// still there for the next. `Self::clear_cache` gives the memory back.
 #[pyclass(name = "Portfolio", module = "phasor")]
 #[derive(Debug)]
 pub struct PyPortfolio {

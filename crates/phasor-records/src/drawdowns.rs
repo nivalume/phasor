@@ -1,6 +1,6 @@
 //! Drawdowns as records, not as a single number.
 //!
-//! [`phasor_analysis::metrics::max_drawdown`] answers "how bad did it get". That
+//! `phasor_analysis::metrics::max_drawdown` answers "how bad did it get". That
 //! is one number out of a series that contained a dozen separate episodes, and
 //! it says nothing about how long any of them lasted or whether the strategy
 //! ever came back. A record per episode does: each one carries its peak, its

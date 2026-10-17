@@ -45,7 +45,7 @@ pub struct FromOrders<'a> {
     /// Starting cash, per column.
     pub init_cash: FlexArray<'a, f64>,
     /// Units held before the first bar, per column (negative: short); 0 is
-    /// none. See [`crate::initial`].
+    /// none. See `crate::initial`.
     pub init_position: FlexArray<'a, f64>,
     /// What the initial position was opened at; `NaN` is the first close.
     pub init_price: FlexArray<'a, f64>,
@@ -68,7 +68,7 @@ pub struct FromOrders<'a> {
     /// Requested price. `+inf` means this bar's close, `-inf` the previous one.
     pub price: FlexArray<'a, f64>,
     /// Whether an order executes at `price`, or at the bar's open or close.
-    /// See [`crate::prices`].
+    /// See `crate::prices`.
     pub price_type: FlexArray<'a, PriceType>,
     /// How many bars before the one an order executes on it was decided:
     /// its size, size type, direction and an explicit price are read there.
@@ -129,7 +129,7 @@ pub struct FromOrders<'a> {
     /// cash, and fees, margin and holding charges are on that notional;
     /// sizes, `min_size` and a per-unit margin stay in contracts. Per column:
     /// one that changes down a column is an error. `1`, the default, is a
-    /// share. See [`crate::multipliers`].
+    /// share. See `crate::multipliers`.
     pub multiplier: FlexArray<'a, f64>,
     /// The most cash one buy may spend, fees included. `inf` is no cap.
     pub cash_limit: FlexArray<'a, f64>,
@@ -173,7 +173,7 @@ pub struct FromOrders<'a> {
     /// A perpetual's funding rate per bar: at the bar's close a position
     /// pays `position × price × rate`, so a positive rate is paid by longs
     /// and received by shorts. `price` is `mark_price`, or the close.
-    /// `NaN` or zero on bars that do not settle. See [`crate::holding`].
+    /// `NaN` or zero on bars that do not settle. See `crate::holding`.
     pub funding_rate: FlexArray<'a, f64>,
     /// Overnight financing per bar on a long: at the bar's close it pays
     /// `position × price × rate`. A negative rate is received.
@@ -194,29 +194,29 @@ pub struct FromOrders<'a> {
     /// A margin column's maintenance margin, in `margin_basis`: a fraction
     /// of the notional below 1, or cash per unit of size. `NaN` or zero, the
     /// default, carries none, and the column is never liquidated. See
-    /// [`crate::liquidation`].
+    /// `crate::liquidation`.
     pub maintenance_margin: FlexArray<'a, f64>,
     /// The maintenance margin of a cash column, as a fraction of the
     /// position's notional below 1: the equity a margin-lending account
     /// (borrowing cash under `leverage`, or shares to short) must keep. Below
     /// it the account's cash columns that carry one are liquidated as margin
     /// columns are. `NaN` or zero, the default, carries none: a cash column
-    /// is then collateral and never closed. See [`crate::liquidation`].
+    /// is then collateral and never closed. See `crate::liquidation`.
     pub cash_maintenance_margin: FlexArray<'a, f64>,
     /// A tier table of maintenance margins by notional, replacing
     /// `maintenance_margin` where given: the rows are tiers, `NaN` after the
     /// last; `margin_tier_rate[t]` applies up to `margin_tier_notional[t]`
     /// (the last tier's bound is ignored). Margin columns with a notional
-    /// basis only. See [`crate::liquidation`].
+    /// basis only. See `crate::liquidation`.
     pub margin_tier_notional: FlexArray<'a, f64>,
     /// The tiers' maintenance margin rates. See `margin_tier_notional`.
     pub margin_tier_rate: FlexArray<'a, f64>,
     /// The fraction of a position each breach closes, in `(0, 1]`; `NaN`,
-    /// the default, closes it all. See [`crate::liquidation`].
+    /// the default, closes it all. See `crate::liquidation`.
     pub liquidation_step: FlexArray<'a, f64>,
     /// Bars on which an exchange deleverages: a margin column's position is
     /// closed at the mark price (the close without one), with no fee. See
-    /// [`crate::liquidation`].
+    /// `crate::liquidation`.
     pub auto_deleverage: FlexArray<'a, bool>,
     /// The state to continue from, on its `next_row`, in place of
     /// `init_cash` and `init_position`; see [`crate::snapshot`]. `None`

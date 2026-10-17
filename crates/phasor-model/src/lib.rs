@@ -9,7 +9,7 @@
 //!
 //! The *value and identifier* types ([`types`], [`ids`]) follow
 //! NautilusTrader's shape — fixed-point raw integers with per-instance
-//! precision, interned identifiers — because phase 2 puts a Nautilus-style
+//! precision, opaque identifiers — because phase 2 puts a Nautilus-style
 //! strategy API on top of this same model and a mismatch there would mean
 //! converting on every call.
 //!

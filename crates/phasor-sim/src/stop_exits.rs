@@ -1,7 +1,7 @@
 //! Stop exits without a simulation: where the stops of each entry would
 //! fire, read off the bars.
 //!
-//! [`generate_ohlc_stop_exits`] arms the stops of [`crate::stops`] at each
+//! [`generate_ohlc_stop_exits`] arms the stops of `crate::stops` at each
 //! entry's close and walks the bars after it with the same test and the same
 //! trailing the simulation uses, so the two agree. With
 //! `skip_until_exit = true` and `until_next = false` the exits are the stop
@@ -30,7 +30,7 @@ use crate::stops::{self, Kind};
 
 /// Inputs to [`generate_ohlc_stop_exits`]. Stops are fractions of the
 /// entry's close, `NaN` disabling one, read on the entry's row; the time
-/// stops count rows. See [`crate::stops`].
+/// stops count rows. See `crate::stops`.
 #[derive(Debug, Clone)]
 pub struct OhlcStopExits<'a> {
     /// Number of bars.
@@ -61,7 +61,7 @@ pub struct OhlcStopExits<'a> {
     pub td_stop: FlexArray<'a, f64>,
     /// Exit on this row.
     pub dt_stop: FlexArray<'a, f64>,
-    /// How the stop distances read. See [`crate::stops`].
+    /// How the stop distances read. See `crate::stops`.
     pub delta_format: FlexArray<'a, DeltaFormat>,
     /// Whether the rows of `sl_stop`, `tsl_stop` and `tp_stop` are a
     /// ladder's steps.

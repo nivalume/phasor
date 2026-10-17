@@ -926,11 +926,11 @@ impl<'a> Portfolio<'a> {
     /// portfolio was built with. `FlexArray::Scalar(f64::NAN)` measures that
     /// side on closes alone, which can only understate it. The window, the
     /// fallback to the close and the entry-bar caveat are
-    /// [`phasor_records::excursions`]'s.
+    /// [`phasor_records::excursions()`]'s.
     ///
     /// # Errors
     ///
-    /// As [`Self::trades`] and [`phasor_records::excursions`].
+    /// As [`Self::trades`] and [`phasor_records::excursions()`].
     pub fn excursions(
         &self,
         high: &FlexArray<'_, f64>,

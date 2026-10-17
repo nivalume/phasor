@@ -2,7 +2,8 @@
 
 Inputs are only: the direction (prompt text, PDF text, or nothing), the symbols, and the
 titles and templates already registered (for de-duplication). No metric, verdict, or
-report ever enters a prompt; `tests/test_propose.py` asserts this on the transcript.
+report ever enters a prompt; `research/tests/test_pipeline.py::test_proposals_never_see_results`
+asserts this on the transcript.
 """
 
 from __future__ import annotations

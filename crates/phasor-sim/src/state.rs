@@ -79,7 +79,7 @@ pub struct StopState {
     pub tp_price: f64,
     /// The take-profit distance, as a fraction; `NaN` is none.
     pub tp_stop: f64,
-    /// The trailing stop's best price since the entry. See [`crate::stops`].
+    /// The trailing stop's best price since the entry. See `crate::stops`.
     pub tsl_price: f64,
     /// The trailing stop's distance from it, as a fraction; `NaN` is none.
     pub tsl_stop: f64,
@@ -104,7 +104,7 @@ pub struct StopState {
     pub delta_format: DeltaFormat,
     /// The size of the position the ladders were armed on.
     pub ladder_base: f64,
-    /// Whether the stops were armed by [`crate::stops`], which a trailing
+    /// Whether the stops were armed by `crate::stops`, which a trailing
     /// stop, a time stop or a ladder needs.
     pub extended: bool,
 }

@@ -1,14 +1,10 @@
-//! Interned identifiers.
+//! Identifiers.
 //!
-//! `InstrumentId` is compared and hashed on nearly every record write. In a
-//! sweep with thousands of columns that is tens of millions of comparisons,
-//! and string comparison there is measurable. Interning collapses each
-//! identifier to a `Copy` handle that compares as an integer.
-//!
-//! Phase 1 keeps the storage simple; the interner is the thing to optimise
-//! once there are real numbers to profile. What matters now is that the
-//! *type* is `Copy` and opaque, so switching the backing store later does not
-//! touch call sites.
+//! `Symbol` and `Venue` wrap an `Arc<str>`: a clone shares the string, and
+//! comparing or hashing reads it. They are not interned. Interning would turn
+//! each into a `Copy` handle that compares as an integer, which matters if
+//! profiling shows identifier comparisons on the record path; the types are
+//! opaque, so changing the store would not touch call sites.
 
 use std::sync::Arc;
 
@@ -17,7 +13,7 @@ use std::sync::Arc;
 pub struct Symbol(Arc<str>);
 
 impl Symbol {
-    /// Interns a symbol name.
+    /// A symbol from its name.
     pub fn new(s: impl AsRef<str>) -> Self {
         Self(Arc::from(s.as_ref()))
     }
@@ -34,7 +30,7 @@ impl Symbol {
 pub struct Venue(Arc<str>);
 
 impl Venue {
-    /// Interns a venue name.
+    /// A venue from its name.
     pub fn new(s: impl AsRef<str>) -> Self {
         Self(Arc::from(s.as_ref()))
     }
