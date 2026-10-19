@@ -1,4 +1,4 @@
-"""Charts of a portfolio, with Plotly. Needs ``pip install phasor[plot]``.
+"""Charts of a portfolio, with Plotly. Needs ``pip install phasor-trader[plot]``.
 
 Each function returns a ``plotly.graph_objects.Figure`` to show, combine or
 save; ``index`` puts the bars' times on the x axis::
@@ -24,7 +24,7 @@ def _go():
     try:
         import plotly.graph_objects as go
     except ImportError as e:  # pragma: no cover - depends on the environment
-        raise ImportError("phasor.plotting needs plotly: pip install phasor[plot]") from e
+        raise ImportError("phasor.plotting needs plotly: pip install phasor-trader[plot]") from e
     return go
 
 
