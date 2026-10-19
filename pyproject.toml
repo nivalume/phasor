@@ -2,13 +2,13 @@
 name = "phasor-dev"
 version = "0.0.0"
 requires-python = ">=3.14,<3.15"
-dependencies = ["phasor[data]"]
+dependencies = ["phasor-trader[data]"]
 
 [tool.uv]
 package = false
 
 [tool.uv.sources]
-phasor = { path = "crates/phasor-py", editable = true }
+phasor-trader = { path = "crates/phasor-py", editable = true }
 
 [dependency-groups]
 research = ["openai>=1", "pymupdf", "pytest>=7", "pyyaml"]

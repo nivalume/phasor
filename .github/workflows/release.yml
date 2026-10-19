@@ -1,0 +1,154 @@
+# Push a tag such as v0.1.0 to build wheels for Linux, macOS and Windows plus an
+# sdist, publish them to PyPI as `phasor-trader` (still `import phasor`) and
+# attach them to a GitHub Release. Running it by hand from the Actions tab on a
+# branch builds and smoke-tests everything without publishing.
+#
+# PyPI side: a trusted publisher for project phasor-trader, owner nivalume,
+# repository phasor, workflow release.yml, environment pypi.
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: check version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # The tag, the Cargo workspace version (which maturin puts in the wheel)
+      # and `phasor.__version__` must agree, or the release stops here.
+      - name: Tag matches Cargo.toml and __version__
+        if: github.ref_type == 'tag'
+        shell: python
+        run: |
+          import os, re, sys, tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("Cargo.toml", "rb") as f:
+              cargo = tomllib.load(f)["workspace"]["package"]["version"]
+          with open("crates/phasor-py/python/phasor/__init__.py", encoding="utf-8") as f:
+              init = re.search(r'^__version__ = "([^"]+)"', f.read(), re.M).group(1)
+          print(f"tag {tag}, Cargo.toml {cargo}, __version__ {init}")
+          if not tag == cargo == init:
+              sys.exit("bump [workspace.package] version in Cargo.toml and __version__ to the tag")
+
+  wheels:
+    name: wheel ${{ matrix.platform }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, runner: ubuntu-24.04, target: x86_64, manylinux: "2_28" }
+          - { platform: linux-aarch64, runner: ubuntu-24.04-arm, target: aarch64, manylinux: "2_28" }
+          - { platform: macos-x86_64, runner: macos-15-intel, target: x86_64 }
+          - { platform: macos-arm64, runner: macos-15, target: aarch64 }
+          - { platform: windows-x86_64, runner: windows-2025, target: x64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      # abi3-py39: one wheel per platform serves CPython 3.9 and later.
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist --manifest-path crates/phasor-py/Cargo.toml
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: false
+      # Install the wheel into the oldest and newest supported Pythons and run
+      # a backtest through the extension.
+      - name: Smoke test
+        shell: bash
+        run: |
+          wheel=$(ls dist/*.whl)
+          for py in 3.9 3.14; do
+            uv run --no-project --isolated --python "$py" --with "$wheel" python - <<'EOF'
+          import importlib.metadata
+          import sys
+
+          import numpy as np
+          import phasor
+
+          close = np.linspace(100.0, 120.0, 64)
+          entries = np.zeros(64, dtype=bool)
+          entries[4] = True
+          exits = np.zeros(64, dtype=bool)
+          exits[40] = True
+          pf = phasor.from_signals(close, entries, exits, init_cash=10_000)
+          assert pf.total_return()[0] > 0, pf.total_return()
+          assert phasor.__version__ == importlib.metadata.version("phasor-trader")
+          print(sys.version.split()[0], phasor.__version__, pf.total_return())
+          EOF
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: sdist
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --manifest-path crates/phasor-py/Cargo.toml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  pypi:
+    name: publish to PyPI
+    needs: [wheels, sdist]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/phasor-trader/
+    permissions:
+      id-token: write # trusted publishing, no API token
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    needs: pypi
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Create the release with the wheels and sdist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "$GITHUB_REF_NAME" $prerelease

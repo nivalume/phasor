@@ -1,4 +1,4 @@
-"""Results as pandas objects. Needs pandas (``pip install phasor[pandas]``).
+"""Results as pandas objects. Needs pandas (``pip install phasor-trader[pandas]``).
 
 Records come back as DataFrames, series as DataFrames with one column per
 account, both with the bars' ``index`` when given (the ``idx`` columns of

@@ -31,7 +31,7 @@ def _arrow():
     try:
         import pyarrow
     except ImportError as error:  # pragma: no cover - depends on the environment
-        raise ImportError("local sources need pyarrow: pip install 'phasor[data]'") from error
+        raise ImportError("local sources need pyarrow: pip install 'phasor-trader[data]'") from error
     return pyarrow
 
 

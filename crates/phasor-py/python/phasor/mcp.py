@@ -253,7 +253,7 @@ def _version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("phasor")
+        return version("phasor-trader")
     except Exception:
         return "0"
 

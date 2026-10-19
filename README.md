@@ -102,6 +102,16 @@ cross-sectional pass over every symbol between stages. A set with a
 cross-sectional operator needs the whole panel before it can hand anything
 over in batches.
 
+## Install
+
+```bash
+pip install phasor-trader            # extras: [data], [plot], [pandas]
+```
+
+The PyPI project is `phasor-trader`; the module is still `import phasor`.
+Wheels cover Linux (x86_64, aarch64), macOS (x86_64, arm64) and Windows
+(x86_64), CPython 3.9 and later.
+
 ## Try it
 
 ```bash
@@ -156,6 +166,12 @@ pyarrow and NumPy. User Schemas name the columns and decode each Arrow batch
 before simulation; the Rust compute crates stay independent of file I/O.
 Binance HTTP and cache writing live only in examples. Parallel account
 execution uses `std::thread::scope`.
+
+To release, set `version` in `Cargo.toml` (`[workspace.package]`) and
+`__version__` in `crates/phasor-py/python/phasor/__init__.py`, commit, and
+push a matching tag (`git tag v0.1.0 && git push origin v0.1.0`).
+[`release.yml`](.github/workflows/release.yml) builds the wheels and sdist,
+publishes them to PyPI and creates the GitHub Release.
 
 ## Licence
 
