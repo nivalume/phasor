@@ -17,6 +17,7 @@ mod pit;
 #[cfg(feature = "polars")]
 mod polars_backend;
 mod stage;
+mod warmup;
 mod window;
 mod wq101;
 
@@ -51,6 +52,10 @@ pub struct FactorSet {
     /// What fills those fields.
     lifted: lift::Lifted,
     graph: graph::Graph,
+    /// Each node's lookback and the fields it reads.
+    warm: warmup::Warmup,
+    /// Whether evaluation blanks the rows before each window has filled.
+    warmup: bool,
     /// The stages, when a factor reads across symbols.
     plan: Option<stage::Staged>,
     /// The factors split into separately compiled groups, built on first use
@@ -102,14 +107,48 @@ impl FactorSet {
                 .map(|((name, _), expr)| (name.as_str(), expr)),
         )?;
         let plan = stage::Staged::plan(&graph);
+        let warm = warmup::Warmup::plan(&graph, &lifted);
         Ok(Self {
             factors,
             rewritten,
             lifted,
             graph,
+            warm,
+            warmup: false,
             plan,
             parts: OnceLock::new(),
         })
+    }
+
+    /// Per factor, in output order: how many rows before the current one its
+    /// windows and lags reach (`Mean($close, 20)` is 19, `Ref(Mean($close,
+    /// 5), 2)` is 6). Its value is complete from that many rows after its
+    /// inputs begin; Qlib's operators give a value earlier, from a partial
+    /// window.
+    #[must_use]
+    pub fn lookbacks(&self) -> Vec<usize> {
+        self.graph
+            .outputs
+            .iter()
+            .map(|&node| self.warm.lookback[node])
+            .collect()
+    }
+
+    /// The same set, evaluating with `NaN` on each symbol's rows before every
+    /// window of a factor has filled: before the first row where the
+    /// factor's input fields all have a value, plus its lookback. A
+    /// cross-sectional operator then skips a symbol that is still warming up.
+    /// Off by default, which is Qlib's behaviour.
+    #[must_use]
+    pub fn with_warmup(mut self, on: bool) -> Self {
+        self.warmup = on;
+        self
+    }
+
+    /// Whether [`FactorSet::with_warmup`] is on.
+    #[must_use]
+    pub fn warmup(&self) -> bool {
+        self.warmup
     }
 
     /// The instruments other than its own symbols that the set reads with
@@ -188,7 +227,27 @@ impl FactorSet {
         inputs: &FactorInputs<'_>,
         backend: &dyn ComputeBackend,
     ) -> Result<FactorValues> {
-        backend.evaluate(self, inputs)
+        let values = backend.evaluate(self, inputs)?;
+        if !self.warmup {
+            return Ok(values);
+        }
+        let starts = warmup::Warmup::starts(&self.graph, inputs)?;
+        let n_rows = inputs.shape().0;
+        let (names, matrices): (Vec<String>, Vec<_>) = values
+            .into_matrices()
+            .enumerate()
+            .map(|(k, (name, matrix))| {
+                let (rows, cols) = (matrix.n_rows(), matrix.n_cols());
+                let mut cells = matrix.into_vec();
+                self.warm
+                    .mask(self.graph.outputs[k], &starts, &mut cells, n_rows);
+                (
+                    name,
+                    phasor_core::matrix::Matrix::from_column_major(cells, rows, cols),
+                )
+            })
+            .unzip();
+        FactorValues::from_matrices(names, matrices.into_iter().collect::<Result<_>>()?)
     }
 
     /// Evaluates `batch` symbols at a time, handing each batch's values to

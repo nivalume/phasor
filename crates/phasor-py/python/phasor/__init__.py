@@ -59,6 +59,7 @@ from . import (
     plotting,
     portfolios,
     predictions,
+    processors,
     rates,
     resolution,
     returns,
@@ -98,6 +99,7 @@ __all__ = [
     "plotting",
     "portfolios",
     "predictions",
+    "processors",
     "rates",
     "resolution",
     "returns",
@@ -311,6 +313,34 @@ class FactorSet:
         ``Date``, ``P`` and ``PRef`` group and compare by the bar times."""
         return self._inner.needs_timestamps
 
+    @property
+    def lookbacks(self) -> dict[str, int]:
+        """Per factor, how many rows before the current one its windows and
+        lags reach: ``Mean($close, 20)`` is 19, ``Ref(Mean($close, 5), 2)`` is
+        6. Its value is complete from that many rows after its inputs begin."""
+        return dict(zip(self.names, self._inner.lookbacks))
+
+    @property
+    def lookback(self) -> int:
+        """The longest of :attr:`lookbacks`."""
+        return max(self._inner.lookbacks, default=0)
+
+    @property
+    def warmup(self) -> bool:
+        """Whether :meth:`with_warmup` is on."""
+        return self._inner.warmup
+
+    def with_warmup(self, on: bool = True) -> FactorSet:
+        """The same set, evaluating to ``NaN`` on each symbol's rows before a
+        factor's windows have filled: until its input fields all have values
+        for that symbol, plus its lookback. Cross-sectional operators then
+        leave out a symbol that is still warming up.
+
+        Qlib's operators (and this set by default) give a value from the first
+        row, from a partial window; in a backtest those rows trade on a 2-bar
+        standard deviation. Turn this on for signals."""
+        return FactorSet(self._inner.with_warmup(bool(on)))
+
     def evaluate(
         self,
         fields: Mapping[str, Any],
@@ -426,6 +456,15 @@ class Expression:
     @property
     def uses_future(self) -> bool:
         return self._factors.uses_future
+
+    @property
+    def lookback(self) -> int:
+        """How many rows before the current one the expression reads."""
+        return self._factors.lookback
+
+    def with_warmup(self, on: bool = True) -> Expression:
+        """As :meth:`FactorSet.with_warmup`."""
+        return Expression(self._factors.with_warmup(on))
 
     def evaluate(self, fields: Mapping[str, Any], **context: Any) -> np.ndarray:
         """As :meth:`FactorSet.evaluate`, for the one expression."""

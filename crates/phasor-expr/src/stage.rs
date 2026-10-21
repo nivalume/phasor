@@ -55,6 +55,8 @@ pub(crate) enum Step {
 pub(crate) struct Staged {
     pub(crate) steps: Vec<Step>,
     pub(crate) panels: usize,
+    /// The node of the whole graph each panel holds.
+    pub(crate) nodes: Vec<NodeId>,
     /// Per step, the panels no later step reads.
     pub(crate) release: Vec<Vec<usize>>,
 }
@@ -86,9 +88,11 @@ impl Staged {
         }
         let mut panel = vec![None; nodes.len()];
         let mut panels = 0;
+        let mut held = Vec::new();
         for at in 0..nodes.len() {
             if cross(at) || (crossing[at] && !source(at)) {
                 panel[at] = Some(panels);
+                held.push(at);
                 panels += 1;
             }
         }
@@ -211,6 +215,7 @@ impl Staged {
         Some(Self {
             steps,
             panels,
+            nodes: held,
             release,
         })
     }

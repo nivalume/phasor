@@ -372,6 +372,14 @@ Alpha360 是 6 个字段 × 60 个滞后：`Ref($close, k)/$close`、开高低 v
 
 `uses_future()` 对 `BFillNan`、`DayLast`（读当天后面的行；只有输入滞后至少一天时才因果，而一天有几根 K 线编译期不知道）和从右边切的 `Cut` 为真。qlib 高频 handler 的 `DayLast(Ref(x, 243))` 因此会被标成读未来。
 
+<a id="warmup"></a>
+
+## 回看长度与预热（`warmup.rs`）
+
+qlib 的算子都是 `min_periods = 1`：20 行均值在第 0 行就有值。qlib 靠多加载一段历史把这些行藏起来，回测里它们会直接触发交易。`FactorSet::lookbacks()` 给出每个因子往前读多少行，在编译后的图上逐节点算：`Ref(x, k≥0)` 加 k，`Delta(x, n)` 加 n（不沿用 PIT 里 qlib 的 N − 1），窗口 n 的滚动算子和 `Corr` / `Cov` 加 n − 1，扩展窗口不加，`EMA` 按 span = 2/alpha − 1 计，其余取输入的最大值；`ChangeInstrument` 带上标的表达式的回看，`P` 为 0。Alpha158 最长 60，Alpha360 最长 59。
+
+`with_warmup(true)`（`FactorSet` 默认关，保持 qlib 语义；Python 的 `phasor.factors`、TOML 回测和 MCP 的 `run_backtest` 这几条直接出信号的路径默认开，TOML 用 `[backtest] warmup = false` 关）之后，每个标的在"因子读的输入字段都有值的第一行 + 回看长度"之前为 NaN，所以晚上市的标的按它自己的开始计。截面算子读的面板也先按同样的规则遮掉，还在预热的标的不参与排名。遮掉之后的行和不预热时逐位相同；分批、线程数不影响结果（`tests/warmup.rs`）。
+
 <a id="wq101"></a>
 
 ## WorldQuant 101

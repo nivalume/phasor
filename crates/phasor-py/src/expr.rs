@@ -110,6 +110,23 @@ impl PyFactorSet {
         self.inner.needs_timestamps()
     }
 
+    #[getter]
+    fn lookbacks(&self) -> Vec<usize> {
+        self.inner.lookbacks()
+    }
+
+    #[getter]
+    fn warmup(&self) -> bool {
+        self.inner.warmup()
+    }
+
+    /// The same set with warm-up on or off.
+    fn with_warmup(&self, on: bool) -> Self {
+        Self {
+            inner: self.inner.clone().with_warmup(on),
+        }
+    }
+
     /// Evaluates F-ordered float64 fields of `shape` and returns column-major
     /// flat arrays. `timestamps` are wall-clock nanoseconds per row.
     #[pyo3(signature = (fields, shape, timestamps=None, symbols=None, instruments=Vec::new(), pit=Vec::new()))]

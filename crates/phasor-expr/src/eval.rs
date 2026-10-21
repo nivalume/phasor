@@ -14,6 +14,7 @@ use crate::graph::{self, BinaryOp, Cross, DAY, Graph, MINUTE, NodeId, Op, Rollin
 use crate::order::{Order, ordered_into, rolling_arg_extreme_into};
 use crate::pit::{self, PitRecord};
 use crate::stage::{Dest, Source, Staged, Step};
+use crate::warmup::Warmup;
 use crate::window::{Count, Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide_into};
 
 /// Named column-major fields supplied to a factor set, and what the
@@ -227,6 +228,14 @@ impl<'a> FactorInputs<'a> {
 
     pub(crate) fn pit_records(&self, field: &str) -> Option<&[PitRecord]> {
         self.pit.get(field).map(Vec::as_slice)
+    }
+
+    /// An input field by name.
+    pub(crate) fn field(&self, name: &str) -> Result<&'a [f64]> {
+        self.fields
+            .get(name)
+            .copied()
+            .ok_or_else(|| Error::Invariant(format!("factor input is missing field ${name}")))
     }
 
     /// A field by name: an input, or a hidden one, the calendar's or one a
@@ -476,7 +485,15 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
             run_parts(parts, graph.outputs.len(), inputs, &extra, n_rows, n_cols)?
         }
         None => run_graph(graph, &fields, n_rows, n_cols),
-        Some(staged) => run_staged(staged, graph.outputs.len(), &fields, n_rows, n_cols),
+        Some(staged) => {
+            let starts = if set.warmup() {
+                Some(Warmup::starts(graph, inputs)?)
+            } else {
+                None
+            };
+            let warm = starts.as_deref().map(|starts| (&set.warm, starts));
+            run_staged(staged, graph.outputs.len(), &fields, n_rows, n_cols, warm)
+        }
     };
     let names = set.names().map(str::to_owned).collect();
     let matrices = outputs
@@ -567,12 +584,15 @@ fn run_parts(
 
 /// Runs the stages in order: each per-symbol stage over every column, each
 /// cross-sectional node over every row.
+/// With `warm`, a cross-sectional node reads each panel blanked where its
+/// windows have not yet filled, so a symbol still warming up is skipped.
 fn run_staged(
     staged: &Staged,
     n_outputs: usize,
     fields: &[&[f64]],
     n_rows: usize,
     n_cols: usize,
+    warm: Option<(&Warmup, &[Vec<usize>])>,
 ) -> Vec<Vec<f64>> {
     let mut outputs: Vec<Option<Vec<f64>>> = vec![None; n_outputs];
     let mut panels: Vec<Option<Vec<f64>>> = vec![None; staged.panels];
@@ -615,8 +635,29 @@ fn run_staged(
                 panel,
                 outputs: positions,
             } => {
-                let x = read(&inputs[0]);
-                let y = inputs.get(1).map_or(Arg::Scalar(f64::NAN), read);
+                let blanked: Vec<Option<Vec<f64>>> = inputs
+                    .iter()
+                    .map(|source| match (source, warm) {
+                        (Source::Panel(k), Some((warm, starts))) => {
+                            let mut copy = panels[*k]
+                                .clone()
+                                .expect("a panel is written before it is read");
+                            warm.mask(staged.nodes[*k], starts, &mut copy, n_rows);
+                            Some(copy)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let input = |at: usize| match &blanked[at] {
+                    Some(values) => Arg::Series(values),
+                    None => read(&inputs[at]),
+                };
+                let x = input(0);
+                let y = if inputs.len() > 1 {
+                    input(1)
+                } else {
+                    Arg::Scalar(f64::NAN)
+                };
                 let values = cross_panel(*op, x, y, n_rows, n_cols);
                 for &position in positions {
                     outputs[position] = Some(values.clone());

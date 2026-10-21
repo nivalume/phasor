@@ -20,6 +20,9 @@ def test_direct_call_and_factor_fields():
     np.testing.assert_array_equal(entries, close > 100)
     np.testing.assert_array_equal(exits, close < 100)
     np.testing.assert_allclose(phasor.factors({"close": close}, twice="$close * 2")["twice"], close * 2)
+    # Warm-up: no value from a partial window.
+    ma = phasor.factors({"close": close}, ma="Mean($close, 3)")["ma"]
+    assert np.isnan(ma[:2]).all() and not np.isnan(ma[2:]).any()
     with pytest.raises(ValueError, match="future"):
         phasor.factors({"close": close}, future="Ref($close, -1)")
     with pytest.raises(ValueError, match="missing field"):

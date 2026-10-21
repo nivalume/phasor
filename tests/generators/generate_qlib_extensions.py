@@ -42,7 +42,6 @@ from qlib.data.cache import H
 from qlib.data.data import LocalExpressionProvider
 from qlib.utils import get_period_offset
 
-
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 EPOCH = dt.date(1970, 1, 1)
 
