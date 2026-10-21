@@ -10,6 +10,7 @@ mod backend;
 mod cross;
 mod eval;
 mod graph;
+mod grid;
 mod lift;
 mod order;
 mod parse;
@@ -28,6 +29,7 @@ pub use alpha158::{
 pub use alpha360::alpha360;
 pub use backend::{ComputeBackend, NativeBackend};
 pub use eval::{FactorInputs, FactorValues};
+pub use grid::{FactorGrid, GridCase};
 pub use parse::Expression;
 pub use pit::PitRecord;
 #[cfg(feature = "polars")]
@@ -523,19 +525,36 @@ mod tests {
     }
 
     #[test]
-    fn zero_offset_ref_and_delta_use_the_current_row() {
+    fn zero_offset_ref_and_delta_read_the_first_row_as_qlib() {
         let panel = OhlcvPanel {
-            close: vec![1.0, 2.0, 3.0],
+            close: vec![1.0, 2.0, 3.0, f64::NAN, 5.0, 6.0],
             n_rows: 3,
-            n_cols: 1,
+            n_cols: 2,
             ..OhlcvPanel::default()
         };
-        let values = FactorSet::compile([("same", "Ref($close,0)"), ("zero", "Delta($close,0)")])
+        let values = FactorSet::compile([("first", "Ref($close,0)"), ("since", "Delta($close,0)")])
             .unwrap()
             .evaluate(&FactorInputs::from_ohlcv(&panel).unwrap())
             .unwrap();
 
-        assert_eq!(values.get("same").unwrap().column(0), [1.0, 2.0, 3.0]);
-        assert_eq!(values.get("zero").unwrap().column(0), [0.0, 0.0, 0.0]);
+        // Each symbol's first row, even when it is missing.
+        assert_eq!(values.get("first").unwrap().column(0), [1.0, 1.0, 1.0]);
+        assert_eq!(values.get("since").unwrap().column(0), [0.0, 1.0, 2.0]);
+        assert!(
+            values
+                .get("first")
+                .unwrap()
+                .column(1)
+                .iter()
+                .all(|v| v.is_nan())
+        );
+        assert!(
+            values
+                .get("since")
+                .unwrap()
+                .column(1)
+                .iter()
+                .all(|v| v.is_nan())
+        );
     }
 }

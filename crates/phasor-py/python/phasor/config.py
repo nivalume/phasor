@@ -157,9 +157,12 @@ def run(cfg: dict | str | Path) -> dict[str, Any]:
     market = {k: fields[k] for k in ("open", "high", "low") if k in fields}
     combos = _combos(cfg)
     portfolios, stats = [], []
-    for combo in combos:
-        exprs = {k: v.format(**combo) for k, v in cfg["signals"].items()}
-        values = phasor.FactorSet.compile(exprs).with_warmup(warmup).evaluate(fields)
+    # Every combination in one graph: what no parameter touches is computed once.
+    grid = phasor.FactorGrid.compile(cfg["signals"], combos).with_warmup(warmup)
+    wide = grid.evaluate(fields)
+    n_symbols = fields["close"].shape[1]
+    for k, combo in enumerate(combos):
+        values = {name: v[:, k * n_symbols:(k + 1) * n_symbols] for name, v in wide.items()}
         if entry == "from_signals":
             pf = phasor.from_signals(fields["close"], _signal(values["entries"]), _signal(values["exits"]),
                                      **market, **backtest)

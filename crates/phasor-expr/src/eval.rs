@@ -99,7 +99,7 @@ impl<'a> FactorInputs<'a> {
                 expected,
             });
         }
-        let name = name.to_ascii_lowercase();
+        let name = name.to_lowercase();
         if name.is_empty() {
             return Err(Error::Invariant("factor field name cannot be empty".into()));
         }
@@ -197,7 +197,7 @@ impl<'a> FactorInputs<'a> {
     /// whose period is not a quarter (or year) of 1900..=2099, or a field
     /// already supplied.
     pub fn with_pit(mut self, field: &str, records: Vec<PitRecord>) -> Result<Self> {
-        let field = field.trim_start_matches('$').to_ascii_lowercase();
+        let field = field.trim_start_matches('$').to_lowercase();
         pit::quarterly(&field)?;
         for record in &records {
             if record.col >= self.n_cols {
@@ -981,6 +981,11 @@ fn step(op: Op, args: &[Arg<'_>], target: &mut [f64], spare: &mut [Vec<f64>]) {
             target[kept..].fill(f64::NAN);
         }
         Op::Delta(offset) => binary_series(BinaryOp::Sub, args[0], args[0].shifted(offset), target),
+        Op::First => {
+            if let Some(&value) = args[0].series(first).first() {
+                target.fill(value);
+            }
+        }
         Op::Ema(alpha) => {
             let column = args[0].series(first);
             match alpha {

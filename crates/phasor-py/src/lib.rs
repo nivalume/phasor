@@ -2931,6 +2931,7 @@ fn _phasor(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<resume::PySimState>()?;
     m.add_class::<resume::PySegment>()?;
     m.add_class::<PyFactorSet>()?;
+    m.add_class::<expr::PyFactorGrid>()?;
     m.add_function(wrap_pyfunction!(from_signals, m)?)?;
     m.add_function(wrap_pyfunction!(from_orders, m)?)?;
     m.add_function(wrap_pyfunction!(expr::alpha158, m)?)?;

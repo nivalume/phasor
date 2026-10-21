@@ -155,6 +155,8 @@ pub(crate) enum Op {
     Binary(BinaryOp),
     If,
     Ref(i64),
+    /// The first row's value on every row (Qlib's `Ref(x, 0)`).
+    First,
     Delta(usize),
     /// `None` is the expanding EMA (`EMA(x, 0)`), otherwise the alpha's bits.
     Ema(Option<u64>),
@@ -375,24 +377,8 @@ impl Builder {
                 return Err(Error::Invariant(format!("unsupported unary {op}")));
             }
             Expression::Binary(op, left, right) => {
-                let op = match op.as_str() {
-                    "+" => BinaryOp::Add,
-                    "-" => BinaryOp::Sub,
-                    "*" => BinaryOp::Mul,
-                    "/" => BinaryOp::Div,
-                    "**" => BinaryOp::Pow,
-                    ">" => BinaryOp::Gt,
-                    "<" => BinaryOp::Lt,
-                    ">=" => BinaryOp::Ge,
-                    "<=" => BinaryOp::Le,
-                    "==" => BinaryOp::Eq,
-                    "!=" => BinaryOp::Ne,
-                    "&" => BinaryOp::And,
-                    "|" => BinaryOp::Or,
-                    other => {
-                        return Err(Error::Invariant(format!("unsupported operator {other}")));
-                    }
-                };
+                let op = binary_op(op)
+                    .ok_or_else(|| Error::Invariant(format!("unsupported operator {op}")))?;
                 let inputs = vec![self.node(left)?, self.node(right)?];
                 self.intern(Op::Binary(op), inputs)
             }
@@ -480,6 +466,31 @@ impl Builder {
             _ => None,
         };
         if let Some(kind) = rolling {
+            // Qlib rejects these windows when it builds the operator.
+            let least = match name {
+                "Skew" => 3.0,
+                "Kurt" => 4.0,
+                _ => 0.0,
+            };
+            let value = number(&args[1], "window")?;
+            if least > 0.0 && value != 0.0 && value < least {
+                return Err(Error::Invariant(format!(
+                    "{name}'s window must be 0 or at least {least}"
+                )));
+            }
+            // Qlib's base rolling operators read a window strictly between
+            // 0 and 1 as an exponential mean with that alpha, whatever the
+            // operator (`Std($close, 0.5)` too).
+            if matches!(
+                name,
+                "Mean" | "Sum" | "Std" | "Var" | "Max" | "Min" | "Med" | "Count"
+            ) {
+                let value = number(&args[1], "window")?;
+                if value > 0.0 && value < 1.0 {
+                    let input = self.node(&args[0])?;
+                    return Ok(self.intern(Op::Ema(Some(value.to_bits())), vec![input]));
+                }
+            }
             let window = window(&args[1])?;
             let input = self.node(&args[0])?;
             return Ok(self.intern(Op::Rolling(kind, window), vec![input]));
@@ -594,16 +605,27 @@ impl Builder {
                 ];
                 self.intern(Op::If, inputs)
             }
+            // Qlib: `Ref(x, 0)` is the first row's value, `Delta(x, 0)` the
+            // change since it.
             "Ref" => {
                 let offset = integer(&args[1], "Ref offset")?;
                 let input = self.node(&args[0])?;
-                self.intern(Op::Ref(offset), vec![input])
+                let op = if offset == 0 {
+                    Op::First
+                } else {
+                    Op::Ref(offset)
+                };
+                self.intern(op, vec![input])
             }
             "Delta" => {
                 let offset = integer(&args[1], "Delta offset")?;
                 let offset = usize::try_from(offset)
                     .map_err(|_| Error::Invariant("Delta offset cannot be negative".into()))?;
                 let input = self.node(&args[0])?;
+                if offset == 0 {
+                    let first = self.intern(Op::First, vec![input]);
+                    return Ok(self.intern(Op::Binary(BinaryOp::Sub), vec![input, first]));
+                }
                 self.intern(Op::Delta(offset), vec![input])
             }
             "EMA" => {
@@ -637,14 +659,31 @@ impl Builder {
     }
 }
 
+/// The operator an infix symbol denotes.
+pub(crate) fn binary_op(symbol: &str) -> Option<BinaryOp> {
+    Some(match symbol {
+        "+" => BinaryOp::Add,
+        "-" => BinaryOp::Sub,
+        "*" => BinaryOp::Mul,
+        "/" => BinaryOp::Div,
+        "**" => BinaryOp::Pow,
+        ">" => BinaryOp::Gt,
+        "<" => BinaryOp::Lt,
+        ">=" => BinaryOp::Ge,
+        "<=" => BinaryOp::Le,
+        "==" => BinaryOp::Eq,
+        "!=" => BinaryOp::Ne,
+        "&" => BinaryOp::And,
+        "|" => BinaryOp::Or,
+        _ => return None,
+    })
+}
+
+/// A literal parameter: a number, or arithmetic over numbers (`2*5`), as
+/// Python would have computed it before Qlib saw it.
 pub(crate) fn number(expr: &Expression, label: &str) -> Result<f64> {
-    match expr {
-        Expression::Number(bits) => Ok(f64::from_bits(*bits)),
-        Expression::Unary('-', inner) => Ok(-number(inner, label)?),
-        _ => Err(Error::Invariant(format!(
-            "{label} must be a numeric literal"
-        ))),
-    }
+    expr.constant()
+        .ok_or_else(|| Error::Invariant(format!("{label} must be a numeric literal")))
 }
 
 pub(crate) fn integer(expr: &Expression, label: &str) -> Result<i64> {
@@ -849,6 +888,8 @@ mod tests {
             ("EMA($close, -1)", "negative"),
             ("Delta($close, -1)", "negative"),
             ("Ref($close, $open)", "literal"),
+            ("Skew($close, 2)", "at least 3"),
+            ("Kurt($close, 0.5)", "at least 4"),
         ] {
             let error = graph(&[source]).unwrap_err().to_string();
             assert!(error.contains(message), "{source}: {error}");

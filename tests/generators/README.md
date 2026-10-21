@@ -24,6 +24,7 @@ not noise.
 | `qlib_alpha158.tsv`, `qlib_alpha360.tsv` | `parity_qlib.rs` in `phasor-expr`'s tests | Qlib's Alpha158 and Alpha360 outputs |
 | `qlib_alpha158_configs.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Names and expression strings of `Alpha158DL.get_feature_config(config)` for six configs |
 | `qlib_highfreq.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Qlib's high-frequency operators (`DayCumsum`, `DayLast`, `FFillNan`, `BFillNan`, `Date`, `Select`, `IsNull`, `IsInf`, `Cut`) and `ChangeInstrument` / `Mask` |
+| `qlib_semantics.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests | Qlib semantics that depend on Python: `Ref`/`Delta(x, 0)`, windows between 0 and 1, arithmetic arguments, `True`/`False`, Unicode field names |
 | `qlib_pit_records.tsv`, `qlib_pit.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Point-in-time records and `P` / `PRef` read through Qlib's `LocalPITProvider` |
 | `qlib_processors.tsv` | `crates/phasor-py/tests/test_processors.py` | Qlib's data processors (`qlib.data.dataset.processor`), alone and as handler pipelines |
 | `wq101.tsv` | `phasor-expr/tests/wq101.rs` | WorldQuant 101 alphas |
@@ -69,7 +70,7 @@ environment, in one command:
 TMPDIR=/some/scratch conda run -n rdagent4qlib python tests/generators/generate_qlib_extensions.py
 ```
 
-It writes four fixtures:
+It writes five fixtures:
 
 - `qlib_alpha158_configs.tsv`: `config, position, name, expression` rows for
   six `Alpha158DL.get_feature_config` configs; the header records each config
@@ -79,6 +80,12 @@ It writes four fixtures:
   and `qlib.contrib.ops.high_freq.get_calendar_day` are replaced. Booleans
   are 1/0, `Date()` is days since 1970-01-01, and rows that `Select` or `Cut`
   drop are `nan`.
+- `qlib_semantics.tsv`: the corners of Qlib's semantics that come from
+  Python: `Ref(x, 0)` and `Delta(x, 0)` read the first row, a window strictly
+  between 0 and 1 makes the base rolling operators an exponential mean,
+  literal arguments may be arithmetic, `True`/`False`, Unicode field names.
+  (Qlib's precedence of `&`/`|` and its chained comparisons are Python's and
+  are deliberately not matched: phasor follows mathematics.)
 - `qlib_pit_records.tsv` and `qlib_pit.tsv`: the generator writes real PIT
   binary files in the layout of Qlib's `scripts/dump_pit.py` (values through
   float32, as that script casts them) into a throwaway provider directory

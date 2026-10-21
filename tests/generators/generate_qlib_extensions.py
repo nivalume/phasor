@@ -7,6 +7,10 @@ Writes four fixtures:
 * ``qlib_highfreq.tsv``: Qlib's high-frequency operators
   (``qlib.contrib.ops.high_freq``) and the cross-instrument operators
   ``ChangeInstrument`` and ``Mask`` over a 30-minute panel.
+* ``qlib_semantics.tsv``: the corners of Qlib's operator semantics that
+  depend on Python: ``Ref(x, 0)`` / ``Delta(x, 0)`` (the first row), windows
+  strictly between 0 and 1 (an exponential mean), arithmetic in literal
+  arguments, ``True`` / ``False``, and Unicode field names.
 * ``qlib_pit_records.tsv`` and ``qlib_pit.tsv``: point-in-time financial
   records and ``P`` / ``PRef`` evaluated through Qlib's own
   ``LocalPITProvider`` reading real PIT binary files.
@@ -452,10 +456,98 @@ def write_pit() -> None:
     print(f"wrote {out} ({len(PIT_SYMBOLS) * rows} rows, {len(PIT_EXPRESSIONS)} expressions)")
 
 
+# --------------------------------------------------------------------------
+# Semantics
+# --------------------------------------------------------------------------
+
+SEM_SYMBOLS = ("AAA", "BBB")
+SEM_ROWS = 60
+SEM_INPUTS = ("close", "volume", "收盘价", "成交量（手）")
+SEM_EXPRESSIONS = [
+    "Ref($close, 0)",
+    "Delta($close, 0)",
+    "$close/Ref($close, 0) - 1",
+    "Mean($close, 0.5)",
+    "Std($close, 0.5)",
+    "Var($close, 0.5)",
+    "Max($close, 0.3)",
+    "Min($close, 0.3)",
+    "Sum($volume, 0.25)",
+    "Med($close, 0.5)",
+    "Count($close, 0.5)",
+    "EMA($close, 0.5)",
+    "Mean($close, 2*5)",
+    "Std($close, 3*4-2)",
+    "Ref($close, 4-2)",
+    "Corr($close, $volume, 2*5)",
+    "If($close > Ref($close, 1), True, False)",
+    "$收盘价/$close",
+    "Mean($成交量（手）, 5)",
+]
+
+
+def sem_panel() -> dict[str, dict[str, np.ndarray]]:
+    data = {}
+    for k, symbol in enumerate(SEM_SYMBOLS):
+        row = np.arange(SEM_ROWS, dtype=np.float64)
+        close = 20.0 + k * 7.0 + np.sin(row * 0.29 + k) * 2.0 + row * 0.05
+        volume = 1000.0 + ((row * 37 + k * 11) % 23) * 40.0
+        fields = {
+            "close": close,
+            "volume": volume,
+            "收盘价": close * 1.01 + 0.3,
+            "成交量（手）": volume / 100.0,
+        }
+        # Missing rows, and for BBB a missing first row, which Ref(x, 0) reads.
+        fields["close"][[9 + k, 31, 44 - k]] = np.nan
+        fields["volume"][[17, 50]] = np.nan
+        if symbol == "BBB":
+            fields["close"][0] = np.nan
+        data[symbol] = fields
+    return data
+
+
+def write_semantics() -> None:
+    data = sem_panel()
+    dates = pd.bdate_range("2021-03-01", periods=SEM_ROWS)
+
+    def load_feature(self: Feature, instrument: str, start: int, end: int, *_args) -> pd.Series:
+        return pd.Series(data[instrument][self._name][start : end + 1], index=dates[start : end + 1])
+
+    Feature._load_internal = load_feature
+    provider = LocalExpressionProvider(time2idx=False)
+    output: dict[str, dict[str, np.ndarray]] = {symbol: {} for symbol in SEM_SYMBOLS}
+    for expression in SEM_EXPRESSIONS:
+        H["f"].clear()
+        for symbol in SEM_SYMBOLS:
+            values = provider.get_expression_instance(expression).load(symbol, 0, SEM_ROWS - 1, "day")
+            output[symbol][expression] = values.to_numpy(dtype=np.float64)
+
+    out = FIXTURES / "qlib_semantics.tsv"
+    with out.open("w", newline="") as handle:
+        versions(handle)
+        handle.write(f"# layout=symbol-major rows={SEM_ROWS} symbols={','.join(SEM_SYMBOLS)}; booleans are 1/0\n")
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(["symbol", "row", "date", *SEM_INPUTS, *SEM_EXPRESSIONS])
+        for symbol in SEM_SYMBOLS:
+            for row, date in enumerate(dates):
+                writer.writerow(
+                    [
+                        symbol,
+                        row,
+                        date.date().isoformat(),
+                        *(format_float(float(data[symbol][name][row])) for name in SEM_INPUTS),
+                        *(format_float(float(output[symbol][e][row])) for e in SEM_EXPRESSIONS),
+                    ]
+                )
+    print(f"wrote {out} ({len(SEM_SYMBOLS) * SEM_ROWS} rows, {len(SEM_EXPRESSIONS)} expressions)")
+
+
 def main() -> None:
     qlib.init(custom_ops=[DayCumsum, DayLast, FFillNan, BFillNan, Date, Select, IsNull, IsInf, Cut])
     write_alpha158_configs()
     write_highfreq()
+    write_semantics()
     write_pit()
 
 

@@ -4,6 +4,8 @@
 //! cargo run --release --example scale -p phasor-expr -- 2520 500          # everything
 //! cargo run --release --example scale -p phasor-expr -- 2520 500 sets     # only the sets
 //! cargo run --release --example scale -p phasor-expr -- 20000 16 ops      # only operators
+//! cargo run --release --example scale -p phasor-expr -- 2520 500 grid     # a parameter grid
+//! cargo run --release --example scale -p phasor-expr -- 2520 500 warmup   # warm-up's cost
 //! ```
 //!
 //! Criterion (`benches/backends.rs`) covers small panels with statistics; this
@@ -13,7 +15,7 @@
 
 use std::time::{Duration, Instant};
 
-use phasor_expr::{FactorInputs, FactorSet, alpha158, alpha360};
+use phasor_expr::{FactorGrid, FactorInputs, FactorSet, GridCase, alpha158, alpha360};
 use phasor_model::OhlcvPanel;
 
 fn main() {
@@ -24,8 +26,8 @@ fn main() {
     let (ops, sets) = match which.as_str() {
         "all" => (true, true),
         "ops" => (true, false),
-        "sets" => (false, true),
-        other => panic!("unknown selection {other:?}; use all, ops or sets"),
+        "sets" | "grid" | "warmup" => (false, which == "sets"),
+        other => panic!("unknown selection {other:?}; use all, ops, sets, grid or warmup"),
     };
     let series = |base: f64, trend: f64, wave: f64| {
         (0..n_cols)
@@ -84,6 +86,11 @@ fn main() {
             println!("{:>40}  {:>9.1} ms", source, time(&factors, &inputs));
         }
     }
+    match which.as_str() {
+        "grid" => grid(&inputs),
+        "warmup" => warmup(&inputs),
+        _ => {}
+    }
     if sets {
         for (name, set) in [
             ("alpha158", alpha158().unwrap()),
@@ -96,6 +103,77 @@ fn main() {
             }
         }
     }
+}
+
+/// A 20-case grid (5 windows × 4 thresholds) as one [`FactorGrid`] against
+/// each case compiled and evaluated on its own.
+fn grid(inputs: &FactorInputs<'_>) {
+    let factors = [
+        (
+            "z",
+            "($close - Mean($close, {n})) / (Std($close, {n}) + 1e-12) > {k}",
+        ),
+        ("trend", "Slope($close, {n}) / $close > {k} / 100"),
+        (
+            "range",
+            "($close - Min($low, {n})) / (Max($high, {n}) - Min($low, {n}) + 1e-12)",
+        ),
+    ];
+    let mut cases = Vec::new();
+    for n in ["10", "20", "40", "60", "120"] {
+        for k in ["0", "0.5", "1", "2"] {
+            let case: GridCase = [("n", n), ("k", k)]
+                .into_iter()
+                .map(|(a, b)| (a.to_owned(), b.to_owned()))
+                .collect();
+            cases.push(case);
+        }
+    }
+    let start = Instant::now();
+    let grid = FactorGrid::compile(factors, cases.clone()).unwrap();
+    let compile_ms = start.elapsed().as_secs_f64() * 1e3;
+    let grid_ms = best(|| {
+        std::hint::black_box(grid.evaluate(inputs).unwrap());
+    });
+    let mut each_ms = 0.0;
+    for case in &cases {
+        let set = FactorSet::compile(factors.iter().map(|(name, source)| {
+            let mut text = (*source).to_owned();
+            for (param, value) in case {
+                text = text.replace(&format!("{{{param}}}"), value);
+            }
+            (*name, text)
+        }))
+        .unwrap();
+        each_ms += time(&set, inputs);
+    }
+    println!(
+        "{:>40}  {grid_ms:>9.1} ms   (compile {compile_ms:.1} ms)",
+        format!("grid: {} factors x {} cases", factors.len(), cases.len())
+    );
+    println!("{:>40}  {each_ms:>9.1} ms", "each case on its own, summed");
+}
+
+/// Alpha158 with and without warm-up.
+fn warmup(inputs: &FactorInputs<'_>) {
+    let plain = alpha158().unwrap();
+    let warm = plain.clone().with_warmup(true);
+    println!("{:>40}  {:>9.1} ms", "alpha158", time(&plain, inputs));
+    println!(
+        "{:>40}  {:>9.1} ms",
+        "alpha158 with warm-up",
+        time(&warm, inputs)
+    );
+}
+
+fn best(mut run: impl FnMut()) -> f64 {
+    let mut best = Duration::MAX;
+    for _ in 0..3 {
+        let start = Instant::now();
+        run();
+        best = best.min(start.elapsed());
+    }
+    best.as_secs_f64() * 1e3
 }
 
 /// The process high-water mark from `/proc/self/status`, Linux only.

@@ -113,19 +113,29 @@ flowchart TD
 
 ## 语言
 
-字段写作 `$name`（不区分大小写，统一小写）；OHLCV 由 `from_ohlcv` 提供，其他字段（例如 Alpha158 需要的 `vwap`）用 `with_field` 加入。 布尔结果是 `1.0 / 0.0`。运算符优先级从低到高：
+字段写作 `$name`，不区分大小写，统一小写；和 qlib 一样，名字可以是任何 Unicode 字母、数字、`_` 以及 `、：（）`（`$收盘价`、`$成交量（手）`）。OHLCV 由 `from_ohlcv` 提供，其他字段（例如 Alpha158 需要的 `vwap`）用 `with_field` 加入。布尔结果是 `1.0 / 0.0`，`True / False` 是 1 和 0。
 
-\|\<&\<\> \< \>= \<= == !=\< + −\<\* /\<一元 + −\<\*\*（右结合）
+运算符优先级**以数学为准**，不跟随任何编程语言（`tests/precedence.rs`）：
 
-所以 `-2**2` 是 `-(2**2) = -4`，和 Python 一样；`$a > 1 & $b < 2` 是 `($a>1) & ($b<2)`。单独的 `=` 或 `!` 是词法错误。
+| 结合力 | 运算符 | 说明 |
+|----|----|----|
+| 最强 | `^`（也写 `**`） | 右结合：`2^3^2 = 2^9` |
+| | 一元 `-` `+` | 比乘方弱：`-2^2 = -4`，`2^-1 = 0.5` |
+| | `*` `/` | 左结合 |
+| | `+` `-` | 左结合 |
+| | `<` `<=` `>` `>=` `==` `!=` | 连写按数学理解：`1 < $x < 3` 是 `1 < $x` 且 `$x < 3`（中间的表达式只算一次）；加括号 `(1 < $x) < 3` 才是比较一个比较结果 |
+| | `&` | 合取先于析取 |
+| 最弱 | `\|` | |
+
+qlib 走 Python 的 `eval`：`&`、`\|` 比比较运算结合得更紧，`$a > 1 & $b < 2` 在 qlib 里会丢掉前一半；连写的比较经 Python 的 `and` 也只剩最后一段。这两处 phasor 按数学，和 qlib 不同。字面量参数可以是数字之间的算式（`Mean($close, 2*5)`、`Ref($close, -1)`），编译期算出；qlib 里 `30/3` 是浮点数、会被 pandas 拒绝，这里当作 10。单独的 `=` 或 `!` 是词法错误。
 
 | 类别 | 函数 | 语义 |
 |----|----|----|
 | 逐元素 | `Abs Sign Log Not`；`Add Sub Mul Div Power Gt Ge Lt Le Eq Ne And Or`；`Greater Less`；`If(c, a, b)` | 函数写法和运算符写法编译成同一个节点。比较是 NumPy 式的精确比较：和 NaN 比较得 0。`Greater / Less` 遇 NaN 得 NaN。 |
 | 逐元素（扩展） | `Exp Sqrt IsNan`；`FillNa(x, v)`、`Mask(x, c)`、`SignedPower(x, p)`；`Clip(x, lo, hi)` | `FillNa`：x 是 NaN 时取 v。`Mask`：c 为真（非 0 且非 NaN）时取 x，否则 NaN。`SignedPower` = sign(x)·\|x\|^p，x = 0 得 0。`Clip` 不是新节点，编译成 `Less(Greater(x, lo), hi)`：NaN 仍是 NaN，下限高于上限时得上限，和 NumPy 的 clip 一样。 |
-| 平移 | `Ref(x, n)`、`Delta(x, n)` | `Ref` 正数读过去（视图），负数读未来；`Delta = x − Ref(x, n)`，n 不能为负。 |
+| 平移 | `Ref(x, n)`、`Delta(x, n)` | `Ref` 正数读过去（视图），负数读未来，**0 是第一行的值**（qlib 语义，第一行缺失就是 NaN）；`Delta = x − Ref(x, n)`，n 不能为负，`Delta(x, 0) = x − 第一行`。 |
 | 平滑 | `EMA(x, p)` | `p < 1` 是 alpha，`p ≥ 1` 是 span（alpha = 2/(p+1)），`0` 是扩展窗口（每行重新加权，O(n)）。 |
-| 滚动 `(x, N)` | `Mean Sum Std Var Max Min Med Mad Count Skew Kurt WMA Rank IdxMax IdxMin Slope Rsquare Resi` | `min_periods = 1`（qlib 语义：第 0 行就有值）；`N = 0` 是扩展窗口；NaN 占窗口位置但不参与计算。`Std/Var` 是样本（ddof = 1）；`Rank` 是最后一个值在窗口里的分位；`IdxMax/IdxMin` 从 1 开始。 |
+| 滚动 `(x, N)` | `Mean Sum Std Var Max Min Med Mad Count Skew Kurt WMA Rank IdxMax IdxMin Slope Rsquare Resi` | `min_periods = 1`（qlib 语义：第 0 行就有值）；`N = 0` 是扩展窗口；NaN 占窗口位置但不参与计算。`Std/Var` 是样本（ddof = 1）；`Rank` 是最后一个值在窗口里的分位；`IdxMax/IdxMin` 从 1 开始。 窗口严格介于 0 和 1 之间时（qlib 基类的路径），`Mean Sum Std Var Max Min Med Count` 一律是 alpha = N 的指数均值（连 `Std` 也是），与 `EMA(x, N)` 相同；`Skew` 的窗口要么是 0 要么 ≥ 3，`Kurt` ≥ 4，否则编译期报错，与 qlib 一致。 |
 | 滚动 `(x, N, q)` | `Quantile` | 线性插值，q ∈ \[0, 1\]。 |
 | 成对 `(x, y, N)` | `Corr Cov` | 只用两边都不是 NaN 的行；`Corr` 在任一边的标准差 ≤ 2e-5 时为 NaN（qlib 的规则）。 |
 | 滚动（扩展）`(x, N)` | `DecayLinear Prod` | `DecayLinear` 是 WorldQuant 的 decay_linear：权重 1..=N，最新的最重，只在有值的位置上归一化。`Prod` 是窗口里有值的数之积，全 NaN 为 NaN。两者都和其它滚动算子一样 minp = 1。 |
@@ -372,6 +382,14 @@ Alpha360 是 6 个字段 × 60 个滞后：`Ref($close, k)/$close`、开高低 v
 
 `uses_future()` 对 `BFillNan`、`DayLast`（读当天后面的行；只有输入滞后至少一天时才因果，而一天有几根 K 线编译期不知道）和从右边切的 `Cut` 为真。qlib 高频 handler 的 `DayLast(Ref(x, 243))` 因此会被标成读未来。
 
+<a id="grid"></a>
+
+## 参数化表达式（`grid.rs`）
+
+`FactorGrid::compile(factors, cases)`：表达式里写 `{name}` 占位符，`cases` 是参数组合（每个组合是 `参数 → 源码文本`）。每个组合代入每个表达式，全部编译进**一个** `FactorSet`：同一张图，与参数无关的子表达式（`$close`、`Ref($close, 1)`……）只算一次，一次按标的并行的遍历算完所有组合。占位符可以出现在任何位置：窗口、阈值、字段（`${field}`）、标的名。
+
+每个因子的结果按组合并排：第 `case * n_symbols + symbol` 列，和 phasor 其它参数扫描的布局一致，所以 `(rows, symbols)` 的价格用 `column_map = [0..n_symbols)` 重复 n_cases 次即可共享。编译错误会带上因子名和出错的组合。`lookbacks()` 按因子、按组合给出；`with_warmup` 同 `FactorSet`。Python：`phasor.FactorGrid.compile(factors, n=[10, 20])`（关键字参数取笛卡尔积，或传 `phasor.params.grid(..., where=...)` 的组合列表），`grid.column_map(n_symbols)`；TOML 回测的 `[sweep]` 也改为一个 `FactorGrid`。
+
 <a id="warmup"></a>
 
 ## 回看长度与预热（`warmup.rs`）
@@ -439,6 +457,10 @@ lib.rs：字面量广播与共享节点、缺字段在任何计算前报错、�
 ### tests/parity_qlib_ext.rs
 
 四份 fixture 来自 `tests/generators/generate_qlib_extensions.py`，用的是 qlib 自己的算子；PIT 还经过 qlib 真正的 `LocalPITProvider`，读的是写到临时目录里的 PIT 二进制文件。`qlib_alpha158_configs.tsv`：六个配置的名字和表达式文本逐字相等。`qlib_highfreq.tsv`：24 个表达式（高频算子、`ChangeInstrument`、`Mask(e, "X")`），列头就是 qlib 源码、原样编译，容差 1e-9，`Corr` 1e-6。`qlib_pit.tsv`：17 个 `P` / `PRef` 表达式，容差 1e-6（qlib 的 P 是 float32）。每个都在 1 和 4 个线程、整块和每批一个标的下逐位相同。
+
+### tests/precedence.rs · tests/grid.rs
+
+数学优先级（乘方、一元负号、连写比较、合取与析取）、字面量算式、`True / False`、Unicode 字段名；参数网格的每个组合和单独编译逐位相同，预热按各自的回看长度。`qlib_semantics.tsv`（`parity_qlib_ext.rs`，原生与 Polars 两个后端）对拍 qlib 依赖 Python 的语义：`Ref / Delta(x, 0)`、小数窗口、参数算式、`True / False`、Unicode 字段。
 
 ### tests/batches.rs · tests/wq101.rs
 

@@ -492,3 +492,55 @@ fn high_frequency_operators_need_timestamps_and_flag_the_future() {
     assert_eq!(forward.get("f").unwrap().as_slice(), [1.0, 1.0, 3.0]);
     assert_eq!(forward.get("b").unwrap().as_slice(), [1.0, 3.0, 3.0]);
 }
+
+#[test]
+fn python_dependent_semantics_match_qlib() {
+    let (header, rows) = table("qlib_semantics.tsv");
+    let mut symbols: Vec<String> = rows.iter().map(|row| row[0].clone()).collect();
+    symbols.dedup();
+    let n_rows = rows.len() / symbols.len();
+    let column = |name: &str| -> Vec<f64> {
+        let at = header.iter().position(|h| h == name).unwrap();
+        rows.iter().map(|row| row[at].parse().unwrap()).collect()
+    };
+    let inputs_named = ["close", "volume", "收盘价", "成交量（手）"];
+    let fields: Vec<(&str, Vec<f64>)> = inputs_named.iter().map(|&n| (n, column(n))).collect();
+    let mut inputs = FactorInputs::new(n_rows, symbols.len()).unwrap();
+    for (name, values) in &fields {
+        inputs = inputs.with_field(name, values).unwrap();
+    }
+    let expressions = &header[7..];
+    assert_eq!(expressions.len(), 19);
+    let expected: HashMap<String, Vec<f64>> =
+        expressions.iter().map(|e| (e.clone(), column(e))).collect();
+    let set = FactorSet::compile(expressions.iter().map(|e| (e.clone(), e.clone()))).unwrap();
+    let (corr, rest): (Vec<&String>, Vec<&String>) =
+        expressions.iter().partition(|e| e.starts_with("Corr"));
+    let pick = |names: &[&String]| {
+        names
+            .iter()
+            .map(|name| ((*name).clone(), expected[*name].clone()))
+            .collect::<HashMap<_, _>>()
+    };
+    let only = |names: &[&String]| {
+        FactorSet::compile(names.iter().map(|e| ((*e).clone(), (*e).clone()))).unwrap()
+    };
+    compare(
+        &evaluate_everywhere(&only(&rest), &inputs),
+        &pick(&rest),
+        1e-9,
+    );
+    compare(
+        &evaluate_everywhere(&only(&corr), &inputs),
+        &pick(&corr),
+        1e-6,
+    );
+    #[cfg(feature = "polars")]
+    {
+        let polars = set
+            .evaluate_with(&inputs, &phasor_expr::PolarsBackend)
+            .unwrap();
+        compare(&polars, &expected, 1e-6);
+    }
+    let _ = set;
+}

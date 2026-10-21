@@ -303,6 +303,29 @@ factors = phasor.FactorSet.compile({
 values = factors.evaluate({"close": close, "volume": volume})
 ```
 
+Operators bind as in mathematics: `^` (or `**`) tightest and from the right,
+then unary minus (`-2^2` is `-4`), `*` `/`, `+` `-`, comparisons, `&`, `|`.
+Comparisons chain as in mathematics, `1 < $x < 3` meaning `1 < $x` and
+`$x < 3`. Literal arguments may be arithmetic (`Mean($close, 2*5)`).
+
+`phasor.FactorGrid` compiles expressions with `{name}` placeholders for every
+case of a parameter grid into one graph, so what no parameter touches is
+computed once and one pass evaluates every case:
+
+```python
+grid = phasor.FactorGrid.compile(
+    {"fast": "Mean($close, {f})", "slow": "Mean($close, {s})"},
+    phasor.params.grid(f=[5, 10], s=[20, 50], where=lambda p: p["f"] < p["s"]),
+).with_warmup()
+v = grid.evaluate({"close": close})            # each (rows, cases * symbols)
+pf = phasor.from_signals(close, phasor.crossed_above(v["fast"], v["slow"]),
+                         phasor.crossed_above(v["slow"], v["fast"]),
+                         column_map=grid.column_map(close.shape[1]))
+```
+
+Keyword arguments form the full product (`FactorGrid.compile(f, n=[10, 20])`);
+`grid.cases` lists each case's values in column order.
+
 `phasor.alpha158()` and `phasor.alpha360()` return the built-in Qlib factor sets and
 require explicit `open`, `high`, `low`, `close`, `volume`, and `vwap` fields.
 `phasor.alpha158(config)` takes Qlib's `Alpha158DL.get_feature_config` dict

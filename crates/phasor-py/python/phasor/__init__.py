@@ -76,6 +76,7 @@ from ._phasor import Context, Portfolio, Segment, SimState
 
 __all__ = [
     "Expression",
+    "FactorGrid",
     "FactorSet",
     "Context",
     "Portfolio",
@@ -433,6 +434,120 @@ class FactorSet:
         finally:
             if writer is not None:
                 writer.close()
+
+
+def _param_text(value: Any) -> str:
+    """A parameter value as expression source: numbers round-trip exactly."""
+    if isinstance(value, (bool, np.bool_)):
+        return "True" if value else "False"
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        return repr(float(value))
+    return str(value)
+
+
+class FactorGrid:
+    """Factor expressions with ``{name}`` placeholders, compiled for every
+    case of a parameter grid into one graph::
+
+        grid = phasor.FactorGrid.compile(
+            {"z": "($close - Mean($close, {n})) / Std($close, {n})"}, n=[10, 20, 50])
+        z = grid.evaluate({"close": close})["z"]        # (rows, 3 * symbols)
+        pf = phasor.from_signals(close, z > 1, z < 0, column_map=grid.column_map(close.shape[1]))
+
+    A placeholder can stand anywhere: a window, a threshold, a field
+    (``${field}``). Every case is compiled into the same graph, so what does
+    not depend on a parameter is computed once, and one pass over the
+    symbols evaluates every case. Each factor's columns are
+    ``case * n_symbols + symbol``, the layout of phasor's sweeps; the
+    keyword arguments of :meth:`compile` form the full product, or pass
+    ``cases``, e.g. ``phasor.params.grid(..., where=...)``.
+    """
+
+    __slots__ = ("_inner", "_cases")
+
+    def __init__(self, inner: Any, cases: list[dict]):
+        self._inner = inner
+        self._cases = cases
+
+    @classmethod
+    def compile(
+        cls, factors: Mapping[str, str], cases: Sequence[Mapping[str, Any]] | None = None, **grid: Any
+    ) -> FactorGrid:
+        if not isinstance(factors, Mapping):
+            raise TypeError("factors must be a mapping of names to expressions")
+        if cases is not None and grid:
+            raise TypeError("pass either cases or grid keywords, not both")
+        if cases is None:
+            from .params import grid as product
+
+            cases = product(**grid) if grid else [{}]
+        cases = [dict(case) for case in cases]
+        pairs = [(str(name), str(source)) for name, source in factors.items()]
+        texts = [[(str(k), _param_text(v)) for k, v in case.items()] for case in cases]
+        return cls(_phasor._FactorGrid.compile(pairs, texts), cases)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._inner.names)
+
+    @property
+    def cases(self) -> list[dict]:
+        """The parameter values of each case, in column order."""
+        return [dict(case) for case in self._cases]
+
+    @property
+    def required_fields(self) -> tuple[str, ...]:
+        return tuple(self._inner.required_fields)
+
+    @property
+    def uses_future(self) -> bool:
+        return self._inner.uses_future
+
+    @property
+    def needs_timestamps(self) -> bool:
+        return self._inner.needs_timestamps
+
+    @property
+    def lookbacks(self) -> dict[str, list[int]]:
+        """Per factor, each case's lookback (:attr:`FactorSet.lookbacks`)."""
+        return dict(zip(self.names, self._inner.lookbacks))
+
+    @property
+    def lookback(self) -> int:
+        return max((max(v) for v in self._inner.lookbacks), default=0)
+
+    @property
+    def warmup(self) -> bool:
+        return self._inner.warmup
+
+    def with_warmup(self, on: bool = True) -> FactorGrid:
+        """As :meth:`FactorSet.with_warmup`."""
+        return FactorGrid(self._inner.with_warmup(bool(on)), self._cases)
+
+    def column_map(self, n_symbols: int) -> np.ndarray:
+        """The ``column_map`` that shares a ``(rows, n_symbols)`` panel across
+        the cases: ``[0, 1, ..., n_symbols - 1]`` once per case."""
+        return np.tile(np.arange(int(n_symbols)), len(self._cases))
+
+    def evaluate(
+        self,
+        fields: Mapping[str, Any],
+        *,
+        index: Any = None,
+        symbols: Sequence[Any] | None = None,
+        instruments: Mapping[str, Mapping[str, Any]] | None = None,
+        pit: Any = None,
+    ) -> dict[str, np.ndarray]:
+        """Every factor over every case, each ``(rows, n_cases * n_symbols)``.
+        The keyword arguments are :meth:`FactorSet.evaluate`'s."""
+        prepared, shape, context = _factor_context(fields, index, symbols, instruments, pit)
+        wide = (shape[0], shape[1] * len(self._cases))
+        return {
+            name: values.reshape(wide, order="F")
+            for name, values in self._inner.evaluate(prepared, shape, **context).items()
+        }
 
 
 class Expression:

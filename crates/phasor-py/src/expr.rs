@@ -2,7 +2,7 @@
 
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use phasor_expr::{
-    Alpha158Config, Alpha158Price, Alpha158Rolling, FactorInputs, FactorSet, PitRecord,
+    Alpha158Config, Alpha158Price, Alpha158Rolling, FactorGrid, FactorInputs, FactorSet, PitRecord,
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyDictMethods};
@@ -194,6 +194,105 @@ impl PyFactorSet {
             return Err(error);
         }
         run.map_err(to_py_err)
+    }
+}
+
+/// Factor expressions with `{name}` placeholders compiled for every case of a
+/// parameter grid.
+#[pyclass(name = "_FactorGrid", module = "phasor._phasor")]
+#[derive(Debug)]
+pub struct PyFactorGrid {
+    inner: FactorGrid,
+}
+
+#[pymethods]
+impl PyFactorGrid {
+    /// Compiles `(name, expression)` pairs for every case, each case a list
+    /// of `(parameter, value text)`.
+    #[staticmethod]
+    fn compile(
+        factors: Vec<(String, String)>,
+        cases: Vec<Vec<(String, String)>>,
+    ) -> PyResult<Self> {
+        let cases = cases
+            .into_iter()
+            .map(|case| case.into_iter().collect())
+            .collect();
+        Ok(Self {
+            inner: FactorGrid::compile(factors, cases).map_err(to_py_err)?,
+        })
+    }
+
+    #[getter]
+    fn names(&self) -> Vec<String> {
+        self.inner.names().map(str::to_owned).collect()
+    }
+
+    #[getter]
+    fn lookbacks(&self) -> Vec<Vec<usize>> {
+        self.inner.lookbacks()
+    }
+
+    #[getter]
+    fn uses_future(&self) -> bool {
+        self.inner.set().uses_future()
+    }
+
+    #[getter]
+    fn needs_timestamps(&self) -> bool {
+        self.inner.set().needs_timestamps()
+    }
+
+    #[getter]
+    fn instrument_names(&self) -> Vec<String> {
+        self.inner.set().instrument_names()
+    }
+
+    #[getter]
+    fn required_fields(&self) -> Vec<String> {
+        self.inner
+            .set()
+            .required_fields()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[getter]
+    fn warmup(&self) -> bool {
+        self.inner.set().warmup()
+    }
+
+    fn with_warmup(&self, on: bool) -> Self {
+        Self {
+            inner: self.inner.clone().with_warmup(on),
+        }
+    }
+
+    /// As [`PyFactorSet::evaluate`]; each factor is `(rows, cases * symbols)`.
+    #[pyo3(signature = (fields, shape, timestamps=None, symbols=None, instruments=Vec::new(), pit=Vec::new()))]
+    fn evaluate<'py>(
+        &self,
+        py: Python<'py>,
+        fields: Fields<'py>,
+        shape: (usize, usize),
+        timestamps: Option<PyReadonlyArray1<'py, i64>>,
+        symbols: Option<Vec<String>>,
+        instruments: Instruments<'py>,
+        pit: Pit<'py>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let context = Context {
+            shape,
+            timestamps,
+            symbols,
+            instruments,
+            pit,
+        };
+        let inputs = inputs_of(&fields, &context)?;
+        let values = py
+            .detach(|| self.inner.evaluate(&inputs))
+            .map_err(to_py_err)?;
+        values_dict(py, values)
     }
 }
 

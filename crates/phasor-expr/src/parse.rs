@@ -20,6 +20,25 @@ impl Expression {
         Self::Number(value.to_bits())
     }
 
+    /// The value of an expression made only of literals and arithmetic, as
+    /// a literal argument (`Mean($close, 2*5)`, `Ref($close, -1)`) is.
+    pub(crate) fn constant(&self) -> Option<f64> {
+        match self {
+            Self::Number(bits) => Some(f64::from_bits(*bits)),
+            Self::Unary('-', child) => child.constant().map(|value| -value),
+            Self::Unary(_, child) => child.constant(),
+            Self::Binary(op, left, right) => {
+                let op = crate::graph::binary_op(op)?;
+                Some(crate::graph::binary(
+                    op,
+                    left.constant()?,
+                    right.constant()?,
+                ))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn fields<'a>(&'a self, out: &mut BTreeSet<&'a str>) {
         match self {
             Self::Field(name) => {
@@ -45,13 +64,8 @@ impl Expression {
     /// from the right (which rows are cut depends on how many come after).
     pub(crate) fn uses_future(&self) -> bool {
         let negative = |arg: Option<&Self>| {
-            arg.is_some_and(|arg| match arg {
-                Self::Number(bits) => f64::from_bits(*bits) < 0.0,
-                Self::Unary('-', inner) => {
-                    matches!(inner.as_ref(), Self::Number(bits) if f64::from_bits(*bits) > 0.0)
-                }
-                _ => false,
-            })
+            arg.and_then(Self::constant)
+                .is_some_and(|value| value < 0.0)
         };
         match self {
             Self::Call(name, args) => {
@@ -97,6 +111,12 @@ pub(crate) fn parse(source: &str) -> std::result::Result<Expression, String> {
     Ok(expr)
 }
 
+/// A character of a `$field` name: Qlib's `\\w` (any letter, digit or `_`,
+/// Unicode included) and the full-width punctuation `、：（）` it also allows.
+fn field_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || matches!(c, '、' | '：' | '（' | '）')
+}
+
 fn lex(source: &str) -> std::result::Result<Vec<Token>, String> {
     let bytes = source.as_bytes();
     let mut out = Vec::new();
@@ -114,6 +134,11 @@ fn lex(source: &str) -> std::result::Result<Vec<Token>, String> {
             }
             b',' => {
                 out.push(Token::Comma);
+                i += 1;
+            }
+            // Mathematics writes a power as `^` (Python as `**`).
+            b'^' => {
+                out.push(Token::Op("**".into()));
                 i += 1;
             }
             b'+' | b'-' | b'*' | b'/' | b'>' | b'<' | b'=' | b'!' | b'&' | b'|' => {
@@ -139,14 +164,16 @@ fn lex(source: &str) -> std::result::Result<Vec<Token>, String> {
                 // `$$name` is a point-in-time field, kept as `$name`.
                 let pit = bytes.get(i + 1) == Some(&b'$');
                 let start = i + 1 + usize::from(pit);
-                i = start;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                    i += 1;
-                }
+                let rest = &source[start..];
+                i = start
+                    + rest
+                        .char_indices()
+                        .find(|&(_, c)| !field_char(c))
+                        .map_or(rest.len(), |(at, _)| at);
                 if i == start {
                     return Err("expected a field name after '$'".into());
                 }
-                let name = source[start..i].to_ascii_lowercase();
+                let name = source[start..i].to_lowercase();
                 out.push(Token::Field(if pit { format!("${name}") } else { name }));
             }
             quote @ (b'\'' | b'"') => {
@@ -220,6 +247,11 @@ impl Parser {
             Token::Name(name) if name == "None" && self.peek() != &Token::LParen => {
                 Expression::None
             }
+            Token::Name(name)
+                if (name == "True" || name == "False") && self.peek() != &Token::LParen =>
+            {
+                Expression::number(f64::from(name == "True"))
+            }
             Token::Op(op) if op == "+" || op == "-" => Expression::Unary(
                 op.as_bytes()[0] as char,
                 Box::new(self.expression(11, depth + 1)?),
@@ -253,6 +285,9 @@ impl Parser {
             token => return Err(format!("expected expression, found {token:?}")),
         };
 
+        // The right operand of the last comparison of an unbroken chain:
+        // `a < b < c` is `(a < b) & (b < c)`, as in mathematics.
+        let mut chain: Option<Expression> = None;
         while let Token::Op(op) = self.peek() {
             let op = op.clone();
             let (left_bp, right_bp) = match op.as_str() {
@@ -269,7 +304,22 @@ impl Parser {
             }
             self.take();
             let right = self.expression(right_bp, depth + 1)?;
-            left = Expression::Binary(op, Box::new(left), Box::new(right));
+            let comparison = left_bp == 5;
+            left = match chain.take() {
+                Some(middle) if comparison => Expression::Binary(
+                    "&".into(),
+                    Box::new(left),
+                    Box::new(Expression::Binary(
+                        op,
+                        Box::new(middle),
+                        Box::new(right.clone()),
+                    )),
+                ),
+                _ => Expression::Binary(op, Box::new(left), Box::new(right.clone())),
+            };
+            if comparison {
+                chain = Some(right);
+            }
         }
         Ok(left)
     }
