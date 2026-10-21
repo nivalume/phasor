@@ -43,7 +43,7 @@ Alpha158 里几十个因子都用到 `Ref($close, 1)`，`Mean($close>Ref($close,
 
 | 第一性原理的问题 | phasor-expr 的回答 | 小节 |
 |----|----|----|
-| 因子是数据 | Qlib 语法：`$field`、中缀运算、44 个函数；Pratt 解析器，源码 ≤ 16 KiB，嵌套 ≤ 128 | [语言](#lang) |
+| 因子是数据 | Qlib 语法：`$field`、`$$field`（PIT）、中缀运算、字符串与 `None` 参数、71 个函数；Pratt 解析器，源码 ≤ 16 KiB，嵌套 ≤ 128 | [语言](#lang) |
 | 共享子表达式 | `Graph`：按 `(Op, inputs)` 哈希合并；逐元素字面量常量折叠 | [编译器](#compiler) |
 | 内存由活跃集决定 | `Graph::schedule`：依赖顺序 + 最后读者之后释放槽位；没人读的节点直接写输出 | [编译器](#compiler) |
 | 平移不复制 | `k ≥ 0` 的 `Ref` 是视图（链式视图合并偏移）；`k < 0` 计算并使 `uses_future()` 为真 | [编译器](#compiler) |
@@ -57,7 +57,7 @@ Alpha158 里几十个因子都用到 `Ref($close, 1)`，`Mean($close>Ref($close,
 
 ## 依赖图
 
-左边是上游：phasor-core 的 `Matrix` / `Error`，phasor-generic 的 `rolling_mean / max / min_1d`，phasor-model 的 `OhlcvPanel`，外部的 rayon 和可选的 polars。 中间是十一个私有模块（lib.rs 定义 `FactorSet` 并再导出公开项；`stage`、`cross` 负责截面算子，`wq101` 是 WorldQuant 101 的表），右边是使用者。点任一节点，只保留相关的线。
+左边是上游：phasor-core 的 `Matrix` / `Error`，phasor-generic 的 `rolling_mean / max / min_1d`，phasor-model 的 `OhlcvPanel`，外部的 rayon 和可选的 polars。 中间是十三个私有模块（lib.rs 定义 `FactorSet` 并再导出公开项；`stage`、`cross` 负责截面算子，`lift`、`pit` 负责跨标的与 PIT，`wq101` 是 WorldQuant 101 的表），右边是使用者。点任一节点，只保留相关的线。
 
 #### 示意 / 说明：线的颜色 = 被用到的模块。研究层不直接依赖这个 crate，而是经 Python 包调用（虚线）
 
@@ -130,6 +130,9 @@ flowchart TD
 | 成对 `(x, y, N)` | `Corr Cov` | 只用两边都不是 NaN 的行；`Corr` 在任一边的标准差 ≤ 2e-5 时为 NaN（qlib 的规则）。 |
 | 滚动（扩展）`(x, N)` | `DecayLinear Prod` | `DecayLinear` 是 WorldQuant 的 decay_linear：权重 1..=N，最新的最重，只在有值的位置上归一化。`Prod` 是窗口里有值的数之积，全 NaN 为 NaN。两者都和其它滚动算子一样 minp = 1。 |
 | 截面 | `CSRank CSZScore CSDemean`（x）；`Scale(x[, a])`；`IndNeutralize(x, g)`；`CSResi(y, x)` | 一行进、一行出，NaN 不参与统计、输出 NaN。`CSRank` 是百分位排名，并列取平均（pandas `rank(pct=True)`）；`CSZScore` 用样本标准差；`Scale` 让一行的绝对值之和等于 a（默认 1）；`IndNeutralize` 减去同组均值，组是 g 在这一行的精确值；`CSResi` 是 y 对 x 的截面最小二乘残差。 |
+| 高频（qlib.contrib） | `DayCumsum(x[, start, end, g])`、`DayLast(x)`、`Date(x)`；`FFillNan BFillNan IsNull IsInf`（x）；`Select(c, x)`；`Cut(x[, l, r])` | 按天分组读 `@day` / `@minute` 两个隐藏字段，来自 `FactorInputs::with_timestamps`（市场本地的挂钟时间）。`DayCumsum`：从包含 start 的那根 K 线到最后一根开始时间 ≤ end 的 K 线累加，窗口外为 0，缺失行输出 NaN、和继续；g 是 K 线分钟数。`DayLast`：当天最后一个非 NaN 值。`Date`：距 1970-01-01 的天数。`Select` 在 qlib 里删行，这里留着、置 NaN（编译成 `Mask(x, c)`）；`Cut` 同理把头 l 行、尾 \|r\| 行置 NaN。`IsNull` 就是 `IsNan`。 |
+| 跨标的 | `ChangeInstrument("X", e)`；qlib 的 `Mask(e, "X")` | 在标的 X 上算 e，每个标的拿到同一条序列。第二个参数是字符串时 `Mask` 是 qlib 的语义，否则是条件掩码。X 在 `with_symbols` 给的列名里找，找不到再找 `with_instrument` 给的面板外标的（例如指数）。 |
+| PIT | `P(e)`、`PRef(e, period)`，e 里读 `$$field` | 每行按当天已公布的记录算 e、取最新一期，见下面 [Qlib 扩展](#qlib-ext)。`$$field` 只能出现在 `P` / `PRef` 里。 |
 
 截面算子以外的算子都只读本标的，所以没有截面算子的图仍按标的并行；有截面算子的图怎么执行见[截面与分阶段](#cross)。新算子的元数在 `parse.rs` 的 `validate`（[:244](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-expr/src/parse.rs#L244)）登记，名字到节点的映射在 `graph.rs` 的 `Builder::call`（[:376](https://github.com/nivalume/phasor/blob/1d573df0430fa5cd3a2416300603c7147f3c6a13/crates/phasor-expr/src/graph.rs#L376)）。
 
@@ -334,6 +337,41 @@ Polars 慢在：每个算子都要重新按标的分组、qlib 算子是 O(windo
 
 Alpha360 是 6 个字段 × 60 个滞后：`Ref($close, k)/$close`、开高低 vwap 同理，成交量除以 `$volume + 1e-12`。其中 354 个 `Ref` 都是视图，所以整个 Alpha360 编译后只需要 1 个槽位。 两个集合都需要显式的 `vwap` 字段（`required_fields()` 会列出它），都不读未来（`uses_future() = false`）。
 
+<a id="qlib-ext"></a>
+
+## Qlib 扩展：可配置 Alpha158、标签、高频、跨标的、PIT
+
+### 可配置的 Alpha158 与标签
+
+`alpha158_features(&Alpha158Config)` 按 qlib 的 `Alpha158DL.get_feature_config(config)` 生成 `(名字, 表达式)`，表达式文本和 qlib 逐字相同；`alpha158_with` 编译它，`alpha158()` 是默认配置。`Alpha158Config` 的四个字段对应 qlib config 的四段：`kbar`、`price`（windows、features）、`volume`（windows）、`rolling`（windows、include、exclude），段存在即启用，`Alpha158Price::default()` / `Alpha158Rolling::default()` 是 qlib 对缺省键的默认值。滚动族按 qlib 的键名选（`MIN` 族的键是 `LOW`），拼错的键名会报错，qlib 会静默忽略。`qlib_label("close" | "vwap")` 是 qlib 的 `LABEL0 = Ref($p, -2)/Ref($p, -1) - 1`，`uses_future()` 为真，只能当训练目标。
+
+### 提升：不读本标的的子表达式
+
+`lift.rs` 在建图之前把两类子表达式提出来，换成隐藏字段，图、分阶段和调度都不用改：
+
+- `ChangeInstrument("X", e)` / `Mask(e, "X")` → `@iK`：同一标的的所有 e 编成一个子 `FactorSet`，在 X 的单列输入上求值，结果是每行一个值、所有标的共用的字段（`column()` 遇到长度为行数的字段就广播）。
+- `P(e)` / `PRef(e, p)` → `@pK`：见下。
+
+`@` 不能出现在 `$` 字段名里，隐藏字段不会和输入撞名。`evaluate_batches` 给每批带上时间戳、PIT 记录（列号重映射），以及这批要读的面板内标的，所以分批和整块逐位相同。
+
+### PIT（`pit.rs`）
+
+`FactorInputs::with_pit(field, Vec<PitRecord>)`：每条记录是 (标的列, 公布日, 期, 值)，字段名以 `_q`（季度，期 = 年 × 100 + 季）或 `_a`（年）结尾，和 qlib 一样。某行的 `P(e)`：
+
+1. 已知记录 = 公布日 ≤ 这一行日期的记录；
+2. 期轴 = 已知最早一期到最晚一期之间的每个季度（年），缺的期是 NaN；
+3. 只留最近 `left + 1` 期，`left` 是 qlib `get_extended_window_size` 算出的回看长度（`lift::extent`）——qlib 就只加载这么多，所以这是结果的一部分；
+4. 每期取已知记录里最后一次修订；
+5. 在这个期序列上算 e，取最后一期。
+
+已知记录只在公布日变化，所以每个标的只按"状态"（第几个公布日）算一次 e；各标的期数相同的状态并成一张面板一起算。`PRef(e, p)` 的期轴只有 p 一期。
+
+和 qlib 一致的怪癖：qlib 的滚动算子都按 `N − 1` 扩展窗口，`Delta(x, N)` 需要 N 期却只拿到 N − 1 期，所以 `P(Delta($$x, N))` 恒为 NaN；`P(Mean($$x, 0))` 只看到最新一期，等于 `P($$x)`。已知差异：同一个 P 里的多个字段共用一条期轴；qlib 每个字段各有期轴、每个算子之后按期对齐，只有字段的最早或最晚已知期不同时两者才不同。
+
+### 不读未来的检查
+
+`uses_future()` 对 `BFillNan`、`DayLast`（读当天后面的行；只有输入滞后至少一天时才因果，而一天有几根 K 线编译期不知道）和从右边切的 `Cut` 为真。qlib 高频 handler 的 `DayLast(Ref(x, 243))` 因此会被标成读未来。
+
 <a id="wq101"></a>
 
 ## WorldQuant 101
@@ -389,6 +427,10 @@ lib.rs：字面量广播与共享节点、缺字段在任何计算前报错、�
 ### tests/cross_section.rs
 
 `cs_rank_matches_a_row_by_row_rank` 对照逐行朴素排名；`stages_compose_and_match_the_factors_computed_one_at_a_time` 把十一个因子（截面套截面、截面后接 Ref、Corr 读两个截面、中性化、残差、Scale、裸字段、字面量、普通滚动）放在一起算和各自单独算逐位相同，并手算抽查；线程数不变性；新逐元素算子的值。
+
+### tests/parity_qlib_ext.rs
+
+四份 fixture 来自 `tests/generators/generate_qlib_extensions.py`，用的是 qlib 自己的算子；PIT 还经过 qlib 真正的 `LocalPITProvider`，读的是写到临时目录里的 PIT 二进制文件。`qlib_alpha158_configs.tsv`：六个配置的名字和表达式文本逐字相等。`qlib_highfreq.tsv`：24 个表达式（高频算子、`ChangeInstrument`、`Mask(e, "X")`），列头就是 qlib 源码、原样编译，容差 1e-9，`Corr` 1e-6。`qlib_pit.tsv`：17 个 `P` / `PRef` 表达式，容差 1e-6（qlib 的 P 是 float32）。每个都在 1 和 4 个线程、整块和每批一个标的下逐位相同。
 
 ### tests/batches.rs · tests/wq101.rs
 

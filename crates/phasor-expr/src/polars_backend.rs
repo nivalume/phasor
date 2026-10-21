@@ -89,6 +89,11 @@ fn compile(expression: &Expression, n_rows: usize) -> Result<PolarsExpr> {
             binary(operator, compile(left, n_rows)?, compile(right, n_rows)?)?
         }
         Expression::Call(name, arguments) => call(name, arguments, n_rows)?,
+        Expression::Str(_) | Expression::None => {
+            return Err(Error::Invariant(
+                "unsupported operator: string and None arguments".into(),
+            ));
+        }
     })
 }
 

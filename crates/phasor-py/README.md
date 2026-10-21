@@ -305,6 +305,29 @@ values = factors.evaluate({"close": close, "volume": volume})
 
 `phasor.alpha158()` and `phasor.alpha360()` return the built-in Qlib factor sets and
 require explicit `open`, `high`, `low`, `close`, `volume`, and `vwap` fields.
+`phasor.alpha158(config)` takes Qlib's `Alpha158DL.get_feature_config` dict
+(`kbar`, `price`, `volume`, `rolling` with `windows` / `include` / `exclude`),
+and `phasor.alpha158_features(config)` lists the `(name, expression)` pairs it
+compiles. `phasor.qlib_label("close")` is Qlib's label
+`Ref($close, -2)/Ref($close, -1) - 1`, a training target (`uses_future`).
+
+Qlib's high-frequency operators (`DayCumsum`, `DayLast`, `Date`, `FFillNan`,
+`BFillNan`, `IsNull`, `IsInf`, `Select`, `Cut`), `ChangeInstrument` and
+point-in-time `P($$field)` / `PRef` read more than the panel's fields; pass it
+to `evaluate` (and `evaluate_batches`, `to_parquet`) as keywords:
+
+```python
+values = factors.evaluate(
+    {"close": close, "volume": volume},
+    index=bar_times,                       # datetime64 or a pandas DatetimeIndex
+    symbols=["600000.SH", "600036.SH"],    # ChangeInstrument looks names up here
+    instruments={"SH000300": {"close": index_close}},   # outside the panel
+    pit=records,                           # columns symbol, field, date, period, value
+)
+```
+
+`factors.needs_timestamps` and `factors.instrument_names` say which of these a
+set reads.
 Alpha360 returns the raw 60-row normalized history without Qlib's later data
 handler processing. Custom field names such as `$funding_rate` work the same
 way. The DSL supports arithmetic, comparisons, `If`, `Ref`, fixed and

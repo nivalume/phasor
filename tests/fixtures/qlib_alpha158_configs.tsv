@@ -1,0 +1,532 @@
+# qlib=0.9.8.dev26
+# numpy=2.2.6 pandas=2.3.3
+# config default = qlib default
+# config full = {"kbar": {}, "price": {"feature": ["OPEN", "HIGH", "LOW", "CLOSE", "VWAP"], "windows": [0, 1, 2, 3, 4]}, "rolling": {}, "volume": {"windows": [0, 1, 2, 3, 4]}}
+# config implicit = {"price": {}, "volume": {}}
+# config subset = {"rolling": {"exclude": ["MA"], "include": ["ROC", "MA", "LOW", "CORD", "VSUMD"], "windows": [3, 7]}}
+# config exclude = {"kbar": {}, "rolling": {"exclude": ["RANK", "CORR", "CORD"]}}
+# config price_only = {"price": {"feature": ["close", "Vwap"], "windows": [2, 0]}}
+config	position	name	expression
+default	0	KMID	($close-$open)/$open
+default	1	KLEN	($high-$low)/$open
+default	2	KMID2	($close-$open)/($high-$low+1e-12)
+default	3	KUP	($high-Greater($open, $close))/$open
+default	4	KUP2	($high-Greater($open, $close))/($high-$low+1e-12)
+default	5	KLOW	(Less($open, $close)-$low)/$open
+default	6	KLOW2	(Less($open, $close)-$low)/($high-$low+1e-12)
+default	7	KSFT	(2*$close-$high-$low)/$open
+default	8	KSFT2	(2*$close-$high-$low)/($high-$low+1e-12)
+default	9	OPEN0	$open/$close
+default	10	HIGH0	$high/$close
+default	11	LOW0	$low/$close
+default	12	VWAP0	$vwap/$close
+default	13	ROC5	Ref($close, 5)/$close
+default	14	ROC10	Ref($close, 10)/$close
+default	15	ROC20	Ref($close, 20)/$close
+default	16	ROC30	Ref($close, 30)/$close
+default	17	ROC60	Ref($close, 60)/$close
+default	18	MA5	Mean($close, 5)/$close
+default	19	MA10	Mean($close, 10)/$close
+default	20	MA20	Mean($close, 20)/$close
+default	21	MA30	Mean($close, 30)/$close
+default	22	MA60	Mean($close, 60)/$close
+default	23	STD5	Std($close, 5)/$close
+default	24	STD10	Std($close, 10)/$close
+default	25	STD20	Std($close, 20)/$close
+default	26	STD30	Std($close, 30)/$close
+default	27	STD60	Std($close, 60)/$close
+default	28	BETA5	Slope($close, 5)/$close
+default	29	BETA10	Slope($close, 10)/$close
+default	30	BETA20	Slope($close, 20)/$close
+default	31	BETA30	Slope($close, 30)/$close
+default	32	BETA60	Slope($close, 60)/$close
+default	33	RSQR5	Rsquare($close, 5)
+default	34	RSQR10	Rsquare($close, 10)
+default	35	RSQR20	Rsquare($close, 20)
+default	36	RSQR30	Rsquare($close, 30)
+default	37	RSQR60	Rsquare($close, 60)
+default	38	RESI5	Resi($close, 5)/$close
+default	39	RESI10	Resi($close, 10)/$close
+default	40	RESI20	Resi($close, 20)/$close
+default	41	RESI30	Resi($close, 30)/$close
+default	42	RESI60	Resi($close, 60)/$close
+default	43	MAX5	Max($high, 5)/$close
+default	44	MAX10	Max($high, 10)/$close
+default	45	MAX20	Max($high, 20)/$close
+default	46	MAX30	Max($high, 30)/$close
+default	47	MAX60	Max($high, 60)/$close
+default	48	MIN5	Min($low, 5)/$close
+default	49	MIN10	Min($low, 10)/$close
+default	50	MIN20	Min($low, 20)/$close
+default	51	MIN30	Min($low, 30)/$close
+default	52	MIN60	Min($low, 60)/$close
+default	53	QTLU5	Quantile($close, 5, 0.8)/$close
+default	54	QTLU10	Quantile($close, 10, 0.8)/$close
+default	55	QTLU20	Quantile($close, 20, 0.8)/$close
+default	56	QTLU30	Quantile($close, 30, 0.8)/$close
+default	57	QTLU60	Quantile($close, 60, 0.8)/$close
+default	58	QTLD5	Quantile($close, 5, 0.2)/$close
+default	59	QTLD10	Quantile($close, 10, 0.2)/$close
+default	60	QTLD20	Quantile($close, 20, 0.2)/$close
+default	61	QTLD30	Quantile($close, 30, 0.2)/$close
+default	62	QTLD60	Quantile($close, 60, 0.2)/$close
+default	63	RANK5	Rank($close, 5)
+default	64	RANK10	Rank($close, 10)
+default	65	RANK20	Rank($close, 20)
+default	66	RANK30	Rank($close, 30)
+default	67	RANK60	Rank($close, 60)
+default	68	RSV5	($close-Min($low, 5))/(Max($high, 5)-Min($low, 5)+1e-12)
+default	69	RSV10	($close-Min($low, 10))/(Max($high, 10)-Min($low, 10)+1e-12)
+default	70	RSV20	($close-Min($low, 20))/(Max($high, 20)-Min($low, 20)+1e-12)
+default	71	RSV30	($close-Min($low, 30))/(Max($high, 30)-Min($low, 30)+1e-12)
+default	72	RSV60	($close-Min($low, 60))/(Max($high, 60)-Min($low, 60)+1e-12)
+default	73	IMAX5	IdxMax($high, 5)/5
+default	74	IMAX10	IdxMax($high, 10)/10
+default	75	IMAX20	IdxMax($high, 20)/20
+default	76	IMAX30	IdxMax($high, 30)/30
+default	77	IMAX60	IdxMax($high, 60)/60
+default	78	IMIN5	IdxMin($low, 5)/5
+default	79	IMIN10	IdxMin($low, 10)/10
+default	80	IMIN20	IdxMin($low, 20)/20
+default	81	IMIN30	IdxMin($low, 30)/30
+default	82	IMIN60	IdxMin($low, 60)/60
+default	83	IMXD5	(IdxMax($high, 5)-IdxMin($low, 5))/5
+default	84	IMXD10	(IdxMax($high, 10)-IdxMin($low, 10))/10
+default	85	IMXD20	(IdxMax($high, 20)-IdxMin($low, 20))/20
+default	86	IMXD30	(IdxMax($high, 30)-IdxMin($low, 30))/30
+default	87	IMXD60	(IdxMax($high, 60)-IdxMin($low, 60))/60
+default	88	CORR5	Corr($close, Log($volume+1), 5)
+default	89	CORR10	Corr($close, Log($volume+1), 10)
+default	90	CORR20	Corr($close, Log($volume+1), 20)
+default	91	CORR30	Corr($close, Log($volume+1), 30)
+default	92	CORR60	Corr($close, Log($volume+1), 60)
+default	93	CORD5	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 5)
+default	94	CORD10	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 10)
+default	95	CORD20	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 20)
+default	96	CORD30	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 30)
+default	97	CORD60	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 60)
+default	98	CNTP5	Mean($close>Ref($close, 1), 5)
+default	99	CNTP10	Mean($close>Ref($close, 1), 10)
+default	100	CNTP20	Mean($close>Ref($close, 1), 20)
+default	101	CNTP30	Mean($close>Ref($close, 1), 30)
+default	102	CNTP60	Mean($close>Ref($close, 1), 60)
+default	103	CNTN5	Mean($close<Ref($close, 1), 5)
+default	104	CNTN10	Mean($close<Ref($close, 1), 10)
+default	105	CNTN20	Mean($close<Ref($close, 1), 20)
+default	106	CNTN30	Mean($close<Ref($close, 1), 30)
+default	107	CNTN60	Mean($close<Ref($close, 1), 60)
+default	108	CNTD5	Mean($close>Ref($close, 1), 5)-Mean($close<Ref($close, 1), 5)
+default	109	CNTD10	Mean($close>Ref($close, 1), 10)-Mean($close<Ref($close, 1), 10)
+default	110	CNTD20	Mean($close>Ref($close, 1), 20)-Mean($close<Ref($close, 1), 20)
+default	111	CNTD30	Mean($close>Ref($close, 1), 30)-Mean($close<Ref($close, 1), 30)
+default	112	CNTD60	Mean($close>Ref($close, 1), 60)-Mean($close<Ref($close, 1), 60)
+default	113	SUMP5	Sum(Greater($close-Ref($close, 1), 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+default	114	SUMP10	Sum(Greater($close-Ref($close, 1), 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+default	115	SUMP20	Sum(Greater($close-Ref($close, 1), 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+default	116	SUMP30	Sum(Greater($close-Ref($close, 1), 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+default	117	SUMP60	Sum(Greater($close-Ref($close, 1), 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+default	118	SUMN5	Sum(Greater(Ref($close, 1)-$close, 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+default	119	SUMN10	Sum(Greater(Ref($close, 1)-$close, 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+default	120	SUMN20	Sum(Greater(Ref($close, 1)-$close, 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+default	121	SUMN30	Sum(Greater(Ref($close, 1)-$close, 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+default	122	SUMN60	Sum(Greater(Ref($close, 1)-$close, 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+default	123	SUMD5	(Sum(Greater($close-Ref($close, 1), 0), 5)-Sum(Greater(Ref($close, 1)-$close, 0), 5))/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+default	124	SUMD10	(Sum(Greater($close-Ref($close, 1), 0), 10)-Sum(Greater(Ref($close, 1)-$close, 0), 10))/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+default	125	SUMD20	(Sum(Greater($close-Ref($close, 1), 0), 20)-Sum(Greater(Ref($close, 1)-$close, 0), 20))/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+default	126	SUMD30	(Sum(Greater($close-Ref($close, 1), 0), 30)-Sum(Greater(Ref($close, 1)-$close, 0), 30))/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+default	127	SUMD60	(Sum(Greater($close-Ref($close, 1), 0), 60)-Sum(Greater(Ref($close, 1)-$close, 0), 60))/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+default	128	VMA5	Mean($volume, 5)/($volume+1e-12)
+default	129	VMA10	Mean($volume, 10)/($volume+1e-12)
+default	130	VMA20	Mean($volume, 20)/($volume+1e-12)
+default	131	VMA30	Mean($volume, 30)/($volume+1e-12)
+default	132	VMA60	Mean($volume, 60)/($volume+1e-12)
+default	133	VSTD5	Std($volume, 5)/($volume+1e-12)
+default	134	VSTD10	Std($volume, 10)/($volume+1e-12)
+default	135	VSTD20	Std($volume, 20)/($volume+1e-12)
+default	136	VSTD30	Std($volume, 30)/($volume+1e-12)
+default	137	VSTD60	Std($volume, 60)/($volume+1e-12)
+default	138	WVMA5	Std(Abs($close/Ref($close, 1)-1)*$volume, 5)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 5)+1e-12)
+default	139	WVMA10	Std(Abs($close/Ref($close, 1)-1)*$volume, 10)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 10)+1e-12)
+default	140	WVMA20	Std(Abs($close/Ref($close, 1)-1)*$volume, 20)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 20)+1e-12)
+default	141	WVMA30	Std(Abs($close/Ref($close, 1)-1)*$volume, 30)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 30)+1e-12)
+default	142	WVMA60	Std(Abs($close/Ref($close, 1)-1)*$volume, 60)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 60)+1e-12)
+default	143	VSUMP5	Sum(Greater($volume-Ref($volume, 1), 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+default	144	VSUMP10	Sum(Greater($volume-Ref($volume, 1), 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+default	145	VSUMP20	Sum(Greater($volume-Ref($volume, 1), 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+default	146	VSUMP30	Sum(Greater($volume-Ref($volume, 1), 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+default	147	VSUMP60	Sum(Greater($volume-Ref($volume, 1), 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+default	148	VSUMN5	Sum(Greater(Ref($volume, 1)-$volume, 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+default	149	VSUMN10	Sum(Greater(Ref($volume, 1)-$volume, 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+default	150	VSUMN20	Sum(Greater(Ref($volume, 1)-$volume, 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+default	151	VSUMN30	Sum(Greater(Ref($volume, 1)-$volume, 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+default	152	VSUMN60	Sum(Greater(Ref($volume, 1)-$volume, 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+default	153	VSUMD5	(Sum(Greater($volume-Ref($volume, 1), 0), 5)-Sum(Greater(Ref($volume, 1)-$volume, 0), 5))/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+default	154	VSUMD10	(Sum(Greater($volume-Ref($volume, 1), 0), 10)-Sum(Greater(Ref($volume, 1)-$volume, 0), 10))/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+default	155	VSUMD20	(Sum(Greater($volume-Ref($volume, 1), 0), 20)-Sum(Greater(Ref($volume, 1)-$volume, 0), 20))/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+default	156	VSUMD30	(Sum(Greater($volume-Ref($volume, 1), 0), 30)-Sum(Greater(Ref($volume, 1)-$volume, 0), 30))/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+default	157	VSUMD60	(Sum(Greater($volume-Ref($volume, 1), 0), 60)-Sum(Greater(Ref($volume, 1)-$volume, 0), 60))/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+full	0	KMID	($close-$open)/$open
+full	1	KLEN	($high-$low)/$open
+full	2	KMID2	($close-$open)/($high-$low+1e-12)
+full	3	KUP	($high-Greater($open, $close))/$open
+full	4	KUP2	($high-Greater($open, $close))/($high-$low+1e-12)
+full	5	KLOW	(Less($open, $close)-$low)/$open
+full	6	KLOW2	(Less($open, $close)-$low)/($high-$low+1e-12)
+full	7	KSFT	(2*$close-$high-$low)/$open
+full	8	KSFT2	(2*$close-$high-$low)/($high-$low+1e-12)
+full	9	OPEN0	$open/$close
+full	10	OPEN1	Ref($open, 1)/$close
+full	11	OPEN2	Ref($open, 2)/$close
+full	12	OPEN3	Ref($open, 3)/$close
+full	13	OPEN4	Ref($open, 4)/$close
+full	14	HIGH0	$high/$close
+full	15	HIGH1	Ref($high, 1)/$close
+full	16	HIGH2	Ref($high, 2)/$close
+full	17	HIGH3	Ref($high, 3)/$close
+full	18	HIGH4	Ref($high, 4)/$close
+full	19	LOW0	$low/$close
+full	20	LOW1	Ref($low, 1)/$close
+full	21	LOW2	Ref($low, 2)/$close
+full	22	LOW3	Ref($low, 3)/$close
+full	23	LOW4	Ref($low, 4)/$close
+full	24	CLOSE0	$close/$close
+full	25	CLOSE1	Ref($close, 1)/$close
+full	26	CLOSE2	Ref($close, 2)/$close
+full	27	CLOSE3	Ref($close, 3)/$close
+full	28	CLOSE4	Ref($close, 4)/$close
+full	29	VWAP0	$vwap/$close
+full	30	VWAP1	Ref($vwap, 1)/$close
+full	31	VWAP2	Ref($vwap, 2)/$close
+full	32	VWAP3	Ref($vwap, 3)/$close
+full	33	VWAP4	Ref($vwap, 4)/$close
+full	34	VOLUME0	$volume/($volume+1e-12)
+full	35	VOLUME1	Ref($volume, 1)/($volume+1e-12)
+full	36	VOLUME2	Ref($volume, 2)/($volume+1e-12)
+full	37	VOLUME3	Ref($volume, 3)/($volume+1e-12)
+full	38	VOLUME4	Ref($volume, 4)/($volume+1e-12)
+full	39	ROC5	Ref($close, 5)/$close
+full	40	ROC10	Ref($close, 10)/$close
+full	41	ROC20	Ref($close, 20)/$close
+full	42	ROC30	Ref($close, 30)/$close
+full	43	ROC60	Ref($close, 60)/$close
+full	44	MA5	Mean($close, 5)/$close
+full	45	MA10	Mean($close, 10)/$close
+full	46	MA20	Mean($close, 20)/$close
+full	47	MA30	Mean($close, 30)/$close
+full	48	MA60	Mean($close, 60)/$close
+full	49	STD5	Std($close, 5)/$close
+full	50	STD10	Std($close, 10)/$close
+full	51	STD20	Std($close, 20)/$close
+full	52	STD30	Std($close, 30)/$close
+full	53	STD60	Std($close, 60)/$close
+full	54	BETA5	Slope($close, 5)/$close
+full	55	BETA10	Slope($close, 10)/$close
+full	56	BETA20	Slope($close, 20)/$close
+full	57	BETA30	Slope($close, 30)/$close
+full	58	BETA60	Slope($close, 60)/$close
+full	59	RSQR5	Rsquare($close, 5)
+full	60	RSQR10	Rsquare($close, 10)
+full	61	RSQR20	Rsquare($close, 20)
+full	62	RSQR30	Rsquare($close, 30)
+full	63	RSQR60	Rsquare($close, 60)
+full	64	RESI5	Resi($close, 5)/$close
+full	65	RESI10	Resi($close, 10)/$close
+full	66	RESI20	Resi($close, 20)/$close
+full	67	RESI30	Resi($close, 30)/$close
+full	68	RESI60	Resi($close, 60)/$close
+full	69	MAX5	Max($high, 5)/$close
+full	70	MAX10	Max($high, 10)/$close
+full	71	MAX20	Max($high, 20)/$close
+full	72	MAX30	Max($high, 30)/$close
+full	73	MAX60	Max($high, 60)/$close
+full	74	MIN5	Min($low, 5)/$close
+full	75	MIN10	Min($low, 10)/$close
+full	76	MIN20	Min($low, 20)/$close
+full	77	MIN30	Min($low, 30)/$close
+full	78	MIN60	Min($low, 60)/$close
+full	79	QTLU5	Quantile($close, 5, 0.8)/$close
+full	80	QTLU10	Quantile($close, 10, 0.8)/$close
+full	81	QTLU20	Quantile($close, 20, 0.8)/$close
+full	82	QTLU30	Quantile($close, 30, 0.8)/$close
+full	83	QTLU60	Quantile($close, 60, 0.8)/$close
+full	84	QTLD5	Quantile($close, 5, 0.2)/$close
+full	85	QTLD10	Quantile($close, 10, 0.2)/$close
+full	86	QTLD20	Quantile($close, 20, 0.2)/$close
+full	87	QTLD30	Quantile($close, 30, 0.2)/$close
+full	88	QTLD60	Quantile($close, 60, 0.2)/$close
+full	89	RANK5	Rank($close, 5)
+full	90	RANK10	Rank($close, 10)
+full	91	RANK20	Rank($close, 20)
+full	92	RANK30	Rank($close, 30)
+full	93	RANK60	Rank($close, 60)
+full	94	RSV5	($close-Min($low, 5))/(Max($high, 5)-Min($low, 5)+1e-12)
+full	95	RSV10	($close-Min($low, 10))/(Max($high, 10)-Min($low, 10)+1e-12)
+full	96	RSV20	($close-Min($low, 20))/(Max($high, 20)-Min($low, 20)+1e-12)
+full	97	RSV30	($close-Min($low, 30))/(Max($high, 30)-Min($low, 30)+1e-12)
+full	98	RSV60	($close-Min($low, 60))/(Max($high, 60)-Min($low, 60)+1e-12)
+full	99	IMAX5	IdxMax($high, 5)/5
+full	100	IMAX10	IdxMax($high, 10)/10
+full	101	IMAX20	IdxMax($high, 20)/20
+full	102	IMAX30	IdxMax($high, 30)/30
+full	103	IMAX60	IdxMax($high, 60)/60
+full	104	IMIN5	IdxMin($low, 5)/5
+full	105	IMIN10	IdxMin($low, 10)/10
+full	106	IMIN20	IdxMin($low, 20)/20
+full	107	IMIN30	IdxMin($low, 30)/30
+full	108	IMIN60	IdxMin($low, 60)/60
+full	109	IMXD5	(IdxMax($high, 5)-IdxMin($low, 5))/5
+full	110	IMXD10	(IdxMax($high, 10)-IdxMin($low, 10))/10
+full	111	IMXD20	(IdxMax($high, 20)-IdxMin($low, 20))/20
+full	112	IMXD30	(IdxMax($high, 30)-IdxMin($low, 30))/30
+full	113	IMXD60	(IdxMax($high, 60)-IdxMin($low, 60))/60
+full	114	CORR5	Corr($close, Log($volume+1), 5)
+full	115	CORR10	Corr($close, Log($volume+1), 10)
+full	116	CORR20	Corr($close, Log($volume+1), 20)
+full	117	CORR30	Corr($close, Log($volume+1), 30)
+full	118	CORR60	Corr($close, Log($volume+1), 60)
+full	119	CORD5	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 5)
+full	120	CORD10	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 10)
+full	121	CORD20	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 20)
+full	122	CORD30	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 30)
+full	123	CORD60	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 60)
+full	124	CNTP5	Mean($close>Ref($close, 1), 5)
+full	125	CNTP10	Mean($close>Ref($close, 1), 10)
+full	126	CNTP20	Mean($close>Ref($close, 1), 20)
+full	127	CNTP30	Mean($close>Ref($close, 1), 30)
+full	128	CNTP60	Mean($close>Ref($close, 1), 60)
+full	129	CNTN5	Mean($close<Ref($close, 1), 5)
+full	130	CNTN10	Mean($close<Ref($close, 1), 10)
+full	131	CNTN20	Mean($close<Ref($close, 1), 20)
+full	132	CNTN30	Mean($close<Ref($close, 1), 30)
+full	133	CNTN60	Mean($close<Ref($close, 1), 60)
+full	134	CNTD5	Mean($close>Ref($close, 1), 5)-Mean($close<Ref($close, 1), 5)
+full	135	CNTD10	Mean($close>Ref($close, 1), 10)-Mean($close<Ref($close, 1), 10)
+full	136	CNTD20	Mean($close>Ref($close, 1), 20)-Mean($close<Ref($close, 1), 20)
+full	137	CNTD30	Mean($close>Ref($close, 1), 30)-Mean($close<Ref($close, 1), 30)
+full	138	CNTD60	Mean($close>Ref($close, 1), 60)-Mean($close<Ref($close, 1), 60)
+full	139	SUMP5	Sum(Greater($close-Ref($close, 1), 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+full	140	SUMP10	Sum(Greater($close-Ref($close, 1), 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+full	141	SUMP20	Sum(Greater($close-Ref($close, 1), 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+full	142	SUMP30	Sum(Greater($close-Ref($close, 1), 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+full	143	SUMP60	Sum(Greater($close-Ref($close, 1), 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+full	144	SUMN5	Sum(Greater(Ref($close, 1)-$close, 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+full	145	SUMN10	Sum(Greater(Ref($close, 1)-$close, 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+full	146	SUMN20	Sum(Greater(Ref($close, 1)-$close, 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+full	147	SUMN30	Sum(Greater(Ref($close, 1)-$close, 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+full	148	SUMN60	Sum(Greater(Ref($close, 1)-$close, 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+full	149	SUMD5	(Sum(Greater($close-Ref($close, 1), 0), 5)-Sum(Greater(Ref($close, 1)-$close, 0), 5))/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+full	150	SUMD10	(Sum(Greater($close-Ref($close, 1), 0), 10)-Sum(Greater(Ref($close, 1)-$close, 0), 10))/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+full	151	SUMD20	(Sum(Greater($close-Ref($close, 1), 0), 20)-Sum(Greater(Ref($close, 1)-$close, 0), 20))/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+full	152	SUMD30	(Sum(Greater($close-Ref($close, 1), 0), 30)-Sum(Greater(Ref($close, 1)-$close, 0), 30))/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+full	153	SUMD60	(Sum(Greater($close-Ref($close, 1), 0), 60)-Sum(Greater(Ref($close, 1)-$close, 0), 60))/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+full	154	VMA5	Mean($volume, 5)/($volume+1e-12)
+full	155	VMA10	Mean($volume, 10)/($volume+1e-12)
+full	156	VMA20	Mean($volume, 20)/($volume+1e-12)
+full	157	VMA30	Mean($volume, 30)/($volume+1e-12)
+full	158	VMA60	Mean($volume, 60)/($volume+1e-12)
+full	159	VSTD5	Std($volume, 5)/($volume+1e-12)
+full	160	VSTD10	Std($volume, 10)/($volume+1e-12)
+full	161	VSTD20	Std($volume, 20)/($volume+1e-12)
+full	162	VSTD30	Std($volume, 30)/($volume+1e-12)
+full	163	VSTD60	Std($volume, 60)/($volume+1e-12)
+full	164	WVMA5	Std(Abs($close/Ref($close, 1)-1)*$volume, 5)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 5)+1e-12)
+full	165	WVMA10	Std(Abs($close/Ref($close, 1)-1)*$volume, 10)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 10)+1e-12)
+full	166	WVMA20	Std(Abs($close/Ref($close, 1)-1)*$volume, 20)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 20)+1e-12)
+full	167	WVMA30	Std(Abs($close/Ref($close, 1)-1)*$volume, 30)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 30)+1e-12)
+full	168	WVMA60	Std(Abs($close/Ref($close, 1)-1)*$volume, 60)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 60)+1e-12)
+full	169	VSUMP5	Sum(Greater($volume-Ref($volume, 1), 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+full	170	VSUMP10	Sum(Greater($volume-Ref($volume, 1), 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+full	171	VSUMP20	Sum(Greater($volume-Ref($volume, 1), 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+full	172	VSUMP30	Sum(Greater($volume-Ref($volume, 1), 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+full	173	VSUMP60	Sum(Greater($volume-Ref($volume, 1), 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+full	174	VSUMN5	Sum(Greater(Ref($volume, 1)-$volume, 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+full	175	VSUMN10	Sum(Greater(Ref($volume, 1)-$volume, 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+full	176	VSUMN20	Sum(Greater(Ref($volume, 1)-$volume, 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+full	177	VSUMN30	Sum(Greater(Ref($volume, 1)-$volume, 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+full	178	VSUMN60	Sum(Greater(Ref($volume, 1)-$volume, 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+full	179	VSUMD5	(Sum(Greater($volume-Ref($volume, 1), 0), 5)-Sum(Greater(Ref($volume, 1)-$volume, 0), 5))/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+full	180	VSUMD10	(Sum(Greater($volume-Ref($volume, 1), 0), 10)-Sum(Greater(Ref($volume, 1)-$volume, 0), 10))/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+full	181	VSUMD20	(Sum(Greater($volume-Ref($volume, 1), 0), 20)-Sum(Greater(Ref($volume, 1)-$volume, 0), 20))/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+full	182	VSUMD30	(Sum(Greater($volume-Ref($volume, 1), 0), 30)-Sum(Greater(Ref($volume, 1)-$volume, 0), 30))/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+full	183	VSUMD60	(Sum(Greater($volume-Ref($volume, 1), 0), 60)-Sum(Greater(Ref($volume, 1)-$volume, 0), 60))/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+implicit	0	OPEN0	$open/$close
+implicit	1	OPEN1	Ref($open, 1)/$close
+implicit	2	OPEN2	Ref($open, 2)/$close
+implicit	3	OPEN3	Ref($open, 3)/$close
+implicit	4	OPEN4	Ref($open, 4)/$close
+implicit	5	HIGH0	$high/$close
+implicit	6	HIGH1	Ref($high, 1)/$close
+implicit	7	HIGH2	Ref($high, 2)/$close
+implicit	8	HIGH3	Ref($high, 3)/$close
+implicit	9	HIGH4	Ref($high, 4)/$close
+implicit	10	LOW0	$low/$close
+implicit	11	LOW1	Ref($low, 1)/$close
+implicit	12	LOW2	Ref($low, 2)/$close
+implicit	13	LOW3	Ref($low, 3)/$close
+implicit	14	LOW4	Ref($low, 4)/$close
+implicit	15	CLOSE0	$close/$close
+implicit	16	CLOSE1	Ref($close, 1)/$close
+implicit	17	CLOSE2	Ref($close, 2)/$close
+implicit	18	CLOSE3	Ref($close, 3)/$close
+implicit	19	CLOSE4	Ref($close, 4)/$close
+implicit	20	VWAP0	$vwap/$close
+implicit	21	VWAP1	Ref($vwap, 1)/$close
+implicit	22	VWAP2	Ref($vwap, 2)/$close
+implicit	23	VWAP3	Ref($vwap, 3)/$close
+implicit	24	VWAP4	Ref($vwap, 4)/$close
+implicit	25	VOLUME0	$volume/($volume+1e-12)
+implicit	26	VOLUME1	Ref($volume, 1)/($volume+1e-12)
+implicit	27	VOLUME2	Ref($volume, 2)/($volume+1e-12)
+implicit	28	VOLUME3	Ref($volume, 3)/($volume+1e-12)
+implicit	29	VOLUME4	Ref($volume, 4)/($volume+1e-12)
+subset	0	ROC3	Ref($close, 3)/$close
+subset	1	ROC7	Ref($close, 7)/$close
+subset	2	MIN3	Min($low, 3)/$close
+subset	3	MIN7	Min($low, 7)/$close
+subset	4	CORD3	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 3)
+subset	5	CORD7	Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 7)
+subset	6	VSUMD3	(Sum(Greater($volume-Ref($volume, 1), 0), 3)-Sum(Greater(Ref($volume, 1)-$volume, 0), 3))/(Sum(Abs($volume-Ref($volume, 1)), 3)+1e-12)
+subset	7	VSUMD7	(Sum(Greater($volume-Ref($volume, 1), 0), 7)-Sum(Greater(Ref($volume, 1)-$volume, 0), 7))/(Sum(Abs($volume-Ref($volume, 1)), 7)+1e-12)
+exclude	0	KMID	($close-$open)/$open
+exclude	1	KLEN	($high-$low)/$open
+exclude	2	KMID2	($close-$open)/($high-$low+1e-12)
+exclude	3	KUP	($high-Greater($open, $close))/$open
+exclude	4	KUP2	($high-Greater($open, $close))/($high-$low+1e-12)
+exclude	5	KLOW	(Less($open, $close)-$low)/$open
+exclude	6	KLOW2	(Less($open, $close)-$low)/($high-$low+1e-12)
+exclude	7	KSFT	(2*$close-$high-$low)/$open
+exclude	8	KSFT2	(2*$close-$high-$low)/($high-$low+1e-12)
+exclude	9	ROC5	Ref($close, 5)/$close
+exclude	10	ROC10	Ref($close, 10)/$close
+exclude	11	ROC20	Ref($close, 20)/$close
+exclude	12	ROC30	Ref($close, 30)/$close
+exclude	13	ROC60	Ref($close, 60)/$close
+exclude	14	MA5	Mean($close, 5)/$close
+exclude	15	MA10	Mean($close, 10)/$close
+exclude	16	MA20	Mean($close, 20)/$close
+exclude	17	MA30	Mean($close, 30)/$close
+exclude	18	MA60	Mean($close, 60)/$close
+exclude	19	STD5	Std($close, 5)/$close
+exclude	20	STD10	Std($close, 10)/$close
+exclude	21	STD20	Std($close, 20)/$close
+exclude	22	STD30	Std($close, 30)/$close
+exclude	23	STD60	Std($close, 60)/$close
+exclude	24	BETA5	Slope($close, 5)/$close
+exclude	25	BETA10	Slope($close, 10)/$close
+exclude	26	BETA20	Slope($close, 20)/$close
+exclude	27	BETA30	Slope($close, 30)/$close
+exclude	28	BETA60	Slope($close, 60)/$close
+exclude	29	RSQR5	Rsquare($close, 5)
+exclude	30	RSQR10	Rsquare($close, 10)
+exclude	31	RSQR20	Rsquare($close, 20)
+exclude	32	RSQR30	Rsquare($close, 30)
+exclude	33	RSQR60	Rsquare($close, 60)
+exclude	34	RESI5	Resi($close, 5)/$close
+exclude	35	RESI10	Resi($close, 10)/$close
+exclude	36	RESI20	Resi($close, 20)/$close
+exclude	37	RESI30	Resi($close, 30)/$close
+exclude	38	RESI60	Resi($close, 60)/$close
+exclude	39	MAX5	Max($high, 5)/$close
+exclude	40	MAX10	Max($high, 10)/$close
+exclude	41	MAX20	Max($high, 20)/$close
+exclude	42	MAX30	Max($high, 30)/$close
+exclude	43	MAX60	Max($high, 60)/$close
+exclude	44	MIN5	Min($low, 5)/$close
+exclude	45	MIN10	Min($low, 10)/$close
+exclude	46	MIN20	Min($low, 20)/$close
+exclude	47	MIN30	Min($low, 30)/$close
+exclude	48	MIN60	Min($low, 60)/$close
+exclude	49	QTLU5	Quantile($close, 5, 0.8)/$close
+exclude	50	QTLU10	Quantile($close, 10, 0.8)/$close
+exclude	51	QTLU20	Quantile($close, 20, 0.8)/$close
+exclude	52	QTLU30	Quantile($close, 30, 0.8)/$close
+exclude	53	QTLU60	Quantile($close, 60, 0.8)/$close
+exclude	54	QTLD5	Quantile($close, 5, 0.2)/$close
+exclude	55	QTLD10	Quantile($close, 10, 0.2)/$close
+exclude	56	QTLD20	Quantile($close, 20, 0.2)/$close
+exclude	57	QTLD30	Quantile($close, 30, 0.2)/$close
+exclude	58	QTLD60	Quantile($close, 60, 0.2)/$close
+exclude	59	RSV5	($close-Min($low, 5))/(Max($high, 5)-Min($low, 5)+1e-12)
+exclude	60	RSV10	($close-Min($low, 10))/(Max($high, 10)-Min($low, 10)+1e-12)
+exclude	61	RSV20	($close-Min($low, 20))/(Max($high, 20)-Min($low, 20)+1e-12)
+exclude	62	RSV30	($close-Min($low, 30))/(Max($high, 30)-Min($low, 30)+1e-12)
+exclude	63	RSV60	($close-Min($low, 60))/(Max($high, 60)-Min($low, 60)+1e-12)
+exclude	64	IMAX5	IdxMax($high, 5)/5
+exclude	65	IMAX10	IdxMax($high, 10)/10
+exclude	66	IMAX20	IdxMax($high, 20)/20
+exclude	67	IMAX30	IdxMax($high, 30)/30
+exclude	68	IMAX60	IdxMax($high, 60)/60
+exclude	69	IMIN5	IdxMin($low, 5)/5
+exclude	70	IMIN10	IdxMin($low, 10)/10
+exclude	71	IMIN20	IdxMin($low, 20)/20
+exclude	72	IMIN30	IdxMin($low, 30)/30
+exclude	73	IMIN60	IdxMin($low, 60)/60
+exclude	74	IMXD5	(IdxMax($high, 5)-IdxMin($low, 5))/5
+exclude	75	IMXD10	(IdxMax($high, 10)-IdxMin($low, 10))/10
+exclude	76	IMXD20	(IdxMax($high, 20)-IdxMin($low, 20))/20
+exclude	77	IMXD30	(IdxMax($high, 30)-IdxMin($low, 30))/30
+exclude	78	IMXD60	(IdxMax($high, 60)-IdxMin($low, 60))/60
+exclude	79	CNTP5	Mean($close>Ref($close, 1), 5)
+exclude	80	CNTP10	Mean($close>Ref($close, 1), 10)
+exclude	81	CNTP20	Mean($close>Ref($close, 1), 20)
+exclude	82	CNTP30	Mean($close>Ref($close, 1), 30)
+exclude	83	CNTP60	Mean($close>Ref($close, 1), 60)
+exclude	84	CNTN5	Mean($close<Ref($close, 1), 5)
+exclude	85	CNTN10	Mean($close<Ref($close, 1), 10)
+exclude	86	CNTN20	Mean($close<Ref($close, 1), 20)
+exclude	87	CNTN30	Mean($close<Ref($close, 1), 30)
+exclude	88	CNTN60	Mean($close<Ref($close, 1), 60)
+exclude	89	CNTD5	Mean($close>Ref($close, 1), 5)-Mean($close<Ref($close, 1), 5)
+exclude	90	CNTD10	Mean($close>Ref($close, 1), 10)-Mean($close<Ref($close, 1), 10)
+exclude	91	CNTD20	Mean($close>Ref($close, 1), 20)-Mean($close<Ref($close, 1), 20)
+exclude	92	CNTD30	Mean($close>Ref($close, 1), 30)-Mean($close<Ref($close, 1), 30)
+exclude	93	CNTD60	Mean($close>Ref($close, 1), 60)-Mean($close<Ref($close, 1), 60)
+exclude	94	SUMP5	Sum(Greater($close-Ref($close, 1), 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+exclude	95	SUMP10	Sum(Greater($close-Ref($close, 1), 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+exclude	96	SUMP20	Sum(Greater($close-Ref($close, 1), 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+exclude	97	SUMP30	Sum(Greater($close-Ref($close, 1), 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+exclude	98	SUMP60	Sum(Greater($close-Ref($close, 1), 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+exclude	99	SUMN5	Sum(Greater(Ref($close, 1)-$close, 0), 5)/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+exclude	100	SUMN10	Sum(Greater(Ref($close, 1)-$close, 0), 10)/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+exclude	101	SUMN20	Sum(Greater(Ref($close, 1)-$close, 0), 20)/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+exclude	102	SUMN30	Sum(Greater(Ref($close, 1)-$close, 0), 30)/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+exclude	103	SUMN60	Sum(Greater(Ref($close, 1)-$close, 0), 60)/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+exclude	104	SUMD5	(Sum(Greater($close-Ref($close, 1), 0), 5)-Sum(Greater(Ref($close, 1)-$close, 0), 5))/(Sum(Abs($close-Ref($close, 1)), 5)+1e-12)
+exclude	105	SUMD10	(Sum(Greater($close-Ref($close, 1), 0), 10)-Sum(Greater(Ref($close, 1)-$close, 0), 10))/(Sum(Abs($close-Ref($close, 1)), 10)+1e-12)
+exclude	106	SUMD20	(Sum(Greater($close-Ref($close, 1), 0), 20)-Sum(Greater(Ref($close, 1)-$close, 0), 20))/(Sum(Abs($close-Ref($close, 1)), 20)+1e-12)
+exclude	107	SUMD30	(Sum(Greater($close-Ref($close, 1), 0), 30)-Sum(Greater(Ref($close, 1)-$close, 0), 30))/(Sum(Abs($close-Ref($close, 1)), 30)+1e-12)
+exclude	108	SUMD60	(Sum(Greater($close-Ref($close, 1), 0), 60)-Sum(Greater(Ref($close, 1)-$close, 0), 60))/(Sum(Abs($close-Ref($close, 1)), 60)+1e-12)
+exclude	109	VMA5	Mean($volume, 5)/($volume+1e-12)
+exclude	110	VMA10	Mean($volume, 10)/($volume+1e-12)
+exclude	111	VMA20	Mean($volume, 20)/($volume+1e-12)
+exclude	112	VMA30	Mean($volume, 30)/($volume+1e-12)
+exclude	113	VMA60	Mean($volume, 60)/($volume+1e-12)
+exclude	114	VSTD5	Std($volume, 5)/($volume+1e-12)
+exclude	115	VSTD10	Std($volume, 10)/($volume+1e-12)
+exclude	116	VSTD20	Std($volume, 20)/($volume+1e-12)
+exclude	117	VSTD30	Std($volume, 30)/($volume+1e-12)
+exclude	118	VSTD60	Std($volume, 60)/($volume+1e-12)
+exclude	119	WVMA5	Std(Abs($close/Ref($close, 1)-1)*$volume, 5)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 5)+1e-12)
+exclude	120	WVMA10	Std(Abs($close/Ref($close, 1)-1)*$volume, 10)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 10)+1e-12)
+exclude	121	WVMA20	Std(Abs($close/Ref($close, 1)-1)*$volume, 20)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 20)+1e-12)
+exclude	122	WVMA30	Std(Abs($close/Ref($close, 1)-1)*$volume, 30)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 30)+1e-12)
+exclude	123	WVMA60	Std(Abs($close/Ref($close, 1)-1)*$volume, 60)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 60)+1e-12)
+exclude	124	VSUMP5	Sum(Greater($volume-Ref($volume, 1), 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+exclude	125	VSUMP10	Sum(Greater($volume-Ref($volume, 1), 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+exclude	126	VSUMP20	Sum(Greater($volume-Ref($volume, 1), 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+exclude	127	VSUMP30	Sum(Greater($volume-Ref($volume, 1), 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+exclude	128	VSUMP60	Sum(Greater($volume-Ref($volume, 1), 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+exclude	129	VSUMN5	Sum(Greater(Ref($volume, 1)-$volume, 0), 5)/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+exclude	130	VSUMN10	Sum(Greater(Ref($volume, 1)-$volume, 0), 10)/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+exclude	131	VSUMN20	Sum(Greater(Ref($volume, 1)-$volume, 0), 20)/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+exclude	132	VSUMN30	Sum(Greater(Ref($volume, 1)-$volume, 0), 30)/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+exclude	133	VSUMN60	Sum(Greater(Ref($volume, 1)-$volume, 0), 60)/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+exclude	134	VSUMD5	(Sum(Greater($volume-Ref($volume, 1), 0), 5)-Sum(Greater(Ref($volume, 1)-$volume, 0), 5))/(Sum(Abs($volume-Ref($volume, 1)), 5)+1e-12)
+exclude	135	VSUMD10	(Sum(Greater($volume-Ref($volume, 1), 0), 10)-Sum(Greater(Ref($volume, 1)-$volume, 0), 10))/(Sum(Abs($volume-Ref($volume, 1)), 10)+1e-12)
+exclude	136	VSUMD20	(Sum(Greater($volume-Ref($volume, 1), 0), 20)-Sum(Greater(Ref($volume, 1)-$volume, 0), 20))/(Sum(Abs($volume-Ref($volume, 1)), 20)+1e-12)
+exclude	137	VSUMD30	(Sum(Greater($volume-Ref($volume, 1), 0), 30)-Sum(Greater(Ref($volume, 1)-$volume, 0), 30))/(Sum(Abs($volume-Ref($volume, 1)), 30)+1e-12)
+exclude	138	VSUMD60	(Sum(Greater($volume-Ref($volume, 1), 0), 60)-Sum(Greater(Ref($volume, 1)-$volume, 0), 60))/(Sum(Abs($volume-Ref($volume, 1)), 60)+1e-12)
+price_only	0	CLOSE2	Ref($close, 2)/$close
+price_only	1	CLOSE0	$close/$close
+price_only	2	VWAP2	Ref($vwap, 2)/$close
+price_only	3	VWAP0	$vwap/$close

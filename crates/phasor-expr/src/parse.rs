@@ -8,6 +8,11 @@ pub enum Expression {
     Unary(char, Box<Self>),
     Binary(String, Box<Self>, Box<Self>),
     Call(String, Vec<Self>),
+    /// A quoted literal: a time of day (`DayCumsum`) or an instrument
+    /// (`ChangeInstrument`, Qlib's `Mask(x, "SH000300")`).
+    Str(String),
+    /// Python's `None`, as in Qlib's `Cut(x, 240, None)`.
+    None,
 }
 
 impl Expression {
@@ -30,24 +35,37 @@ impl Expression {
                     arg.fields(out);
                 }
             }
-            Self::Number(_) => {}
+            Self::Number(_) | Self::Str(_) | Self::None => {}
         }
     }
 
+    /// Whether a row's value can depend on later rows: a negative `Ref`,
+    /// `BFillNan`, `DayLast` (the rest of the day; causal only when its input
+    /// is lagged by at least a day, which the bar count decides), and `Cut`
+    /// from the right (which rows are cut depends on how many come after).
     pub(crate) fn uses_future(&self) -> bool {
+        let negative = |arg: Option<&Self>| {
+            arg.is_some_and(|arg| match arg {
+                Self::Number(bits) => f64::from_bits(*bits) < 0.0,
+                Self::Unary('-', inner) => {
+                    matches!(inner.as_ref(), Self::Number(bits) if f64::from_bits(*bits) > 0.0)
+                }
+                _ => false,
+            })
+        };
         match self {
             Self::Call(name, args) => {
-                (name == "Ref" && args.get(1).is_some_and(|arg| match arg {
-                    Self::Number(bits) => f64::from_bits(*bits) < 0.0,
-                    Self::Unary('-', inner) => {
-                        matches!(inner.as_ref(), Self::Number(bits) if f64::from_bits(*bits) > 0.0)
-                    }
+                let reads_ahead = match name.as_str() {
+                    "Ref" => negative(args.get(1)),
+                    "Cut" => negative(args.get(2)),
+                    "BFillNan" | "DayLast" => true,
                     _ => false,
-                })) || args.iter().any(Self::uses_future)
+                };
+                reads_ahead || args.iter().any(Self::uses_future)
             }
             Self::Unary(_, child) => child.uses_future(),
             Self::Binary(_, left, right) => left.uses_future() || right.uses_future(),
-            Self::Number(_) | Self::Field(_) => false,
+            Self::Number(_) | Self::Field(_) | Self::Str(_) | Self::None => false,
         }
     }
 }
@@ -56,6 +74,7 @@ impl Expression {
 enum Token {
     Number(f64),
     Field(String),
+    Str(String),
     Name(String),
     Op(String),
     LParen,
@@ -117,7 +136,9 @@ fn lex(source: &str) -> std::result::Result<Vec<Token>, String> {
                 out.push(Token::Op(source[start..i].to_owned()));
             }
             b'$' => {
-                let start = i + 1;
+                // `$$name` is a point-in-time field, kept as `$name`.
+                let pit = bytes.get(i + 1) == Some(&b'$');
+                let start = i + 1 + usize::from(pit);
                 i = start;
                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
@@ -125,7 +146,16 @@ fn lex(source: &str) -> std::result::Result<Vec<Token>, String> {
                 if i == start {
                     return Err("expected a field name after '$'".into());
                 }
-                out.push(Token::Field(source[start..i].to_ascii_lowercase()));
+                let name = source[start..i].to_ascii_lowercase();
+                out.push(Token::Field(if pit { format!("${name}") } else { name }));
+            }
+            quote @ (b'\'' | b'"') => {
+                let start = i + 1;
+                let Some(length) = bytes[start..].iter().position(|&b| b == quote) else {
+                    return Err(format!("unterminated string starting at byte {i}"));
+                };
+                out.push(Token::Str(source[start..start + length].to_owned()));
+                i = start + length + 1;
             }
             c if c.is_ascii_digit() || c == b'.' => {
                 let start = i;
@@ -186,6 +216,10 @@ impl Parser {
         let mut left = match self.take() {
             Token::Number(value) => Expression::number(value),
             Token::Field(name) => Expression::Field(name),
+            Token::Str(text) => Expression::Str(text),
+            Token::Name(name) if name == "None" && self.peek() != &Token::LParen => {
+                Expression::None
+            }
             Token::Op(op) if op == "+" || op == "-" => Expression::Unary(
                 op.as_bytes()[0] as char,
                 Box::new(self.expression(11, depth + 1)?),
@@ -245,11 +279,14 @@ fn validate(expr: &Expression) -> std::result::Result<(), String> {
     if let Expression::Call(name, args) = expr {
         let arity = match name.as_str() {
             "Abs" | "Sign" | "Log" | "Not" | "Exp" | "Sqrt" | "IsNan" | "CSRank" | "CSZScore"
-            | "CSDemean" => 1..=1,
+            | "CSDemean" | "IsNull" | "IsInf" | "FFillNan" | "BFillNan" | "DayLast" | "Date"
+            | "P" => 1..=1,
             "Greater" | "Less" | "Power" | "Add" | "Sub" | "Mul" | "Div" | "Gt" | "Ge" | "Lt"
             | "Le" | "Eq" | "Ne" | "And" | "Or" | "FillNa" | "Mask" | "SignedPower"
-            | "IndNeutralize" | "CSResi" => 2..=2,
+            | "IndNeutralize" | "CSResi" | "Select" | "ChangeInstrument" | "PRef" => 2..=2,
             "Scale" => 1..=2,
+            "Cut" => 1..=3,
+            "DayCumsum" => 1..=4,
             "If" | "Clip" => 3..=3,
             "Ref" | "Mean" | "Std" | "Sum" | "Max" | "Min" | "Rank" | "IdxMax" | "IdxMin"
             | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew" | "Kurt" | "Med" | "Mad" | "Count"
@@ -273,7 +310,9 @@ fn validate(expr: &Expression) -> std::result::Result<(), String> {
             }
             Ok(())
         }
-        Expression::Number(_) | Expression::Field(_) => Ok(()),
+        Expression::Number(_) | Expression::Field(_) | Expression::Str(_) | Expression::None => {
+            Ok(())
+        }
     }
 }
 
@@ -285,6 +324,30 @@ mod tests {
     fn precedence_and_scientific_numbers_parse() {
         let expr = parse("($close-Ref($close, 1))/(2*$close+1e-12)").unwrap();
         assert!(matches!(expr, Expression::Binary(ref op, _, _) if op == "/"));
+    }
+
+    #[test]
+    fn qlib_strings_none_and_pit_fields_parse() {
+        let expr = parse("DayCumsum($volume, '9:45', \"14:44\")").unwrap();
+        let Expression::Call(_, args) = expr else {
+            panic!("a call")
+        };
+        assert_eq!(args[1], Expression::Str("9:45".into()));
+        assert_eq!(args[2], Expression::Str("14:44".into()));
+        let Expression::Call(_, args) = parse("Cut($close, 240, None)").unwrap() else {
+            panic!("a call")
+        };
+        assert_eq!(args[2], Expression::None);
+        assert_eq!(
+            parse("P($$ROEWA_q)").unwrap(),
+            Expression::Call("P".into(), vec![Expression::Field("$roewa_q".into())])
+        );
+        assert!(
+            parse("Mask($close, 'SH000300)")
+                .unwrap_err()
+                .contains("unterminated")
+        );
+        assert!(parse("$$").unwrap_err().contains("field name"));
     }
 
     #[test]

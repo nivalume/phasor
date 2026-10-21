@@ -22,6 +22,9 @@ not noise.
 | `generic.tsv`, `indicators.tsv`, `signals_gen.tsv` | `phasor-generic`, `phasor-indicators`, `phasor-signals` golden tests | Arrays, indicators, signal generation |
 | `shared_accounts.json` | `crates/phasor-py/tests/test_shared_accounts.py` | Shared-account runs through the Python API |
 | `qlib_alpha158.tsv`, `qlib_alpha360.tsv` | `parity_qlib.rs` in `phasor-expr`'s tests | Qlib's Alpha158 and Alpha360 outputs |
+| `qlib_alpha158_configs.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Names and expression strings of `Alpha158DL.get_feature_config(config)` for six configs |
+| `qlib_highfreq.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Qlib's high-frequency operators (`DayCumsum`, `DayLast`, `FFillNan`, `BFillNan`, `Date`, `Select`, `IsNull`, `IsInf`, `Cut`) and `ChangeInstrument` / `Mask` |
+| `qlib_pit_records.tsv`, `qlib_pit.tsv` | `parity_qlib_ext.rs` in `phasor-expr`'s tests, `crates/phasor-py/tests/test_qlib_ext.py` | Point-in-time records and `P` / `PRef` read through Qlib's `LocalPITProvider` |
 | `wq101.tsv` | `phasor-expr/tests/wq101.rs` | WorldQuant 101 alphas |
 
 Fixture rows are field-by-field comparisons of records, never aggregates: an
@@ -31,7 +34,7 @@ indices. Float fields compare with a tight tolerance; integers, enums and
 purpose: gaps, constant series, short windows, huge and tiny magnitudes,
 every reachable rejection reason.
 
-## The three generators
+## The four generators
 
 Only the fixtures that come from an external library or an independent
 interpreter have a generator here.
@@ -55,6 +58,39 @@ tests focused on operator semantics rather than float32 cancellation.
 The Alpha158 and Alpha360 expressions come from [Qlib](https://github.com/microsoft/qlib)
 (MIT licence), and the header of each fixture records the Qlib version that
 produced it.
+
+### `generate_qlib_extensions.py`
+
+The Qlib extensions beyond Alpha158 and Alpha360, from the same Conda
+environment, in one command:
+
+```bash
+TMPDIR=/some/scratch conda run -n rdagent4qlib python tests/generators/generate_qlib_extensions.py
+```
+
+It writes four fixtures:
+
+- `qlib_alpha158_configs.tsv`: `config, position, name, expression` rows for
+  six `Alpha158DL.get_feature_config` configs; the header records each config
+  as JSON.
+- `qlib_highfreq.tsv`: two symbols, ten days of eight 30-minute bars, each
+  expression column headed by its exact Qlib source. Only the bar provider
+  and `qlib.contrib.ops.high_freq.get_calendar_day` are replaced. Booleans
+  are 1/0, `Date()` is days since 1970-01-01, and rows that `Select` or `Cut`
+  drop are `nan`.
+- `qlib_pit_records.tsv` and `qlib_pit.tsv`: the generator writes real PIT
+  binary files in the layout of Qlib's `scripts/dump_pit.py` (values through
+  float32, as that script casts them) into a throwaway provider directory
+  under `TMPDIR`, then evaluates `P` / `PRef` through Qlib's own
+  `LocalPITProvider`. The records file lists the records in the order they
+  were written; `P` is float32 in Qlib, and the outputs are the float64 of
+  that float32.
+
+Qlib's memory cache is keyed by an expression's string, and `DayCumsum` and
+`Cut` print without their time or cut arguments (`DayCumsum($volume)`), so
+two of them over the same feature would share one cached series. The
+generator clears the cache before each expression so every column is that
+operator's own output.
 
 ### `generate_wq101.py`
 

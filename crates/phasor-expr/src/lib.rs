@@ -10,19 +10,25 @@ mod backend;
 mod cross;
 mod eval;
 mod graph;
+mod lift;
 mod order;
 mod parse;
+mod pit;
 #[cfg(feature = "polars")]
 mod polars_backend;
 mod stage;
 mod window;
 mod wq101;
 
-pub use alpha158::alpha158;
+pub use alpha158::{
+    ALPHA158_ROLLING, Alpha158Config, Alpha158Price, Alpha158Rolling, alpha158, alpha158_features,
+    alpha158_with, qlib_label,
+};
 pub use alpha360::alpha360;
 pub use backend::{ComputeBackend, NativeBackend};
 pub use eval::{FactorInputs, FactorValues};
 pub use parse::Expression;
+pub use pit::PitRecord;
 #[cfg(feature = "polars")]
 pub use polars_backend::PolarsBackend;
 pub use wq101::{wq101, wq101_all, wq101_formula};
@@ -39,6 +45,11 @@ use crate::parse::parse;
 #[derive(Debug, Clone)]
 pub struct FactorSet {
     factors: Vec<(String, Expression)>,
+    /// The factors as the graph reads them: lifted subexpressions replaced
+    /// by their hidden fields.
+    rewritten: Vec<Expression>,
+    /// What fills those fields.
+    lifted: lift::Lifted,
     graph: graph::Graph,
     /// The stages, when a factor reads across symbols.
     plan: Option<stage::Staged>,
@@ -78,15 +89,36 @@ impl FactorSet {
         if compiled.is_empty() {
             return Err(Error::Invariant("a factor set cannot be empty".into()));
         }
-        let graph =
-            graph::Graph::compile(compiled.iter().map(|(name, expr)| (name.as_str(), expr)))?;
+        Self::build(compiled)
+    }
+
+    /// Compiles parsed, arity-checked expressions.
+    pub(crate) fn build(factors: Vec<(String, Expression)>) -> Result<Self> {
+        let (rewritten, lifted) = lift::Lifted::lift(&factors)?;
+        let graph = graph::Graph::compile(
+            factors
+                .iter()
+                .zip(&rewritten)
+                .map(|((name, _), expr)| (name.as_str(), expr)),
+        )?;
         let plan = stage::Staged::plan(&graph);
         Ok(Self {
-            factors: compiled,
+            factors,
+            rewritten,
+            lifted,
             graph,
             plan,
             parts: OnceLock::new(),
         })
+    }
+
+    /// The instruments other than its own symbols that the set reads with
+    /// `ChangeInstrument` (or Qlib's `Mask(e, "X")`).
+    #[must_use]
+    pub fn instrument_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        self.lifted.instrument_names(&mut names);
+        names
     }
 
     /// Names in output order.
@@ -101,7 +133,26 @@ impl FactorSet {
             .map(|(name, expression)| (name.as_str(), expression))
     }
 
-    /// Source fields required to evaluate this set.
+    /// Whether the set reads the bar timestamps
+    /// ([`FactorInputs::with_timestamps`]): `DayLast`, `DayCumsum`, `Date`,
+    /// `P` and `PRef`, here or in an instrument's expression.
+    #[must_use]
+    pub fn needs_timestamps(&self) -> bool {
+        self.graph
+            .fields
+            .iter()
+            .any(|field| field == graph::DAY || field == graph::MINUTE)
+            || !self.lifted.pits.is_empty()
+            || self
+                .lifted
+                .instruments
+                .iter()
+                .any(|instrument| instrument.set.needs_timestamps())
+    }
+
+    /// Source fields required to evaluate this set. A point-in-time field is
+    /// listed as `$name` (it is written `$$name`), and an instrument's fields
+    /// are listed with the panel's.
     #[must_use]
     pub fn required_fields(&self) -> BTreeSet<&str> {
         let mut fields = BTreeSet::new();
@@ -162,7 +213,7 @@ impl FactorSet {
                 "a batch must hold at least one symbol".into(),
             ));
         }
-        let (n_rows, n_cols) = inputs.shape();
+        let (_, n_cols) = inputs.shape();
         if self.plan.is_some() {
             let all = self.evaluate(inputs)?;
             for start in (0..n_cols).step_by(batch) {
@@ -171,12 +222,10 @@ impl FactorSet {
             }
             return Ok(());
         }
+        let needed = self.instrument_names();
         for start in (0..n_cols).step_by(batch) {
             let cols = start..(start + batch).min(n_cols);
-            let mut part = FactorInputs::new(n_rows, cols.len())?;
-            for (name, values) in inputs.fields() {
-                part = part.with_field(name, &values[cols.start * n_rows..cols.end * n_rows])?;
-            }
+            let part = inputs.columns(cols.clone(), &needed)?;
             sink(cols, self.evaluate(&part)?)?;
         }
         Ok(())
