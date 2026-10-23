@@ -10,18 +10,31 @@ use rayon::prelude::*;
 
 use crate::FactorSet;
 use crate::cross;
-use crate::graph::{self, BinaryOp, Cross, Graph, NodeId, Op, Rolling, UnaryOp};
+use crate::graph::{self, BinaryOp, Cross, DAY, Graph, MINUTE, NodeId, Op, Rolling, UnaryOp};
 use crate::order::{Order, ordered_into, rolling_arg_extreme_into};
+use crate::pit::{self, PitRecord};
 use crate::stage::{Dest, Source, Staged, Step};
+use crate::warmup::Warmup;
 use crate::window::{Count, Deviation, Fit, Pair, Regression, Shape, Sum, Wma, slide_into};
 
-/// Named column-major fields supplied to a factor set.
+/// Named column-major fields supplied to a factor set, and what the
+/// operators beyond a symbol's own fields read: the bar timestamps
+/// (`DayLast`, `DayCumsum`, `Date`, `P`), the symbols and other instruments
+/// (`ChangeInstrument`), and point-in-time records (`$$field`).
 #[derive(Debug, Clone)]
 pub struct FactorInputs<'a> {
     n_rows: usize,
     n_cols: usize,
     fields: HashMap<String, &'a [f64]>,
+    /// Per row: the calendar day and the minute of the day.
+    calendar: Option<Arc<(Vec<f64>, Vec<f64>)>>,
+    symbols: Option<Vec<String>>,
+    instruments: HashMap<String, FactorInputs<'a>>,
+    pit: HashMap<String, Vec<PitRecord>>,
 }
+
+const NANOS_PER_DAY: i64 = 86_400_000_000_000;
+const NANOS_PER_MINUTE: i64 = 60_000_000_000;
 
 impl<'a> FactorInputs<'a> {
     /// Creates an empty input set with a fixed `(rows, symbols)` shape.
@@ -39,6 +52,10 @@ impl<'a> FactorInputs<'a> {
             n_rows,
             n_cols,
             fields: HashMap::new(),
+            calendar: None,
+            symbols: None,
+            instruments: HashMap::new(),
+            pit: HashMap::new(),
         })
     }
 
@@ -48,11 +65,7 @@ impl<'a> FactorInputs<'a> {
     ///
     /// Returns an error when a populated field does not match the panel shape.
     pub fn from_ohlcv(panel: &'a OhlcvPanel) -> Result<Self> {
-        let mut inputs = Self {
-            n_rows: panel.n_rows,
-            n_cols: panel.n_cols,
-            fields: HashMap::new(),
-        };
+        let mut inputs = Self::new(panel.n_rows, panel.n_cols)?;
         for (name, values) in [
             ("open", panel.open.as_slice()),
             ("high", panel.high.as_slice()),
@@ -86,7 +99,7 @@ impl<'a> FactorInputs<'a> {
                 expected,
             });
         }
-        let name = name.to_ascii_lowercase();
+        let name = name.to_lowercase();
         if name.is_empty() {
             return Err(Error::Invariant("factor field name cannot be empty".into()));
         }
@@ -96,10 +109,237 @@ impl<'a> FactorInputs<'a> {
         Ok(())
     }
 
+    /// The time of each row as nanoseconds since 1970-01-01 on the wall
+    /// clock of the market (local time, not UTC): what `DayLast`,
+    /// `DayCumsum`, `Date` and `P` group and compare by.
+    ///
+    /// # Errors
+    ///
+    /// A length other than the row count, or times that go backwards.
+    pub fn with_timestamps(mut self, nanos: &[i64]) -> Result<Self> {
+        if nanos.len() != self.n_rows {
+            return Err(Error::FlexLen {
+                kind: "factor timestamps",
+                actual: nanos.len(),
+                expected: self.n_rows,
+            });
+        }
+        if nanos.windows(2).any(|pair| pair[1] < pair[0]) {
+            return Err(Error::Invariant(
+                "factor timestamps must not decrease".into(),
+            ));
+        }
+        let day = nanos
+            .iter()
+            .map(|&t| t.div_euclid(NANOS_PER_DAY) as f64)
+            .collect();
+        let minute = nanos
+            .iter()
+            .map(|&t| (t.rem_euclid(NANOS_PER_DAY) / NANOS_PER_MINUTE) as f64)
+            .collect();
+        self.calendar = Some(Arc::new((day, minute)));
+        Ok(self)
+    }
+
+    /// The name of each symbol (column), which `ChangeInstrument("X", ...)`
+    /// looks `X` up among.
+    ///
+    /// # Errors
+    ///
+    /// A count other than the column count, or a repeated name.
+    pub fn with_symbols<S: AsRef<str>>(mut self, names: &[S]) -> Result<Self> {
+        if names.len() != self.n_cols {
+            return Err(Error::FlexLen {
+                kind: "factor symbols",
+                actual: names.len(),
+                expected: self.n_cols,
+            });
+        }
+        let names: Vec<String> = names.iter().map(|name| name.as_ref().to_owned()).collect();
+        for (at, name) in names.iter().enumerate() {
+            if names[..at].contains(name) {
+                return Err(Error::Invariant(format!(
+                    "duplicate factor symbol {name:?}"
+                )));
+            }
+        }
+        self.symbols = Some(names);
+        Ok(self)
+    }
+
+    /// An instrument outside the panel, such as a benchmark index, that
+    /// `ChangeInstrument(name, ...)` reads: one column over the same rows.
+    /// It reads the panel's timestamps unless it has its own.
+    ///
+    /// # Errors
+    ///
+    /// A shape other than `(rows, 1)`, or a name already supplied.
+    pub fn with_instrument(mut self, name: &str, inputs: FactorInputs<'a>) -> Result<Self> {
+        if inputs.shape() != (self.n_rows, 1) {
+            return Err(Error::Invariant(format!(
+                "instrument {name:?} has shape {}x{}, expected {}x1",
+                inputs.n_rows, inputs.n_cols, self.n_rows
+            )));
+        }
+        if self.instruments.insert(name.to_owned(), inputs).is_some() {
+            return Err(Error::Invariant(format!("duplicate instrument {name:?}")));
+        }
+        Ok(self)
+    }
+
+    /// The records of a point-in-time field (`$$field` in an expression),
+    /// read by `P` and `PRef`. The name ends with `_q` (quarterly periods
+    /// `YYYY * 100 + Q`) or `_a` (years), as in Qlib; leading `$` are ignored.
+    ///
+    /// # Errors
+    ///
+    /// A name without either suffix, a record whose symbol is out of range or
+    /// whose period is not a quarter (or year) of 1900..=2099, or a field
+    /// already supplied.
+    pub fn with_pit(mut self, field: &str, records: Vec<PitRecord>) -> Result<Self> {
+        let field = field.trim_start_matches('$').to_lowercase();
+        pit::quarterly(&field)?;
+        for record in &records {
+            if record.col >= self.n_cols {
+                return Err(Error::Invariant(format!(
+                    "$${field} has a record for symbol {} of {}",
+                    record.col, self.n_cols
+                )));
+            }
+            pit::check_period(&field, record.period)?;
+        }
+        if self.pit.insert(field.clone(), records).is_some() {
+            return Err(Error::Invariant(format!(
+                "duplicate point-in-time field $${field}"
+            )));
+        }
+        Ok(self)
+    }
+
     /// `(rows, symbols)` of every supplied field.
     #[must_use]
     pub fn shape(&self) -> (usize, usize) {
         (self.n_rows, self.n_cols)
+    }
+
+    pub(crate) fn days(&self) -> Option<&[f64]> {
+        self.calendar.as_deref().map(|(day, _)| day.as_slice())
+    }
+
+    pub(crate) fn pit_records(&self, field: &str) -> Option<&[PitRecord]> {
+        self.pit.get(field).map(Vec::as_slice)
+    }
+
+    /// An input field by name.
+    pub(crate) fn field(&self, name: &str) -> Result<&'a [f64]> {
+        self.fields
+            .get(name)
+            .copied()
+            .ok_or_else(|| Error::Invariant(format!("factor input is missing field ${name}")))
+    }
+
+    /// A field by name: an input, or a hidden one, the calendar's or one a
+    /// lifted subexpression computed into `extra`. A hidden field may hold
+    /// one value per row, shared by every symbol.
+    fn lookup<'s>(&'s self, name: &str, extra: &'s HashMap<String, Vec<f64>>) -> Result<&'s [f64]> {
+        if let Some(values) = self.fields.get(name) {
+            return Ok(values);
+        }
+        if let Some(values) = extra.get(name) {
+            return Ok(values);
+        }
+        if name == DAY || name == MINUTE {
+            let (day, minute) = self.calendar.as_deref().ok_or_else(|| {
+                Error::Invariant(
+                    "DayLast, DayCumsum and Date need the bar timestamps (FactorInputs::with_timestamps)"
+                        .into(),
+                )
+            })?;
+            return Ok(if name == DAY { day } else { minute });
+        }
+        Err(Error::Invariant(format!(
+            "factor input is missing field ${name}"
+        )))
+    }
+
+    /// Symbols `cols` only, with everything they read: the timestamps,
+    /// the supplied instruments and their own point-in-time records.
+    fn slice(&self, cols: Range<usize>) -> Result<Self> {
+        let n_rows = self.n_rows;
+        let mut part = Self::new(n_rows, cols.len())?;
+        for (name, values) in &self.fields {
+            part.add_field(name, &values[cols.start * n_rows..cols.end * n_rows])?;
+        }
+        part.calendar.clone_from(&self.calendar);
+        part.symbols = self
+            .symbols
+            .as_ref()
+            .map(|names| names[cols.clone()].to_vec());
+        part.instruments.clone_from(&self.instruments);
+        part.pit = self
+            .pit
+            .iter()
+            .map(|(field, records)| {
+                let kept = records
+                    .iter()
+                    .filter(|record| cols.contains(&record.col))
+                    .map(|record| PitRecord {
+                        col: record.col - cols.start,
+                        ..*record
+                    })
+                    .collect();
+                (field.clone(), kept)
+            })
+            .collect();
+        Ok(part)
+    }
+
+    /// As [`Self::slice`], plus each instrument of `needed` that is a symbol
+    /// of this panel, so a part of the panel can still read it.
+    pub(crate) fn columns(&self, cols: Range<usize>, needed: &[String]) -> Result<Self> {
+        let mut part = self.slice(cols)?;
+        for name in needed {
+            if part.instruments.contains_key(name) {
+                continue;
+            }
+            if let Some(col) = self.symbol(name) {
+                part.instruments
+                    .insert(name.clone(), self.slice(col..col + 1)?);
+            }
+        }
+        Ok(part)
+    }
+
+    fn symbol(&self, name: &str) -> Option<usize> {
+        self.symbols
+            .as_ref()?
+            .iter()
+            .position(|symbol| symbol == name)
+    }
+
+    /// The one-column inputs of instrument `name`: a supplied instrument
+    /// (reading this panel's timestamps and instruments unless it has its
+    /// own), else the panel's symbol of that name.
+    pub(crate) fn instrument(&self, name: &str, needed: &[String]) -> Result<Self> {
+        if let Some(inputs) = self.instruments.get(name) {
+            let mut inputs = inputs.clone();
+            if inputs.calendar.is_none() {
+                inputs.calendar.clone_from(&self.calendar);
+            }
+            for (other, supplied) in &self.instruments {
+                inputs
+                    .instruments
+                    .entry(other.clone())
+                    .or_insert_with(|| supplied.clone());
+            }
+            return Ok(inputs);
+        }
+        let col = self.symbol(name).ok_or_else(|| {
+            Error::Invariant(format!(
+                "instrument {name:?} is neither a symbol of the panel nor supplied with with_instrument"
+            ))
+        })?;
+        self.columns(col..col + 1, needed)
     }
 
     /// Iterates over the named column-major input fields.
@@ -196,19 +436,45 @@ impl FactorValues {
     }
 }
 
+/// The hidden fields of the subexpressions lifted out of `set`: each
+/// instrument's series, one value per row, and each `P`'s panel.
+fn lifted_fields(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<HashMap<String, Vec<f64>>> {
+    let mut extra = HashMap::new();
+    if set.lifted.is_empty() {
+        return Ok(extra);
+    }
+    let needed = set.instrument_names();
+    for instrument in &set.lifted.instruments {
+        let own = inputs.instrument(&instrument.name, &needed)?;
+        for (name, values) in instrument.set.evaluate(&own)?.into_matrices() {
+            extra.insert(name, values.into_vec());
+        }
+    }
+    for job in &set.lifted.pits {
+        extra.insert(job.field.clone(), pit::evaluate(job, inputs)?);
+    }
+    Ok(extra)
+}
+
+/// Symbol `col`'s series of a field; a field of one value per row is every
+/// symbol's.
+fn column(values: &[f64], col: usize, n_rows: usize) -> &[f64] {
+    if values.len() == n_rows {
+        values
+    } else {
+        &values[col * n_rows..(col + 1) * n_rows]
+    }
+}
+
 pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<FactorValues> {
     let graph = &set.graph;
     let (n_rows, n_cols) = (inputs.n_rows, inputs.n_cols);
-    let fields =
-        graph
-            .fields
-            .iter()
-            .map(|name| {
-                inputs.fields.get(name).copied().ok_or_else(|| {
-                    Error::Invariant(format!("factor input is missing field ${name}"))
-                })
-            })
-            .collect::<Result<Vec<&[f64]>>>()?;
+    let extra = lifted_fields(set, inputs)?;
+    let fields = graph
+        .fields
+        .iter()
+        .map(|name| inputs.lookup(name, &extra))
+        .collect::<Result<Vec<&[f64]>>>()?;
 
     let outputs = match &set.plan {
         // Fewer symbols than threads: split the factors as well, so the pool
@@ -216,10 +482,18 @@ pub(crate) fn evaluate(set: &FactorSet, inputs: &FactorInputs<'_>) -> Result<Fac
         // result is the same bit for bit.
         None if n_cols < rayon::current_num_threads() && set.factors.len() > 1 => {
             let parts = set.parts.get_or_init(|| split(set));
-            run_parts(parts, graph.outputs.len(), inputs, n_rows, n_cols)?
+            run_parts(parts, graph.outputs.len(), inputs, &extra, n_rows, n_cols)?
         }
         None => run_graph(graph, &fields, n_rows, n_cols),
-        Some(staged) => run_staged(staged, graph.outputs.len(), &fields, n_rows, n_cols),
+        Some(staged) => {
+            let starts = if set.warmup() {
+                Some(Warmup::starts(graph, inputs)?)
+            } else {
+                None
+            };
+            let warm = starts.as_deref().map(|starts| (&set.warm, starts));
+            run_staged(staged, graph.outputs.len(), &fields, n_rows, n_cols, warm)
+        }
     };
     let names = set.names().map(str::to_owned).collect();
     let matrices = outputs
@@ -251,7 +525,7 @@ fn split(set: &FactorSet) -> Vec<Part> {
             let graph = Graph::compile(
                 positions
                     .iter()
-                    .map(|&k| (set.factors[k].0.as_str(), &set.factors[k].1)),
+                    .map(|&k| (set.factors[k].0.as_str(), &set.rewritten[k])),
             )
             .expect("a subset of a compiled set compiles");
             Part { graph, positions }
@@ -264,6 +538,7 @@ fn run_parts(
     parts: &[Part],
     n_outputs: usize,
     inputs: &FactorInputs<'_>,
+    extra: &HashMap<String, Vec<f64>>,
     n_rows: usize,
     n_cols: usize,
 ) -> Result<Vec<Vec<f64>>> {
@@ -281,23 +556,23 @@ fn run_parts(
             .graph
             .fields
             .iter()
-            .map(|name| {
-                inputs.fields.get(name).copied().ok_or_else(|| {
-                    Error::Invariant(format!("factor input is missing field ${name}"))
-                })
-            })
+            .map(|name| inputs.lookup(name, extra))
             .collect::<Result<Vec<&[f64]>>>()?;
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "col picks one cell of every output and one slice of every field"
+        )]
         for col in 0..n_cols {
             let out: Vec<&mut [f64]> = part
                 .positions
                 .iter()
                 .map(|&p| cells[p][col].take().expect("each cell has one writer"))
                 .collect();
-            let column: Vec<&[f64]> = fields
-                .iter()
-                .map(|values| &values[col * n_rows..(col + 1) * n_rows])
-                .collect();
-            tasks.push((&part.graph, column, out));
+            let mut slices = Vec::with_capacity(fields.len());
+            for values in &fields {
+                slices.push(column(values, col, n_rows));
+            }
+            tasks.push((&part.graph, slices, out));
         }
     }
     tasks.into_par_iter().for_each(|(graph, column, mut out)| {
@@ -309,12 +584,15 @@ fn run_parts(
 
 /// Runs the stages in order: each per-symbol stage over every column, each
 /// cross-sectional node over every row.
+/// With `warm`, a cross-sectional node reads each panel blanked where its
+/// windows have not yet filled, so a symbol still warming up is skipped.
 fn run_staged(
     staged: &Staged,
     n_outputs: usize,
     fields: &[&[f64]],
     n_rows: usize,
     n_cols: usize,
+    warm: Option<(&Warmup, &[Vec<usize>])>,
 ) -> Vec<Vec<f64>> {
     let mut outputs: Vec<Option<Vec<f64>>> = vec![None; n_outputs];
     let mut panels: Vec<Option<Vec<f64>>> = vec![None; staged.panels];
@@ -357,8 +635,29 @@ fn run_staged(
                 panel,
                 outputs: positions,
             } => {
-                let x = read(&inputs[0]);
-                let y = inputs.get(1).map_or(Arg::Scalar(f64::NAN), read);
+                let blanked: Vec<Option<Vec<f64>>> = inputs
+                    .iter()
+                    .map(|source| match (source, warm) {
+                        (Source::Panel(k), Some((warm, starts))) => {
+                            let mut copy = panels[*k]
+                                .clone()
+                                .expect("a panel is written before it is read");
+                            warm.mask(staged.nodes[*k], starts, &mut copy, n_rows);
+                            Some(copy)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let input = |at: usize| match &blanked[at] {
+                    Some(values) => Arg::Series(values),
+                    None => read(&inputs[at]),
+                };
+                let x = input(0);
+                let y = if inputs.len() > 1 {
+                    input(1)
+                } else {
+                    Arg::Scalar(f64::NAN)
+                };
                 let values = cross_panel(*op, x, y, n_rows, n_cols);
                 for &position in positions {
                     outputs[position] = Some(values.clone());
@@ -381,7 +680,7 @@ fn run_staged(
 fn cross_panel(op: Cross, x: Arg<'_>, y: Arg<'_>, n_rows: usize, n_cols: usize) -> Vec<f64> {
     let at = |arg: Arg<'_>, row: usize, col: usize| match arg {
         Arg::Scalar(value) => value,
-        Arg::Series(values) => values[col * n_rows + row],
+        Arg::Series(values) => column(values, col, n_rows)[row],
         Arg::Shifted { .. } => unreachable!("cross-sectional inputs are whole series"),
     };
     let mut rows = vec![0.0; n_rows * n_cols];
@@ -441,7 +740,7 @@ fn run_graph(graph: &Graph, fields: &[&[f64]], n_rows: usize, n_cols: usize) -> 
             |scratch, (col, mut out)| {
                 let fields: Vec<&[f64]> = fields
                     .iter()
-                    .map(|values| &values[col * n_rows..(col + 1) * n_rows])
+                    .map(|values| column(values, col, n_rows))
                     .collect();
                 run_column(graph, &fields, scratch, &mut out);
             },
@@ -682,6 +981,11 @@ fn step(op: Op, args: &[Arg<'_>], target: &mut [f64], spare: &mut [Vec<f64>]) {
             target[kept..].fill(f64::NAN);
         }
         Op::Delta(offset) => binary_series(BinaryOp::Sub, args[0], args[0].shifted(offset), target),
+        Op::First => {
+            if let Some(&value) = args[0].series(first).first() {
+                target.fill(value);
+            }
+        }
         Op::Ema(alpha) => {
             let column = args[0].series(first);
             match alpha {
@@ -704,8 +1008,110 @@ fn step(op: Op, args: &[Arg<'_>], target: &mut [f64], spare: &mut [Vec<f64>]) {
                 slide_into(&pairs, window, &mut Pair::cov(), target);
             }
         }
+        Op::Fill { forward } => fill_into(args[0].series(first), forward, target),
+        Op::DayLast => day_last_into(args[0].series(first), calendar(args[1]), target),
+        Op::DayCumsum { start, end, step } => day_cumsum_into(
+            args[0].series(first),
+            calendar(args[1]),
+            calendar(args[2]),
+            (start, end, step),
+            target,
+        ),
+        Op::Cut { left, right } => {
+            target.copy_from_slice(args[0].series(first));
+            target[..left.min(n_rows)].fill(f64::NAN);
+            target[n_rows.saturating_sub(right)..].fill(f64::NAN);
+        }
         Op::Field(_) | Op::Const(_) => unreachable!("fields and literals are not computed"),
         Op::Cross(_) => unreachable!("cross-sectional nodes run between stages"),
+    }
+}
+
+/// A calendar input, which is always a field read in place.
+fn calendar(arg: Arg<'_>) -> &[f64] {
+    match arg {
+        Arg::Series(values) => values,
+        _ => unreachable!("calendar inputs are fields"),
+    }
+}
+
+/// `NaN` replaced by the last value present before it (`forward`) or the
+/// next one after it; `NaN` where there is none.
+fn fill_into(input: &[f64], forward: bool, out: &mut [f64]) {
+    let mut last = f64::NAN;
+    let mut fill = |(slot, &value): (&mut f64, &f64)| {
+        if !value.is_nan() {
+            last = value;
+        }
+        *slot = last;
+    };
+    if forward {
+        out.iter_mut().zip(input).for_each(&mut fill);
+    } else {
+        out.iter_mut()
+            .rev()
+            .zip(input.iter().rev())
+            .for_each(&mut fill);
+    }
+}
+
+/// The rows of each day: runs of equal `day`.
+fn days(day: &[f64]) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        if start >= day.len() {
+            return None;
+        }
+        let first = day[start];
+        let len = day[start..]
+            .iter()
+            .take_while(|&&d| d.to_bits() == first.to_bits())
+            .count();
+        let rows = start..start + len;
+        start += len;
+        Some(rows)
+    })
+}
+
+/// Each day's last value present (pandas `groupby(...).transform("last")`),
+/// `NaN` for a day without one.
+fn day_last_into(input: &[f64], day: &[f64], out: &mut [f64]) {
+    for rows in days(day) {
+        let last = input[rows.clone()]
+            .iter()
+            .rev()
+            .copied()
+            .find(|value| !value.is_nan())
+            .unwrap_or(f64::NAN);
+        out[rows].fill(last);
+    }
+}
+
+/// Qlib's `DayCumsum`: within each day, zero before the bar that contains
+/// `start`, the running sum of the values present from that bar through the
+/// last bar that starts by `end` (`NaN` where the value is missing, the sum
+/// carrying on), and zero after it.
+fn day_cumsum_into(
+    input: &[f64],
+    minute: &[f64],
+    day: &[f64],
+    (start, end, step): (u32, u32, u32),
+    out: &mut [f64],
+) {
+    let (start, end, step) = (f64::from(start), f64::from(end), f64::from(step));
+    for rows in days(day) {
+        let mut sum = 0.0;
+        for row in rows {
+            let bar = minute[row];
+            out[row] = if bar + step <= start || bar > end {
+                0.0
+            } else if input[row].is_nan() {
+                f64::NAN
+            } else {
+                sum += input[row];
+                sum
+            };
+        }
     }
 }
 
@@ -740,7 +1146,7 @@ fn unary_series(op: UnaryOp, input: Arg<'_>, target: &mut [f64]) {
             }
         };
     }
-    dispatch!(Neg, Abs, Sign, Log, Not, Exp, Sqrt, IsNan);
+    dispatch!(Neg, Abs, Sign, Log, Not, Exp, Sqrt, IsNan, IsInf);
 }
 
 /// An elementwise binary operator with the operator and operand kinds

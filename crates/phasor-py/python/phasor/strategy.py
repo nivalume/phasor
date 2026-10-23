@@ -34,8 +34,12 @@ def _field(data, name):
 
 
 def factors(data, **expressions):
-    """Evaluate named expressions against the fields they require."""
-    compiled = FactorSet.compile(expressions)
+    """Evaluate named expressions against the fields they require, with
+    warm-up: each factor is ``NaN`` on a symbol's rows before its windows
+    have filled (:meth:`FactorSet.with_warmup`), so no signal comes from a
+    partial window. ``FactorSet.compile(...).evaluate(...)`` keeps Qlib's
+    values from the first row."""
+    compiled = FactorSet.compile(expressions).with_warmup()
     if compiled.uses_future:
         raise ValueError("factor expressions cannot use future data")
     names = compiled.required_fields or ("close",)

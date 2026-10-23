@@ -89,6 +89,11 @@ fn compile(expression: &Expression, n_rows: usize) -> Result<PolarsExpr> {
             binary(operator, compile(left, n_rows)?, compile(right, n_rows)?)?
         }
         Expression::Call(name, arguments) => call(name, arguments, n_rows)?,
+        Expression::Str(_) | Expression::None => {
+            return Err(Error::Invariant(
+                "unsupported operator: string and None arguments".into(),
+            ));
+        }
     })
 }
 
@@ -151,7 +156,11 @@ fn call(name: &str, arguments: &[Expression], n_rows: usize) -> Result<PolarsExp
         "Ref" => {
             let source = compile(&arguments[0], n_rows)?;
             let offset = integer(&arguments[1], "Ref offset")?;
-            source.shift(lit(offset)).fill_null(lit(f64::NAN))
+            if offset == 0 {
+                source.first()
+            } else {
+                source.shift(lit(offset)).fill_null(lit(f64::NAN))
+            }
         }
         "Delta" => {
             let source = compile(&arguments[0], n_rows)?;
@@ -159,7 +168,20 @@ fn call(name: &str, arguments: &[Expression], n_rows: usize) -> Result<PolarsExp
             if offset < 0 {
                 return Err(Error::Invariant("Delta offset cannot be negative".into()));
             }
-            source.clone() - source.shift(lit(offset)).fill_null(lit(f64::NAN))
+            if offset == 0 {
+                source.clone() - source.first()
+            } else {
+                source.clone() - source.shift(lit(offset)).fill_null(lit(f64::NAN))
+            }
+        }
+        "Mean" | "Std" | "Sum" | "Max" | "Min" | "Var" | "Med" | "Count"
+            if (0.0..1.0).contains(&number(&arguments[1], "window")?)
+                && number(&arguments[1], "window")? > 0.0 =>
+        {
+            ewm(
+                compile(&arguments[0], n_rows)?,
+                number(&arguments[1], "window")?,
+            )
         }
         "Mean" | "Std" | "Sum" | "Max" | "Min" | "Quantile" | "Rank" | "IdxMax" | "IdxMin"
         | "Slope" | "Rsquare" | "Resi" | "Var" | "Skew" | "Kurt" | "Med" | "Mad" | "Count"
@@ -187,16 +209,7 @@ fn call(name: &str, arguments: &[Expression], n_rows: usize) -> Result<PolarsExp
                 } else {
                     2.0 / (parameter + 1.0)
                 };
-                source
-                    .fill_nan(lit(NULL))
-                    .ewm_mean(EWMOptions {
-                        alpha,
-                        adjust: true,
-                        bias: false,
-                        min_periods: 1,
-                        ignore_nulls: false,
-                    })
-                    .fill_null(lit(f64::NAN))
+                ewm(source, alpha)
             }
         }
         "Corr" | "Cov" => {
@@ -217,6 +230,23 @@ fn call(name: &str, arguments: &[Expression], n_rows: usize) -> Result<PolarsExp
         }
         _ => return Err(Error::Invariant(format!("unsupported operator {name}"))),
     })
+}
+
+/// pandas' `ewm(alpha, adjust=True, min_periods=1).mean()`. Polars leaves a
+/// missing row empty; pandas carries the mean so far, which the forward
+/// fill restores (the weights already decayed across the gap).
+fn ewm(source: PolarsExpr, alpha: f64) -> PolarsExpr {
+    source
+        .fill_nan(lit(NULL))
+        .ewm_mean(EWMOptions {
+            alpha,
+            adjust: true,
+            bias: false,
+            min_periods: 1,
+            ignore_nulls: false,
+        })
+        .forward_fill(None)
+        .fill_null(lit(f64::NAN))
 }
 
 fn rolling_corr_stable(left: PolarsExpr, right: PolarsExpr, window: usize) -> PolarsExpr {
@@ -376,13 +406,9 @@ fn expanding_ema(source: PolarsExpr) -> PolarsExpr {
 }
 
 fn number(expression: &Expression, label: &str) -> Result<f64> {
-    match expression {
-        Expression::Number(bits) => Ok(f64::from_bits(*bits)),
-        Expression::Unary('-', inner) => Ok(-number(inner, label)?),
-        _ => Err(Error::Invariant(format!(
-            "{label} must be a numeric literal"
-        ))),
-    }
+    expression
+        .constant()
+        .ok_or_else(|| Error::Invariant(format!("{label} must be a numeric literal")))
 }
 
 fn integer(expression: &Expression, label: &str) -> Result<i64> {

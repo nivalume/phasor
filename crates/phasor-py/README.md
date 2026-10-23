@@ -303,8 +303,84 @@ factors = phasor.FactorSet.compile({
 values = factors.evaluate({"close": close, "volume": volume})
 ```
 
+Operators bind as in mathematics: `^` (or `**`) tightest and from the right,
+then unary minus (`-2^2` is `-4`), `*` `/`, `+` `-`, comparisons, `&`, `|`.
+Comparisons chain as in mathematics, `1 < $x < 3` meaning `1 < $x` and
+`$x < 3`. Literal arguments may be arithmetic (`Mean($close, 2*5)`).
+
+`phasor.FactorGrid` compiles expressions with `{name}` placeholders for every
+case of a parameter grid into one graph, so what no parameter touches is
+computed once and one pass evaluates every case:
+
+```python
+grid = phasor.FactorGrid.compile(
+    {"fast": "Mean($close, {f})", "slow": "Mean($close, {s})"},
+    phasor.params.grid(f=[5, 10], s=[20, 50], where=lambda p: p["f"] < p["s"]),
+).with_warmup()
+v = grid.evaluate({"close": close})            # each (rows, cases * symbols)
+pf = phasor.from_signals(close, phasor.crossed_above(v["fast"], v["slow"]),
+                         phasor.crossed_above(v["slow"], v["fast"]),
+                         column_map=grid.column_map(close.shape[1]))
+```
+
+Keyword arguments form the full product (`FactorGrid.compile(f, n=[10, 20])`);
+`grid.cases` lists each case's values in column order.
+
 `phasor.alpha158()` and `phasor.alpha360()` return the built-in Qlib factor sets and
 require explicit `open`, `high`, `low`, `close`, `volume`, and `vwap` fields.
+`phasor.alpha158(config)` takes Qlib's `Alpha158DL.get_feature_config` dict
+(`kbar`, `price`, `volume`, `rolling` with `windows` / `include` / `exclude`),
+and `phasor.alpha158_features(config)` lists the `(name, expression)` pairs it
+compiles. `phasor.qlib_label("close")` is Qlib's label
+`Ref($close, -2)/Ref($close, -1) - 1`, a training target (`uses_future`).
+
+Qlib's high-frequency operators (`DayCumsum`, `DayLast`, `Date`, `FFillNan`,
+`BFillNan`, `IsNull`, `IsInf`, `Select`, `Cut`), `ChangeInstrument` and
+point-in-time `P($$field)` / `PRef` read more than the panel's fields; pass it
+to `evaluate` (and `evaluate_batches`, `to_parquet`) as keywords:
+
+```python
+values = factors.evaluate(
+    {"close": close, "volume": volume},
+    index=bar_times,                       # datetime64 or a pandas DatetimeIndex
+    symbols=["600000.SH", "600036.SH"],    # ChangeInstrument looks names up here
+    instruments={"SH000300": {"close": index_close}},   # outside the panel
+    pit=records,                           # columns symbol, field, date, period, value
+)
+```
+
+`factors.needs_timestamps` and `factors.instrument_names` say which of these a
+set reads.
+
+Qlib's windows give a value from the first row (`min_periods=1`), so a 20-row
+mean on row 1 is the mean of two bars. `factors.lookbacks` says how many rows
+each factor reaches back, and `factors.with_warmup()` returns the same set
+evaluating to `NaN` until each symbol's windows have filled (counted from the
+symbol's own first value), with cross-sectional operators skipping symbols
+still warming up. A `FactorSet` keeps Qlib's values by default; the signal
+paths turn warm-up on: `phasor.factors(...)`, TOML runs (`warmup = false`
+under `[backtest]` turns it off) and the MCP `run_backtest` tool (option
+`warmup`). There a `NaN` entry or exit is no signal.
+
+`phasor.processors` has Qlib's data processors with Qlib's names and
+arguments (`ProcessInf`, `Fillna`, `ZScoreNorm`, `RobustZScoreNorm`,
+`MinMaxNorm`, `CSZScoreNorm`, `CSRankNorm`, `CSZFillna`, `TanhProcess`,
+`DropnaLabel`, `DropnaProcessor`, `DropCol`, `FilterCol`) over the
+`{name: (rows, symbols)}` mapping `evaluate` returns. `process` runs a list
+the way Qlib's `DataHandlerLP` does; the fitted ones learn their statistics
+from `fit_start_time` to `fit_end_time` only:
+
+```python
+from phasor import processors as P
+
+data = {**phasor.alpha158().evaluate(fields), **phasor.qlib_label().evaluate(fields)}
+infer = [P.RobustZScoreNorm("2015-01-01", "2019-12-31", fields_group="feature"),
+         P.Fillna(fields_group="feature")]
+data = P.process(data, infer, index=dates)
+train = P.process(data, [P.DropnaLabel(), P.CSRankNorm(fields_group="label")])
+```
+
+A row Qlib would drop stays in the panel as `NaN` in every field.
 Alpha360 returns the raw 60-row normalized history without Qlib's later data
 handler processing. Custom field names such as `$funding_rate` work the same
 way. The DSL supports arithmetic, comparisons, `If`, `Ref`, fixed and

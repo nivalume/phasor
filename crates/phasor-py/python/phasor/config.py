@@ -12,6 +12,7 @@
     exits = "$close < Mean($close, {window})"
 
     [backtest]                   # from_signals keyword arguments
+    # warmup = false             # keep signals from partial windows (Qlib's values)
     size = 1.0
     fees = 0.001
     direction = "longonly"
@@ -29,6 +30,10 @@
 
 Paths are relative to the file. ``entry = "from_orders"`` under
 ``[backtest]`` takes a ``size`` expression under ``[signals]`` instead.
+Signals are evaluated with warm-up (:meth:`phasor.FactorSet.with_warmup`):
+no entry, exit or order on a symbol's rows before every window of the
+expression has filled; ``warmup = false`` under ``[backtest]`` turns that
+off. A ``NaN`` entry or exit is no signal.
 ``load`` reads and checks a file; ``run`` runs one; the ``phasor`` command
 (``phasor run``, ``phasor sweep``) calls them.
 """
@@ -70,6 +75,8 @@ def load(path: str | Path) -> dict:
     entry = cfg.get("backtest", {}).get("entry", "from_signals")
     if entry not in ("from_signals", "from_orders"):
         raise ValueError(f"{path}: entry must be from_signals or from_orders")
+    if not isinstance(cfg.get("backtest", {}).get("warmup", True), bool):
+        raise ValueError(f"{path}: warmup must be true or false")
     want = ("size",) if entry == "from_orders" else ("entries", "exits")
     missing = [k for k in want if k not in cfg["signals"]]
     if missing:
@@ -124,6 +131,12 @@ def _combos(cfg: dict) -> list[dict]:
     return grid(**sweep) if sweep else [{}]
 
 
+def _signal(values: np.ndarray) -> np.ndarray:
+    """An entry or exit wherever a factor is non-zero; ``NaN`` (a window
+    still warming up, a missing input) is no signal."""
+    return (values != 0) & ~np.isnan(values)
+
+
 def run(cfg: dict | str | Path) -> dict[str, Any]:
     """Runs a configuration: every combination of ``[sweep]`` (or the one
     run), writing what ``[output]`` asks for. Returns ``params``, the
@@ -140,14 +153,18 @@ def run(cfg: dict | str | Path) -> dict[str, Any]:
         raise ValueError("[data] has no close")
     backtest = dict(cfg.get("backtest", {}))
     entry = backtest.pop("entry", "from_signals")
+    warmup = backtest.pop("warmup", True)
     market = {k: fields[k] for k in ("open", "high", "low") if k in fields}
     combos = _combos(cfg)
     portfolios, stats = [], []
-    for combo in combos:
-        exprs = {k: v.format(**combo) for k, v in cfg["signals"].items()}
-        values = phasor.FactorSet.compile(exprs).evaluate(fields)
+    # Every combination in one graph: what no parameter touches is computed once.
+    grid = phasor.FactorGrid.compile(cfg["signals"], combos).with_warmup(warmup)
+    wide = grid.evaluate(fields)
+    n_symbols = fields["close"].shape[1]
+    for k, combo in enumerate(combos):
+        values = {name: v[:, k * n_symbols:(k + 1) * n_symbols] for name, v in wide.items()}
         if entry == "from_signals":
-            pf = phasor.from_signals(fields["close"], values["entries"] != 0, values["exits"] != 0,
+            pf = phasor.from_signals(fields["close"], _signal(values["entries"]), _signal(values["exits"]),
                                      **market, **backtest)
         else:
             pf = phasor.from_orders(fields["close"], values["size"], **market, **backtest)

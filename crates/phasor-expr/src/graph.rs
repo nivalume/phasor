@@ -37,6 +37,13 @@ use crate::parse::Expression;
 /// Index of a node in [`Graph::nodes`].
 pub(crate) type NodeId = usize;
 
+/// The calendar day of each row (days since 1970-01-01, wall clock), a
+/// hidden field supplied by [`crate::FactorInputs::with_timestamps`]. `@`
+/// cannot start a `$` field, so it never collides with an input.
+pub(crate) const DAY: &str = "@day";
+/// The minute of the day of each row, as [`DAY`].
+pub(crate) const MINUTE: &str = "@minute";
+
 /// A window argument; `0` in the source means the whole series.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Window {
@@ -63,6 +70,7 @@ pub(crate) enum UnaryOp {
     Exp,
     Sqrt,
     IsNan,
+    IsInf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,6 +155,8 @@ pub(crate) enum Op {
     Binary(BinaryOp),
     If,
     Ref(i64),
+    /// The first row's value on every row (Qlib's `Ref(x, 0)`).
+    First,
     Delta(usize),
     /// `None` is the expanding EMA (`EMA(x, 0)`), otherwise the alpha's bits.
     Ema(Option<u64>),
@@ -156,6 +166,25 @@ pub(crate) enum Op {
         window: Window,
     },
     Cross(Cross),
+    /// `FFillNan` (forward) or `BFillNan`.
+    Fill {
+        forward: bool,
+    },
+    /// The last value present in each day; inputs `[x, @day]`.
+    DayLast,
+    /// The running sum over the bars of each day between two times of day
+    /// (minutes), zero outside them; inputs `[x, @minute, @day]`. A bar
+    /// counts from the one that contains `start`: `step` is the bar length.
+    DayCumsum {
+        start: u32,
+        end: u32,
+        step: u32,
+    },
+    /// `NaN` over the first `left` and the last `right` rows.
+    Cut {
+        left: usize,
+        right: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -348,28 +377,20 @@ impl Builder {
                 return Err(Error::Invariant(format!("unsupported unary {op}")));
             }
             Expression::Binary(op, left, right) => {
-                let op = match op.as_str() {
-                    "+" => BinaryOp::Add,
-                    "-" => BinaryOp::Sub,
-                    "*" => BinaryOp::Mul,
-                    "/" => BinaryOp::Div,
-                    "**" => BinaryOp::Pow,
-                    ">" => BinaryOp::Gt,
-                    "<" => BinaryOp::Lt,
-                    ">=" => BinaryOp::Ge,
-                    "<=" => BinaryOp::Le,
-                    "==" => BinaryOp::Eq,
-                    "!=" => BinaryOp::Ne,
-                    "&" => BinaryOp::And,
-                    "|" => BinaryOp::Or,
-                    other => {
-                        return Err(Error::Invariant(format!("unsupported operator {other}")));
-                    }
-                };
+                let op = binary_op(op)
+                    .ok_or_else(|| Error::Invariant(format!("unsupported operator {op}")))?;
                 let inputs = vec![self.node(left)?, self.node(right)?];
                 self.intern(Op::Binary(op), inputs)
             }
             Expression::Call(name, args) => self.call(name, args)?,
+            Expression::Str(text) => {
+                return Err(Error::Invariant(format!(
+                    "the string {text:?} is only an argument of DayCumsum, ChangeInstrument or Mask"
+                )));
+            }
+            Expression::None => {
+                return Err(Error::Invariant("None is only an argument of Cut".into()));
+            }
         })
     }
 
@@ -381,7 +402,8 @@ impl Builder {
             "Not" => Some(UnaryOp::Not),
             "Exp" => Some(UnaryOp::Exp),
             "Sqrt" => Some(UnaryOp::Sqrt),
-            "IsNan" => Some(UnaryOp::IsNan),
+            "IsNan" | "IsNull" => Some(UnaryOp::IsNan),
+            "IsInf" => Some(UnaryOp::IsInf),
             _ => None,
         };
         if let Some(op) = unary {
@@ -444,6 +466,31 @@ impl Builder {
             _ => None,
         };
         if let Some(kind) = rolling {
+            // Qlib rejects these windows when it builds the operator.
+            let least = match name {
+                "Skew" => 3.0,
+                "Kurt" => 4.0,
+                _ => 0.0,
+            };
+            let value = number(&args[1], "window")?;
+            if least > 0.0 && value != 0.0 && value < least {
+                return Err(Error::Invariant(format!(
+                    "{name}'s window must be 0 or at least {least}"
+                )));
+            }
+            // Qlib's base rolling operators read a window strictly between
+            // 0 and 1 as an exponential mean with that alpha, whatever the
+            // operator (`Std($close, 0.5)` too).
+            if matches!(
+                name,
+                "Mean" | "Sum" | "Std" | "Var" | "Max" | "Min" | "Med" | "Count"
+            ) {
+                let value = number(&args[1], "window")?;
+                if value > 0.0 && value < 1.0 {
+                    let input = self.node(&args[0])?;
+                    return Ok(self.intern(Op::Ema(Some(value.to_bits())), vec![input]));
+                }
+            }
             let window = window(&args[1])?;
             let input = self.node(&args[0])?;
             return Ok(self.intern(Op::Rolling(kind, window), vec![input]));
@@ -475,6 +522,73 @@ impl Builder {
             return Ok(self.intern(Op::Cross(op), inputs));
         }
         Ok(match name {
+            // Qlib drops the rows where the condition is false; on a panel
+            // they stay, as NaN.
+            "Select" => {
+                let inputs = vec![self.node(&args[1])?, self.node(&args[0])?];
+                self.intern(Op::Binary(BinaryOp::Mask), inputs)
+            }
+            "FFillNan" | "BFillNan" => {
+                let input = self.node(&args[0])?;
+                self.intern(
+                    Op::Fill {
+                        forward: name == "FFillNan",
+                    },
+                    vec![input],
+                )
+            }
+            // Qlib's Date returns the bar's date whatever its input.
+            "Date" => self.field(DAY),
+            "DayLast" => {
+                let inputs = vec![self.node(&args[0])?, self.field(DAY)];
+                self.intern(Op::DayLast, inputs)
+            }
+            "DayCumsum" => {
+                let start = args.get(1).map_or(Ok(9 * 60 + 30), time_of_day)?;
+                let end = args.get(2).map_or(Ok(14 * 60 + 59), time_of_day)?;
+                let step = args
+                    .get(3)
+                    .map_or(Ok(1), |arg| integer(arg, "DayCumsum granularity"))?;
+                let step = u32::try_from(step)
+                    .ok()
+                    .filter(|&step| step > 0)
+                    .ok_or_else(|| {
+                        Error::Invariant("DayCumsum granularity must be positive".into())
+                    })?;
+                let inputs = vec![self.node(&args[0])?, self.field(MINUTE), self.field(DAY)];
+                self.intern(Op::DayCumsum { start, end, step }, inputs)
+            }
+            "Cut" => {
+                let bound = |at: usize, label: &str| -> Result<i64> {
+                    match args.get(at) {
+                        None | Some(Expression::None) => Ok(0),
+                        Some(arg) => integer(arg, label),
+                    }
+                };
+                let (left, right) = (bound(1, "Cut's left")?, bound(2, "Cut's right")?);
+                // Qlib's rule: a left cut is positive, a right cut negative.
+                if left < 0 || right > 0 {
+                    return Err(Error::Invariant(
+                        "Cut's left must be positive and its right negative".into(),
+                    ));
+                }
+                let input = self.node(&args[0])?;
+                if left == 0 && right == 0 {
+                    return Ok(input);
+                }
+                self.intern(
+                    Op::Cut {
+                        left: left.unsigned_abs() as usize,
+                        right: right.unsigned_abs() as usize,
+                    },
+                    vec![input],
+                )
+            }
+            "ChangeInstrument" | "P" | "PRef" => {
+                return Err(Error::Invariant(format!(
+                    "{name} must be resolved before the graph is built"
+                )));
+            }
             "Clip" => {
                 // Less(Greater(x, lo), hi): NaN stays NaN, and a floor above
                 // the cap gives the cap, as NumPy's clip does.
@@ -491,16 +605,27 @@ impl Builder {
                 ];
                 self.intern(Op::If, inputs)
             }
+            // Qlib: `Ref(x, 0)` is the first row's value, `Delta(x, 0)` the
+            // change since it.
             "Ref" => {
                 let offset = integer(&args[1], "Ref offset")?;
                 let input = self.node(&args[0])?;
-                self.intern(Op::Ref(offset), vec![input])
+                let op = if offset == 0 {
+                    Op::First
+                } else {
+                    Op::Ref(offset)
+                };
+                self.intern(op, vec![input])
             }
             "Delta" => {
                 let offset = integer(&args[1], "Delta offset")?;
                 let offset = usize::try_from(offset)
                     .map_err(|_| Error::Invariant("Delta offset cannot be negative".into()))?;
                 let input = self.node(&args[0])?;
+                if offset == 0 {
+                    let first = self.intern(Op::First, vec![input]);
+                    return Ok(self.intern(Op::Binary(BinaryOp::Sub), vec![input, first]));
+                }
                 self.intern(Op::Delta(offset), vec![input])
             }
             "EMA" => {
@@ -534,22 +659,56 @@ impl Builder {
     }
 }
 
-fn number(expr: &Expression, label: &str) -> Result<f64> {
-    match expr {
-        Expression::Number(bits) => Ok(f64::from_bits(*bits)),
-        Expression::Unary('-', inner) => Ok(-number(inner, label)?),
-        _ => Err(Error::Invariant(format!(
-            "{label} must be a numeric literal"
-        ))),
-    }
+/// The operator an infix symbol denotes.
+pub(crate) fn binary_op(symbol: &str) -> Option<BinaryOp> {
+    Some(match symbol {
+        "+" => BinaryOp::Add,
+        "-" => BinaryOp::Sub,
+        "*" => BinaryOp::Mul,
+        "/" => BinaryOp::Div,
+        "**" => BinaryOp::Pow,
+        ">" => BinaryOp::Gt,
+        "<" => BinaryOp::Lt,
+        ">=" => BinaryOp::Ge,
+        "<=" => BinaryOp::Le,
+        "==" => BinaryOp::Eq,
+        "!=" => BinaryOp::Ne,
+        "&" => BinaryOp::And,
+        "|" => BinaryOp::Or,
+        _ => return None,
+    })
 }
 
-fn integer(expr: &Expression, label: &str) -> Result<i64> {
+/// A literal parameter: a number, or arithmetic over numbers (`2*5`), as
+/// Python would have computed it before Qlib saw it.
+pub(crate) fn number(expr: &Expression, label: &str) -> Result<f64> {
+    expr.constant()
+        .ok_or_else(|| Error::Invariant(format!("{label} must be a numeric literal")))
+}
+
+pub(crate) fn integer(expr: &Expression, label: &str) -> Result<i64> {
     let value = number(expr, label)?;
     if value.fract() != 0.0 || !value.is_finite() {
         return Err(Error::Invariant(format!("{label} must be an integer")));
     }
     Ok(value as i64)
+}
+
+/// `"H:MM"` as minutes after midnight.
+fn time_of_day(expr: &Expression) -> Result<u32> {
+    let Expression::Str(text) = expr else {
+        return Err(Error::Invariant(
+            "a DayCumsum time must be a string like '9:30'".into(),
+        ));
+    };
+    let parsed = text.split_once(':').and_then(|(hours, minutes)| {
+        let (hours, minutes) = (
+            hours.trim().parse::<u32>().ok()?,
+            minutes.trim().parse::<u32>().ok()?,
+        );
+        (hours < 24 && minutes < 60).then_some(hours * 60 + minutes)
+    });
+    parsed.ok_or_else(|| Error::Invariant(format!("invalid time of day {text:?}")))
 }
 
 fn window(expr: &Expression) -> Result<Window> {
@@ -581,6 +740,7 @@ pub(crate) fn unary(op: UnaryOp, value: f64) -> f64 {
         UnaryOp::Exp => value.exp(),
         UnaryOp::Sqrt => value.sqrt(),
         UnaryOp::IsNan => f64::from(value.is_nan()),
+        UnaryOp::IsInf => f64::from(value.is_infinite()),
     }
 }
 
@@ -728,6 +888,8 @@ mod tests {
             ("EMA($close, -1)", "negative"),
             ("Delta($close, -1)", "negative"),
             ("Ref($close, $open)", "literal"),
+            ("Skew($close, 2)", "at least 3"),
+            ("Kurt($close, 0.5)", "at least 4"),
         ] {
             let error = graph(&[source]).unwrap_err().to_string();
             assert!(error.contains(message), "{source}: {error}");

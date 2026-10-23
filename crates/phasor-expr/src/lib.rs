@@ -10,19 +10,28 @@ mod backend;
 mod cross;
 mod eval;
 mod graph;
+mod grid;
+mod lift;
 mod order;
 mod parse;
+mod pit;
 #[cfg(feature = "polars")]
 mod polars_backend;
 mod stage;
+mod warmup;
 mod window;
 mod wq101;
 
-pub use alpha158::alpha158;
+pub use alpha158::{
+    ALPHA158_ROLLING, Alpha158Config, Alpha158Price, Alpha158Rolling, alpha158, alpha158_features,
+    alpha158_with, qlib_label,
+};
 pub use alpha360::alpha360;
 pub use backend::{ComputeBackend, NativeBackend};
 pub use eval::{FactorInputs, FactorValues};
+pub use grid::{FactorGrid, GridCase};
 pub use parse::Expression;
+pub use pit::PitRecord;
 #[cfg(feature = "polars")]
 pub use polars_backend::PolarsBackend;
 pub use wq101::{wq101, wq101_all, wq101_formula};
@@ -39,7 +48,16 @@ use crate::parse::parse;
 #[derive(Debug, Clone)]
 pub struct FactorSet {
     factors: Vec<(String, Expression)>,
+    /// The factors as the graph reads them: lifted subexpressions replaced
+    /// by their hidden fields.
+    rewritten: Vec<Expression>,
+    /// What fills those fields.
+    lifted: lift::Lifted,
     graph: graph::Graph,
+    /// Each node's lookback and the fields it reads.
+    warm: warmup::Warmup,
+    /// Whether evaluation blanks the rows before each window has filled.
+    warmup: bool,
     /// The stages, when a factor reads across symbols.
     plan: Option<stage::Staged>,
     /// The factors split into separately compiled groups, built on first use
@@ -78,15 +96,70 @@ impl FactorSet {
         if compiled.is_empty() {
             return Err(Error::Invariant("a factor set cannot be empty".into()));
         }
-        let graph =
-            graph::Graph::compile(compiled.iter().map(|(name, expr)| (name.as_str(), expr)))?;
+        Self::build(compiled)
+    }
+
+    /// Compiles parsed, arity-checked expressions.
+    pub(crate) fn build(factors: Vec<(String, Expression)>) -> Result<Self> {
+        let (rewritten, lifted) = lift::Lifted::lift(&factors)?;
+        let graph = graph::Graph::compile(
+            factors
+                .iter()
+                .zip(&rewritten)
+                .map(|((name, _), expr)| (name.as_str(), expr)),
+        )?;
         let plan = stage::Staged::plan(&graph);
+        let warm = warmup::Warmup::plan(&graph, &lifted);
         Ok(Self {
-            factors: compiled,
+            factors,
+            rewritten,
+            lifted,
             graph,
+            warm,
+            warmup: false,
             plan,
             parts: OnceLock::new(),
         })
+    }
+
+    /// Per factor, in output order: how many rows before the current one its
+    /// windows and lags reach (`Mean($close, 20)` is 19, `Ref(Mean($close,
+    /// 5), 2)` is 6). Its value is complete from that many rows after its
+    /// inputs begin; Qlib's operators give a value earlier, from a partial
+    /// window.
+    #[must_use]
+    pub fn lookbacks(&self) -> Vec<usize> {
+        self.graph
+            .outputs
+            .iter()
+            .map(|&node| self.warm.lookback[node])
+            .collect()
+    }
+
+    /// The same set, evaluating with `NaN` on each symbol's rows before every
+    /// window of a factor has filled: before the first row where the
+    /// factor's input fields all have a value, plus its lookback. A
+    /// cross-sectional operator then skips a symbol that is still warming up.
+    /// Off by default, which is Qlib's behaviour.
+    #[must_use]
+    pub fn with_warmup(mut self, on: bool) -> Self {
+        self.warmup = on;
+        self
+    }
+
+    /// Whether [`FactorSet::with_warmup`] is on.
+    #[must_use]
+    pub fn warmup(&self) -> bool {
+        self.warmup
+    }
+
+    /// The instruments other than its own symbols that the set reads with
+    /// `ChangeInstrument` (or Qlib's `Mask(e, "X")`).
+    #[must_use]
+    pub fn instrument_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        self.lifted.instrument_names(&mut names);
+        names
     }
 
     /// Names in output order.
@@ -101,7 +174,26 @@ impl FactorSet {
             .map(|(name, expression)| (name.as_str(), expression))
     }
 
-    /// Source fields required to evaluate this set.
+    /// Whether the set reads the bar timestamps
+    /// ([`FactorInputs::with_timestamps`]): `DayLast`, `DayCumsum`, `Date`,
+    /// `P` and `PRef`, here or in an instrument's expression.
+    #[must_use]
+    pub fn needs_timestamps(&self) -> bool {
+        self.graph
+            .fields
+            .iter()
+            .any(|field| field == graph::DAY || field == graph::MINUTE)
+            || !self.lifted.pits.is_empty()
+            || self
+                .lifted
+                .instruments
+                .iter()
+                .any(|instrument| instrument.set.needs_timestamps())
+    }
+
+    /// Source fields required to evaluate this set. A point-in-time field is
+    /// listed as `$name` (it is written `$$name`), and an instrument's fields
+    /// are listed with the panel's.
     #[must_use]
     pub fn required_fields(&self) -> BTreeSet<&str> {
         let mut fields = BTreeSet::new();
@@ -137,7 +229,27 @@ impl FactorSet {
         inputs: &FactorInputs<'_>,
         backend: &dyn ComputeBackend,
     ) -> Result<FactorValues> {
-        backend.evaluate(self, inputs)
+        let values = backend.evaluate(self, inputs)?;
+        if !self.warmup {
+            return Ok(values);
+        }
+        let starts = warmup::Warmup::starts(&self.graph, inputs)?;
+        let n_rows = inputs.shape().0;
+        let (names, matrices): (Vec<String>, Vec<_>) = values
+            .into_matrices()
+            .enumerate()
+            .map(|(k, (name, matrix))| {
+                let (rows, cols) = (matrix.n_rows(), matrix.n_cols());
+                let mut cells = matrix.into_vec();
+                self.warm
+                    .mask(self.graph.outputs[k], &starts, &mut cells, n_rows);
+                (
+                    name,
+                    phasor_core::matrix::Matrix::from_column_major(cells, rows, cols),
+                )
+            })
+            .unzip();
+        FactorValues::from_matrices(names, matrices.into_iter().collect::<Result<_>>()?)
     }
 
     /// Evaluates `batch` symbols at a time, handing each batch's values to
@@ -162,7 +274,7 @@ impl FactorSet {
                 "a batch must hold at least one symbol".into(),
             ));
         }
-        let (n_rows, n_cols) = inputs.shape();
+        let (_, n_cols) = inputs.shape();
         if self.plan.is_some() {
             let all = self.evaluate(inputs)?;
             for start in (0..n_cols).step_by(batch) {
@@ -171,12 +283,10 @@ impl FactorSet {
             }
             return Ok(());
         }
+        let needed = self.instrument_names();
         for start in (0..n_cols).step_by(batch) {
             let cols = start..(start + batch).min(n_cols);
-            let mut part = FactorInputs::new(n_rows, cols.len())?;
-            for (name, values) in inputs.fields() {
-                part = part.with_field(name, &values[cols.start * n_rows..cols.end * n_rows])?;
-            }
+            let part = inputs.columns(cols.clone(), &needed)?;
             sink(cols, self.evaluate(&part)?)?;
         }
         Ok(())
@@ -415,19 +525,36 @@ mod tests {
     }
 
     #[test]
-    fn zero_offset_ref_and_delta_use_the_current_row() {
+    fn zero_offset_ref_and_delta_read_the_first_row_as_qlib() {
         let panel = OhlcvPanel {
-            close: vec![1.0, 2.0, 3.0],
+            close: vec![1.0, 2.0, 3.0, f64::NAN, 5.0, 6.0],
             n_rows: 3,
-            n_cols: 1,
+            n_cols: 2,
             ..OhlcvPanel::default()
         };
-        let values = FactorSet::compile([("same", "Ref($close,0)"), ("zero", "Delta($close,0)")])
+        let values = FactorSet::compile([("first", "Ref($close,0)"), ("since", "Delta($close,0)")])
             .unwrap()
             .evaluate(&FactorInputs::from_ohlcv(&panel).unwrap())
             .unwrap();
 
-        assert_eq!(values.get("same").unwrap().column(0), [1.0, 2.0, 3.0]);
-        assert_eq!(values.get("zero").unwrap().column(0), [0.0, 0.0, 0.0]);
+        // Each symbol's first row, even when it is missing.
+        assert_eq!(values.get("first").unwrap().column(0), [1.0, 1.0, 1.0]);
+        assert_eq!(values.get("since").unwrap().column(0), [0.0, 1.0, 2.0]);
+        assert!(
+            values
+                .get("first")
+                .unwrap()
+                .column(1)
+                .iter()
+                .all(|v| v.is_nan())
+        );
+        assert!(
+            values
+                .get("since")
+                .unwrap()
+                .column(1)
+                .iter()
+                .all(|v| v.is_nan())
+        );
     }
 }

@@ -47,14 +47,23 @@ def test_a_config_runs_like_the_python_it_describes(tmp_path):
     assert [p["window"] for p in result["params"]] == [5, 20]
     # Qlib's Mean: partial windows from the first bar.
     csum = np.cumsum(close, axis=0)
-    ma = np.vstack([csum[:20] / np.arange(1, 21)[:, None], (csum[20:] - csum[:-20]) / 20])
-    direct = phasor.from_signals(close, close > ma, close < ma, high=close * 1.01, low=close * 0.99,
-                                 size=1.0, fees=0.001, init_cash=10000.0)
+    partial = np.vstack([csum[:20] / np.arange(1, 21)[:, None], (csum[20:] - csum[:-20]) / 20])
+    # With warm-up (the default) no signal before the 20-bar mean has filled.
+    ma = partial.copy()
+    ma[:19] = np.nan
+    market = dict(high=close * 1.01, low=close * 0.99, size=1.0, fees=0.001, init_cash=10000.0)
+    direct = phasor.from_signals(close, close > ma, close < ma, **market)
     assert len(direct.orders()["idx"]) > 10
     np.testing.assert_allclose(result["portfolios"][1].value(), direct.value())
     saved = json.loads((tmp_path / "stats.json").read_text())
     assert saved[1]["params"] == {"window": 20} and len(saved[1]["stats"]) == 3
     np.testing.assert_array_equal(phasor.load(tmp_path / "last.phasor").value(), result["portfolios"][1].value())
+    # warmup = false trades on the partial windows.
+    (tmp_path / "raw.toml").write_text(CONFIG.replace("[backtest]\n", "[backtest]\nwarmup = false\n"))
+    raw = config.run(tmp_path / "raw.toml")
+    qlib = phasor.from_signals(close, close > partial, close < partial, **market)
+    assert qlib.orders()["idx"][0] < 19 <= direct.orders()["idx"][0]
+    np.testing.assert_allclose(raw["portfolios"][1].value(), qlib.value())
 
 
 def test_configs_are_checked(tmp_path):
@@ -67,6 +76,14 @@ def test_configs_are_checked(tmp_path):
     (tmp_path / "c.toml").write_text('[data]\npath="x.npz"\n[signals]\nentries="1"\n[backtest]\nentry="from_orders"\n')
     with pytest.raises(ValueError, match="needs size"):
         config.load(tmp_path / "c.toml")
+    (tmp_path / "d.toml").write_text('[data]\npath="x.npz"\n[signals]\nentries="1"\nexits="0"\n[backtest]\nwarmup="no"\n')
+    with pytest.raises(ValueError, match="warmup"):
+        config.load(tmp_path / "d.toml")
+
+
+def test_a_nan_signal_is_no_signal():
+    values = np.array([[np.nan, 0.0, 1.0, -2.0, np.inf]])
+    np.testing.assert_array_equal(config._signal(values), [[False, False, True, True, True]])
 
 
 def test_long_csv_data(tmp_path):

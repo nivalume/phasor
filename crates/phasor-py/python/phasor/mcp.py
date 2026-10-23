@@ -74,7 +74,8 @@ TOOLS = [
         "name": "run_backtest",
         "description": "phasor.from_signals on synthetic GBM prices (n_rows, n_cols, seed) or inline close "
                        "(list of rows), with entries/exits as factor expressions over $close, $high, $low; "
-                       "options are from_signals keyword arguments. Returns statistics per column.",
+                       "options are from_signals keyword arguments, plus warmup (default true: no signal "
+                       "before an expression's windows have filled). Returns statistics per column.",
         "inputSchema": _schema({
             "entries": {"type": "string"}, "exits": {"type": "string"},
             "close": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
@@ -176,9 +177,13 @@ class Server:
         for bad in ("resume", "callbacks", "pre_group_func", "signal_func", "adjust_func",
                     "post_order_func", "post_segment_func"):
             options.pop(bad, None)
+        from .config import _signal
+
+        warmup = bool(options.pop("warmup", True))
         try:
-            sig = phasor.FactorSet.compile({"entries": entries, "exits": exits}).evaluate(fields)
-            pf = phasor.from_signals(fields["close"], sig["entries"] != 0, sig["exits"] != 0,
+            factors = phasor.FactorSet.compile({"entries": entries, "exits": exits}).with_warmup(warmup)
+            sig = factors.evaluate(fields)
+            pf = phasor.from_signals(fields["close"], _signal(sig["entries"]), _signal(sig["exits"]),
                                      high=fields["high"], low=fields["low"], **options)
         except (ValueError, TypeError) as e:
             raise ToolError(str(e)) from None

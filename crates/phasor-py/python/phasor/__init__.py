@@ -59,6 +59,7 @@ from . import (
     plotting,
     portfolios,
     predictions,
+    processors,
     rates,
     resolution,
     returns,
@@ -75,6 +76,7 @@ from ._phasor import Context, Portfolio, Segment, SimState
 
 __all__ = [
     "Expression",
+    "FactorGrid",
     "FactorSet",
     "Context",
     "Portfolio",
@@ -82,7 +84,9 @@ __all__ = [
     "SimState",
     "Stepper",
     "alpha158",
+    "alpha158_features",
     "alpha360",
+    "qlib_label",
     "wq101",
     "wq101_formula",
     "data",
@@ -96,6 +100,7 @@ __all__ = [
     "plotting",
     "portfolios",
     "predictions",
+    "processors",
     "rates",
     "resolution",
     "returns",
@@ -134,15 +139,16 @@ def _matrix(value: Any, name: str) -> np.ndarray:
 
 
 def _factor_fields(
-    fields: Mapping[str, Any],
+    fields: Mapping[str, Any], shape: tuple[int, int] | None = None
 ) -> tuple[list[tuple[str, np.ndarray]], tuple[int, int]]:
+    """The fields as F-ordered float64 matrices, and their common shape.
+    ``shape`` is what ``index`` and ``symbols`` imply, which a set that reads
+    only point-in-time data needs in place of fields."""
     if not isinstance(fields, Mapping):
         raise TypeError("factor inputs must be a mapping of field names to arrays")
-    if not fields:
-        raise ValueError("factor inputs cannot be empty")
-
-    prepared = []
+    implied = shape
     shape = None
+    prepared = []
     for name, value in fields.items():
         if not isinstance(name, str):
             raise TypeError("factor field names must be strings")
@@ -154,8 +160,115 @@ def _factor_fields(
                 f"factor field {name!r} has shape {array.shape}, expected {shape}"
             )
         prepared.append((name, array))
-    assert shape is not None
-    return prepared, shape
+    if shape is None:
+        if implied is None:
+            raise ValueError(
+                "factor inputs cannot be empty: pass fields, or index and symbols "
+                "for a set that reads only point-in-time data"
+            )
+        shape = implied
+    elif implied is not None and tuple(implied) != tuple(shape):
+        raise ValueError(f"index and symbols imply shape {implied}, but the fields are {shape}")
+    return prepared, tuple(shape)
+
+
+def _timestamps(index: Any) -> np.ndarray:
+    """Wall-clock nanoseconds of each row. A timezone-aware pandas index is
+    read on its own clock: 09:30 in Shanghai stays 09:30."""
+    values = index
+    if getattr(values, "tz", None) is not None:
+        values = values.tz_localize(None)
+    elif getattr(getattr(values, "dt", None), "tz", None) is not None:
+        values = values.dt.tz_localize(None)
+    array = np.asarray(values)
+    if array.dtype.kind == "M":
+        return np.ascontiguousarray(array.astype("datetime64[ns]").astype(np.int64))
+    if array.dtype.kind in "iu":
+        return np.ascontiguousarray(array.astype(np.int64))
+    raise TypeError("index must hold datetimes (datetime64, a pandas DatetimeIndex) or int64 nanoseconds")
+
+
+def _days(values: Any) -> np.ndarray:
+    """Days since 1970-01-01 of dates given as datetimes, ``YYYY-MM-DD``
+    strings, or Qlib's ``YYYYMMDD`` integers."""
+    if getattr(values, "tz", None) is not None or getattr(getattr(values, "dt", None), "tz", None) is not None:
+        return _timestamps(values) // 86_400_000_000_000
+    array = np.asarray(values)
+    if array.dtype.kind in "iu":
+        array = array.astype(np.int64)
+        months = (array // 10000 - 1970).astype("datetime64[Y]").astype("datetime64[M]")
+        months = months + (array // 100 % 100 - 1).astype("timedelta64[M]")
+        days = months.astype("datetime64[D]") + (array % 100 - 1).astype("timedelta64[D]")
+        return days.astype(np.int64)
+    return np.asarray(array, dtype="datetime64[D]").astype(np.int64)
+
+
+def _pit_records(pit: Any, symbols: Sequence[str] | None) -> list[tuple]:
+    """Point-in-time records from a long table (a DataFrame, or a mapping of
+    equal-length columns) with columns ``symbol``, ``field``, ``date``,
+    ``period`` and ``value``, as Qlib's normalized PIT data has. Records of
+    symbols outside ``symbols`` are dropped; without ``symbols``, ``symbol``
+    is the column position."""
+    try:
+        raw = {key: pit[key] for key in ("symbol", "field", "date", "period", "value")}
+    except (KeyError, IndexError, TypeError) as e:
+        raise ValueError("pit must have columns symbol, field, date, period and value") from e
+    columns = {key: np.asarray(value) for key, value in raw.items()}
+    if symbols is None:
+        cols = columns["symbol"].astype(np.int64)
+    else:
+        position = {name: k for k, name in enumerate(symbols)}
+        cols = np.array([position.get(str(s), -1) for s in columns["symbol"]], dtype=np.int64)
+    keep = cols >= 0
+    fields = np.array([str(f).lstrip("$").lower() for f in columns["field"]])
+    days = _days(raw["date"])
+    periods = columns["period"].astype(np.int64)
+    values = columns["value"].astype(np.float64)
+    records = []
+    for field in dict.fromkeys(fields[keep]):
+        mask = keep & (fields == field)
+        records.append((str(field), cols[mask], days[mask], periods[mask], values[mask]))
+    return records
+
+
+def _instruments(instruments: Mapping[str, Mapping[str, Any]], n_rows: int) -> list[tuple]:
+    out = []
+    for name, own in instruments.items():
+        arrays = []
+        for field, values in own.items():
+            array = np.ascontiguousarray(np.asarray(values, dtype=np.float64).reshape(-1))
+            if array.shape[0] != n_rows:
+                raise ValueError(
+                    f"instrument {name!r} field {field!r} has {array.shape[0]} rows, expected {n_rows}"
+                )
+            arrays.append((str(field), array))
+        out.append((str(name), arrays))
+    return out
+
+
+def _factor_context(
+    fields: Mapping[str, Any],
+    index: Any,
+    symbols: Sequence[Any] | None,
+    instruments: Mapping[str, Mapping[str, Any]] | None,
+    pit: Any,
+) -> tuple[list[tuple[str, np.ndarray]], tuple[int, int], dict]:
+    names = None if symbols is None else [str(s) for s in symbols]
+    implied = None if index is None or names is None else (len(index), len(names))
+    prepared, shape = _factor_fields(fields, implied)
+    context: dict[str, Any] = {}
+    if index is not None:
+        timestamps = _timestamps(index)
+        if timestamps.shape[0] != shape[0]:
+            raise ValueError(f"index has {timestamps.shape[0]} rows, expected {shape[0]}")
+        context["timestamps"] = timestamps
+    if names is not None:
+        context["symbols"] = names
+    if instruments:
+        context["instruments"] = _instruments(instruments, shape[0])
+    if pit is not None:
+        context["pit"] = _pit_records(pit, names)
+    return prepared, shape, context
 
 
 class FactorSet:
@@ -189,33 +302,102 @@ class FactorSet:
     def uses_future(self) -> bool:
         return self._inner.uses_future
 
-    def evaluate(self, fields: Mapping[str, Any]) -> dict[str, np.ndarray]:
-        prepared, shape = _factor_fields(fields)
+    @property
+    def instrument_names(self) -> tuple[str, ...]:
+        """Instruments read with ``ChangeInstrument`` (or Qlib's
+        ``Mask(e, "X")``): symbols of the panel, or ``instruments=``."""
+        return tuple(self._inner.instrument_names)
+
+    @property
+    def needs_timestamps(self) -> bool:
+        """Whether evaluation needs ``index=``: ``DayLast``, ``DayCumsum``,
+        ``Date``, ``P`` and ``PRef`` group and compare by the bar times."""
+        return self._inner.needs_timestamps
+
+    @property
+    def lookbacks(self) -> dict[str, int]:
+        """Per factor, how many rows before the current one its windows and
+        lags reach: ``Mean($close, 20)`` is 19, ``Ref(Mean($close, 5), 2)`` is
+        6. Its value is complete from that many rows after its inputs begin."""
+        return dict(zip(self.names, self._inner.lookbacks))
+
+    @property
+    def lookback(self) -> int:
+        """The longest of :attr:`lookbacks`."""
+        return max(self._inner.lookbacks, default=0)
+
+    @property
+    def warmup(self) -> bool:
+        """Whether :meth:`with_warmup` is on."""
+        return self._inner.warmup
+
+    def with_warmup(self, on: bool = True) -> FactorSet:
+        """The same set, evaluating to ``NaN`` on each symbol's rows before a
+        factor's windows have filled: until its input fields all have values
+        for that symbol, plus its lookback. Cross-sectional operators then
+        leave out a symbol that is still warming up.
+
+        Qlib's operators (and this set by default) give a value from the first
+        row, from a partial window; in a backtest those rows trade on a 2-bar
+        standard deviation. Turn this on for signals."""
+        return FactorSet(self._inner.with_warmup(bool(on)))
+
+    def evaluate(
+        self,
+        fields: Mapping[str, Any],
+        *,
+        index: Any = None,
+        symbols: Sequence[Any] | None = None,
+        instruments: Mapping[str, Mapping[str, Any]] | None = None,
+        pit: Any = None,
+    ) -> dict[str, np.ndarray]:
+        """Every factor over ``fields`` (each ``(rows, symbols)``).
+
+        ``index``: the bar times, one per row (datetime64, a pandas
+        DatetimeIndex, or int64 nanoseconds), read on the market's own clock.
+        ``symbols``: the column names, among which ``ChangeInstrument("X",
+        ...)`` looks ``X`` up. ``instruments``: instruments outside the panel
+        such as a benchmark, ``{name: {field: 1-D array}}``. ``pit``:
+        point-in-time records for ``$$field``, a long table with columns
+        ``symbol``, ``field``, ``date``, ``period`` and ``value``.
+        """
+        prepared, shape, context = _factor_context(fields, index, symbols, instruments, pit)
         return {
             name: values.reshape(shape, order="F")
-            for name, values in self._inner.evaluate(prepared).items()
+            for name, values in self._inner.evaluate(prepared, shape, **context).items()
         }
 
     def evaluate_batches(
-        self, fields: Mapping[str, Any], batch: int, sink: Callable[[int, int, dict], Any]
+        self,
+        fields: Mapping[str, Any],
+        batch: int,
+        sink: Callable[[int, int, dict], Any],
+        *,
+        index: Any = None,
+        symbols: Sequence[Any] | None = None,
+        instruments: Mapping[str, Mapping[str, Any]] | None = None,
+        pit: Any = None,
     ) -> None:
         """Evaluates ``batch`` symbols (columns) at a time and calls
         ``sink(start, stop, values)`` for each, ``values`` shaped
         ``(rows, stop - start)``. Without a cross-sectional operator only one
         batch is in memory at a time; with one, the whole panel is evaluated
-        first."""
-        prepared, shape = _factor_fields(fields)
+        first. The keyword arguments are :meth:`evaluate`'s."""
+        prepared, shape, context = _factor_context(fields, index, symbols, instruments, pit)
 
         def forward(start: int, stop: int, values: dict) -> None:
             sink(start, stop, {k: v.reshape((shape[0], stop - start), order="F") for k, v in values.items()})
 
-        self._inner.evaluate_batches(prepared, int(batch), forward)
+        self._inner.evaluate_batches(prepared, shape, int(batch), forward, **context)
 
     def to_parquet(self, path: str, fields: Mapping[str, Any], batch: int = 256,
-                   index: Any = None, symbols: Sequence[Any] | None = None) -> None:
+                   index: Any = None, symbols: Sequence[Any] | None = None,
+                   instruments: Mapping[str, Mapping[str, Any]] | None = None,
+                   pit: Any = None) -> None:
         """Writes every factor to a Parquet file, one row group per batch of
         symbols: long format, columns ``symbol``, ``row`` (or ``time`` from
-        ``index``) and one per factor. Needs pyarrow."""
+        ``index``) and one per factor. ``index`` also serves as the bar times
+        and ``symbols`` as the names :meth:`evaluate` reads. Needs pyarrow."""
         try:
             import pyarrow as pa
             import pyarrow.parquet as pq
@@ -238,11 +420,134 @@ class FactorSet:
                 writer = pq.ParquetWriter(path, table.schema)
             writer.write_table(table)
 
+        reads_symbols = bool(self.instrument_names) or pit is not None
         try:
-            self.evaluate_batches(fields, batch, sink)
+            self.evaluate_batches(
+                fields,
+                batch,
+                sink,
+                index=index if self.needs_timestamps else None,
+                symbols=symbols if reads_symbols else None,
+                instruments=instruments,
+                pit=pit,
+            )
         finally:
             if writer is not None:
                 writer.close()
+
+
+def _param_text(value: Any) -> str:
+    """A parameter value as expression source: numbers round-trip exactly."""
+    if isinstance(value, (bool, np.bool_)):
+        return "True" if value else "False"
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        return repr(float(value))
+    return str(value)
+
+
+class FactorGrid:
+    """Factor expressions with ``{name}`` placeholders, compiled for every
+    case of a parameter grid into one graph::
+
+        grid = phasor.FactorGrid.compile(
+            {"z": "($close - Mean($close, {n})) / Std($close, {n})"}, n=[10, 20, 50])
+        z = grid.evaluate({"close": close})["z"]        # (rows, 3 * symbols)
+        pf = phasor.from_signals(close, z > 1, z < 0, column_map=grid.column_map(close.shape[1]))
+
+    A placeholder can stand anywhere: a window, a threshold, a field
+    (``${field}``). Every case is compiled into the same graph, so what does
+    not depend on a parameter is computed once, and one pass over the
+    symbols evaluates every case. Each factor's columns are
+    ``case * n_symbols + symbol``, the layout of phasor's sweeps; the
+    keyword arguments of :meth:`compile` form the full product, or pass
+    ``cases``, e.g. ``phasor.params.grid(..., where=...)``.
+    """
+
+    __slots__ = ("_inner", "_cases")
+
+    def __init__(self, inner: Any, cases: list[dict]):
+        self._inner = inner
+        self._cases = cases
+
+    @classmethod
+    def compile(
+        cls, factors: Mapping[str, str], cases: Sequence[Mapping[str, Any]] | None = None, **grid: Any
+    ) -> FactorGrid:
+        if not isinstance(factors, Mapping):
+            raise TypeError("factors must be a mapping of names to expressions")
+        if cases is not None and grid:
+            raise TypeError("pass either cases or grid keywords, not both")
+        if cases is None:
+            from .params import grid as product
+
+            cases = product(**grid) if grid else [{}]
+        cases = [dict(case) for case in cases]
+        pairs = [(str(name), str(source)) for name, source in factors.items()]
+        texts = [[(str(k), _param_text(v)) for k, v in case.items()] for case in cases]
+        return cls(_phasor._FactorGrid.compile(pairs, texts), cases)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._inner.names)
+
+    @property
+    def cases(self) -> list[dict]:
+        """The parameter values of each case, in column order."""
+        return [dict(case) for case in self._cases]
+
+    @property
+    def required_fields(self) -> tuple[str, ...]:
+        return tuple(self._inner.required_fields)
+
+    @property
+    def uses_future(self) -> bool:
+        return self._inner.uses_future
+
+    @property
+    def needs_timestamps(self) -> bool:
+        return self._inner.needs_timestamps
+
+    @property
+    def lookbacks(self) -> dict[str, list[int]]:
+        """Per factor, each case's lookback (:attr:`FactorSet.lookbacks`)."""
+        return dict(zip(self.names, self._inner.lookbacks))
+
+    @property
+    def lookback(self) -> int:
+        return max((max(v) for v in self._inner.lookbacks), default=0)
+
+    @property
+    def warmup(self) -> bool:
+        return self._inner.warmup
+
+    def with_warmup(self, on: bool = True) -> FactorGrid:
+        """As :meth:`FactorSet.with_warmup`."""
+        return FactorGrid(self._inner.with_warmup(bool(on)), self._cases)
+
+    def column_map(self, n_symbols: int) -> np.ndarray:
+        """The ``column_map`` that shares a ``(rows, n_symbols)`` panel across
+        the cases: ``[0, 1, ..., n_symbols - 1]`` once per case."""
+        return np.tile(np.arange(int(n_symbols)), len(self._cases))
+
+    def evaluate(
+        self,
+        fields: Mapping[str, Any],
+        *,
+        index: Any = None,
+        symbols: Sequence[Any] | None = None,
+        instruments: Mapping[str, Mapping[str, Any]] | None = None,
+        pit: Any = None,
+    ) -> dict[str, np.ndarray]:
+        """Every factor over every case, each ``(rows, n_cases * n_symbols)``.
+        The keyword arguments are :meth:`FactorSet.evaluate`'s."""
+        prepared, shape, context = _factor_context(fields, index, symbols, instruments, pit)
+        wide = (shape[0], shape[1] * len(self._cases))
+        return {
+            name: values.reshape(wide, order="F")
+            for name, values in self._inner.evaluate(prepared, shape, **context).items()
+        }
 
 
 class Expression:
@@ -267,13 +572,83 @@ class Expression:
     def uses_future(self) -> bool:
         return self._factors.uses_future
 
-    def evaluate(self, fields: Mapping[str, Any]) -> np.ndarray:
-        return self._factors.evaluate(fields)["value"]
+    @property
+    def lookback(self) -> int:
+        """How many rows before the current one the expression reads."""
+        return self._factors.lookback
+
+    def with_warmup(self, on: bool = True) -> Expression:
+        """As :meth:`FactorSet.with_warmup`."""
+        return Expression(self._factors.with_warmup(on))
+
+    def evaluate(self, fields: Mapping[str, Any], **context: Any) -> np.ndarray:
+        """As :meth:`FactorSet.evaluate`, for the one expression."""
+        return self._factors.evaluate(fields, **context)["value"]
 
 
-def alpha158() -> FactorSet:
-    """Returns Qlib's default 158 compiled expressions."""
-    return FactorSet(_phasor.alpha158())
+_ALPHA158_SECTIONS = ("kbar", "price", "volume", "rolling")
+
+
+def _alpha158_spec(config: Mapping[str, Any] | None) -> tuple | None:
+    """Qlib's ``Alpha158DL`` config dict as the binding's plain values, with
+    Qlib's defaults for the keys a present section leaves out."""
+    if config is None:
+        return None
+    if not isinstance(config, Mapping):
+        raise TypeError("an Alpha158 config is a mapping like Qlib's Alpha158DL config")
+    unknown = sorted(set(config) - set(_ALPHA158_SECTIONS))
+    if unknown:
+        raise ValueError(f"unknown Alpha158 config sections {unknown}; expected {list(_ALPHA158_SECTIONS)}")
+
+    def section(key: str) -> Mapping[str, Any]:
+        return config[key] or {}
+
+    price = None
+    if "price" in config:
+        p = section("price")
+        price = (
+            [int(d) for d in p.get("windows", range(5))],
+            [str(f) for f in p.get("feature", ["OPEN", "HIGH", "LOW", "CLOSE", "VWAP"])],
+        )
+    volume = None
+    if "volume" in config:
+        volume = [int(d) for d in section("volume").get("windows", range(5))]
+    rolling = None
+    if "rolling" in config:
+        r = section("rolling")
+        include = r.get("include")
+        rolling = (
+            [int(d) for d in r.get("windows", [5, 10, 20, 30, 60])],
+            None if include is None else [str(k) for k in include],
+            [str(k) for k in r.get("exclude", [])],
+        )
+    return ("kbar" in config, price, volume, rolling)
+
+
+def alpha158(config: Mapping[str, Any] | None = None) -> FactorSet:
+    """Qlib's Alpha158: the default 158 features, or those ``config`` selects.
+
+    ``config`` is the dict ``Alpha158DL.get_feature_config`` takes: sections
+    ``kbar``, ``price`` (``windows``, ``feature``), ``volume`` (``windows``)
+    and ``rolling`` (``windows``, ``include``, ``exclude``), each on when
+    present, with Qlib's defaults for keys a section leaves out. A rolling
+    family is named by Qlib's key (the ``MIN`` family is ``"LOW"``)."""
+    return FactorSet(_phasor.alpha158(_alpha158_spec(config)))
+
+
+def alpha158_features(config: Mapping[str, Any] | None = None) -> list[tuple[str, str]]:
+    """The ``(name, expression)`` pairs :func:`alpha158` compiles, Qlib's
+    text unchanged."""
+    return [tuple(pair) for pair in _phasor.alpha158_features(_alpha158_spec(config))]
+
+
+def qlib_label(price: str = "close") -> FactorSet:
+    """Qlib's training label ``LABEL0 = Ref($price, -2)/Ref($price, -1) - 1``:
+    the return from the next bar to the one after, on ``close`` (Qlib's
+    ``Alpha158`` / ``Alpha360``) or ``vwap`` (their ``vwap`` variants). It
+    reads two bars ahead: a target, never a signal (``uses_future`` is
+    true)."""
+    return FactorSet(_phasor.qlib_label(price))
 
 
 def alpha360() -> FactorSet:
